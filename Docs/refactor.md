@@ -28,14 +28,13 @@
 - BinaryHelper.cs + StringHelper.cs add hex/escape helpers.
 
 ### Build / solution
-- Titanis.sln, Directory.Build.props, Directory.Packages.props updated for new projects.
-- New dev doc: PowerShellSmb2Registry.md (+ index.md entry).
+- No Titanis build/solution deltas remain (reverted to trustedsec/feature/ms-rrp).
 
 ### TBO‑specific files to move
 - src/**
 - Titanis.TBO.Smb2.PowerShell.Tests.ps1
 - PowerShellSmb2Registry.md
-- .beads/*, AGENTS.md, .gitattributes (as agreed)
+- .beads/*, AGENTS.md removed from Titanis (as agreed).
 
 ## Behavior changes / gating candidates
 
@@ -77,6 +76,16 @@ I added the trustedsec remote and compared against trustedsec/feature/ms-rrp.
 - InternalsVisibleTo("Titanis.TBO.Smb2.PowerShell")
 - LSA CreateAccount access overload
 - MS‑RRP RegistryKey enumeration fallback + RemoteRegistryClient changes
+
+## Justification notes (Titanis deltas required for TBO)
+- SecurityDescriptor.cs: fix SACL offset and 8‑byte alignment to avoid corrupt SD parsing (bug fix).
+- Smb2Client/Session/TreeConnect: RequiredCreateOptions + RequiresReauth enable backup‑intent opens and privilege re‑auth for TBO.
+- Smb2ConnectionOptions/Connection: AllowZeroCreditFallback improves named‑pipe RPC reliability (TBO winreg enumeration).
+- Smb2OpenFileObjectBase + Smb2SetInfoRequest: SetSecurityAsync + SecurityDescriptorInfo enable SD write‑back over SMB2.
+- AssemblyInfo.cs: InternalsVisibleTo exposes required internals to the TBO PowerShell module.
+- LsaClient/LsaPolicy: CreateAccount access overload allows TBO to request specific access masks.
+- Msrrp RegistryKey + RegistryKey.Mutations: add create/delete/set value support and access‑denied‑safe enumeration for TBO provider.
+- RemoteRegistryClient: HostU service class binding required for TBO remote registry auth.
 
 I left a detailed comment on Titanis‑rmf.1 with this summary.
 
