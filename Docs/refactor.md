@@ -32,7 +32,7 @@
 - New dev doc: PowerShellSmb2Registry.md (+ index.md entry).
 
 ### TBO‑specific files to move
-- src/Titanis.TBO.Smb2.PowerShell/**
+- src/**
 - Titanis.TBO.Smb2.PowerShell.Tests.ps1
 - PowerShellSmb2Registry.md
 - .beads/*, AGENTS.md, .gitattributes (as agreed)

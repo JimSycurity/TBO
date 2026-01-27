@@ -29,7 +29,7 @@ BeforeAll {
         throw "Could not locate repo root (.git)."
     }
 
-    $script:moduleRoot = Join-Path $script:repoRoot 'src\Titanis.TBO.Smb2.PowerShell'
+    $script:moduleRoot = Join-Path $script:repoRoot 'src'
     $script:manifestPath = Join-Path $script:moduleRoot 'Titanis.TBO.Smb2.psd1'
     $script:formatPath = Join-Path $script:moduleRoot 'Format.ps1xml'
     $script:helpRoot = Join-Path $script:moduleRoot 'en-US'

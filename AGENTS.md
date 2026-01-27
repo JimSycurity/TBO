@@ -1,6 +1,6 @@
 # Agent Instructions
 
-Titanis.TBO module must have Help (per https://learn.microsoft.com/en-us/powershell/scripting/developer/help/writing-help-for-windows-powershell-modules?view=powershell-7.5) and be documented with examples before committing.
+TBO module and all cmdlets must have Help (per https://learn.microsoft.com/en-us/powershell/scripting/developer/help/writing-help-for-windows-powershell-modules?view=powershell-7.5) and be documented with examples before committing. Cmdlet usage examples belong in Docs/Usage.md
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 

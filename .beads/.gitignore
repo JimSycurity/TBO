@@ -16,6 +16,9 @@ last-touched
 # Local version tracking (prevents upgrade notification spam after git ops)
 .local_version
 
+# Export state (local-only)
+export-state/
+
 # Legacy database files
 db.sqlite
 bd.db
