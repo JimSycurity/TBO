@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <TitanisRepoRoot Condition="'$(TitanisRepoRoot)'=='' and '$(TITANIS_REPO)'!=''">$(TITANIS_REPO)</TitanisRepoRoot>
+    <TitanisRepoRoot Condition="'$(TitanisRepoRoot)'=='' and Exists('$(MSBuildThisFileDirectory)..\Titanis\Titanis.sln')">$(MSBuildThisFileDirectory)..\Titanis</TitanisRepoRoot>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,80 @@
+TOPIC
+    about_TBO_Smb2_Provider
+
+SHORT DESCRIPTION
+    Describes the TBO.Smb2 PowerShell provider for SMB2 shares.
+
+LONG DESCRIPTION
+    The TBO.Smb2 provider exposes SMB shares as a PowerShell drive. It opens
+    SMB sessions on demand and uses backup intent for file operations so
+    backup/restore privileges are honored when present.
+
+    The default drive name is tbo-smb and points to smb://. To target a specific
+    share, create a drive with New-PSDrive and a UNC root.
+
+PROVIDER FEATURES
+    - Navigation: Get-ChildItem, Set-Location, and directory enumeration.
+    - Snapshots: Use @GMT tokens from Get-TBOSmbSnapshots to browse VSS snapshots (read-only).
+    - New-Item: File, Directory, Symlink, SymlinkDir, Junction, MountPoint.
+    - Remove-Item: Removes files, directories, symlinks, junctions, and mount points.
+    - Set-ItemProperty: Updates timestamps or attributes (touch behavior).
+    - Content: Get-Content is supported; content writing is not implemented.
+    - Security: Use Get-TBOSmbSecurityDescriptor / Set-TBOSmbSecurityDescriptor.
+    - ACL: Get-Acl / Set-Acl are supported on Windows (security descriptors only).
+
+DYNAMIC PARAMETERS
+    New-PSDrive and Set-TBOSmbConnectOptions accept dynamic SMB options:
+      - HostName, RemotePort, NameResolveOptions
+      - Dialects, Capabilities, SecurityMode, RequireSecureNegotiate
+      - ClientGuid, PreauthSaltLength, Ciphers, SigningAlgorithms
+      - CompressionCapabilities, CompressionAlgorithms
+      - UserName, UserDomain, Password, NtlmHash, Workstation
+      - AesKey, DesKey
+      - Tgt, Tickets, TicketCache
+      - Kdc, KdcPort
+
+    These parameters set or override defaults for the target server.
+    NtlmHash accepts NT (32 hex), LM:NT, or combined 64-hex strings.
+    TicketCache honors KRB5CCNAME by default.
+
+EXAMPLES
+    Example 1: Create a drive with credentials
+        New-PSDrive -Name tbo -PSProvider 'TBO.Smb2' -Root '\\corp1-web01\C$' `
+            -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
+            -Password 'YourSecurePassword'
+
+    Example 2: Set defaults for a server and then create a drive
+        Set-TBOSmbConnectOptions -ServerName corp1-web01 `
+            -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
+            -Password 'YourSecurePassword'
+        New-PSDrive -Name tbo -PSProvider 'TBO.Smb2' -Root '\\corp1-web01\C$'
+
+    Example 2b: Set defaults using alternate auth
+        Set-TBOSmbConnectOptions -ServerName corp1-web01 `
+            -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
+            -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
+        Set-TBOSmbConnectOptions -ServerName corp1-web01 -TicketCache C:\temp\krb5cc
+
+    Example 3: Navigate and read content
+        Set-Location tbo:\
+        Get-ChildItem
+        Get-Content .\Windows\System32\drivers\etc\hosts
+
+    Example 4: Create and remove a junction
+        New-Item -Path tbo:\Mounts\AppData -ItemType Junction -MountPointTarget 'C:\ProgramData'
+        Remove-Item -Path tbo:\Mounts\AppData
+
+    Example 5: Touch a file (update last write time)
+        Set-ItemProperty -Path tbo:\Temp\example.txt -Name LastWriteTime -Value (Get-Date)
+
+    Example 6: Navigate a snapshot
+        $token = (Get-TBOSmbSnapshots -Path tbo:\temp | Select-Object -First 1).Token
+        Set-Location "tbo:\$token\temp"
+        Get-ChildItem
+
+NOTES
+    - Use Copy-TBOSmbItem for file copies between local and SMB paths.
+    - Use provider-qualified paths to target UNC paths without a drive:
+        TBO.Smb2::\\server\share\path
+    - Get-Acl/Set-Acl are Windows-only. Snapshot paths are read-only.
+    - Set TITANIS_TBO_LOG=1 to enable diagnostic logging.
