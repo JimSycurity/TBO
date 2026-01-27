@@ -9,8 +9,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$moduleRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $moduleRoot '..\..')).Path
+$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+$moduleRoot = (Resolve-Path -LiteralPath (Join-Path $repoRoot 'src')).Path
 $projectPath = Join-Path $moduleRoot 'Titanis.TBO.Smb2.PowerShell.csproj'
 $manifestPath = Join-Path $moduleRoot 'Titanis.TBO.Smb2.psd1'
 $metadataPath = Join-Path $PSScriptRoot 'METADATA.md'

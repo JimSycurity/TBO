@@ -3,8 +3,9 @@ param(
 	[string]$Bump = 'patch'
 )
 
+$repoRoot = Split-Path -Parent $PSScriptRoot
 $metadataPath = Join-Path $PSScriptRoot 'METADATA.md'
-$manifestPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'Titanis.TBO.Smb2.psd1'
+$manifestPath = Join-Path $repoRoot 'src\Titanis.TBO.Smb2.psd1'
 
 if (-not (Test-Path $metadataPath)) {
 	throw "Metadata file not found: $metadataPath"
