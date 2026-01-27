@@ -1,5 +1,7 @@
 # Agent Instructions
 
+Titanis.TBO module must have Help (per https://learn.microsoft.com/en-us/powershell/scripting/developer/help/writing-help-for-windows-powershell-modules?view=powershell-7.5) and be documented with examples before committing.
+
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
 ## Quick Reference
@@ -31,6 +33,8 @@ bd sync               # Sync with git
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
+
+Note: Commit signing is configured, allow time for human interaction with passphrase.
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
