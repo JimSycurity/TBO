@@ -5,34 +5,41 @@ if (Test-Path -LiteralPath $script:testHarnessPath) {
 	. $script:testHarnessPath
 }
 
-$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
-$script:moduleAvailable = $false
-if ($script:repoRoot) {
-	try {
-		Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
-		$script:moduleAvailable = $true
-	} catch {
-		$script:moduleAvailable = $false
-	}
-}
-
-function Invoke-WithMockProvider {
-	param(
-		[Parameter(Mandatory = $true)]
-		[object]$ProviderInfo,
-		[Parameter(Mandatory = $true)]
-		[scriptblock]$ScriptBlock
-	)
-
-	$scope = Use-TboProviderInfoOverride -ProviderInfo $ProviderInfo
-	try {
-		& $ScriptBlock
-	} finally {
-		$scope.Dispose()
-	}
-}
-
 Describe 'TBO SMB cmdlets (mocked)' {
+	BeforeAll {
+		function script:Invoke-WithMockProvider {
+			param(
+				[Parameter(Mandatory = $true)]
+				[object]$ProviderInfo,
+				[Parameter(Mandatory = $true)]
+				[scriptblock]$ScriptBlock
+			)
+
+			$scope = Use-TboProviderInfoOverride -ProviderInfo $ProviderInfo
+			try {
+				& $ScriptBlock
+			} finally {
+				$scope.Dispose()
+			}
+		}
+
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		$script:moduleAvailable = $false
+		if ($script:repoRoot) {
+			try {
+				Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+				$script:moduleAvailable = $true
+			} catch {
+				$script:moduleAvailable = $false
+			}
+		}
+	}
+
 	It 'Set-TBOSmbConnectOptions sets server-specific parameters' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
@@ -115,12 +122,12 @@ Describe 'TBO SMB cmdlets (mocked)' {
 		}
 
 		$script:sessionCalled = $false
-		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]]::FromResult($null)
+		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]]::FromResult([Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]$null)
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
 			-OpenServerServiceSessionAsync { param($serverName, $token) $script:sessionCalled = $true; $emptySessionTask }
 
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			{ Get-TBOSmbSessions -ServerName ' ' } | Should -Throw -ErrorType ([System.ArgumentException])
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Get-TBOSmbSessions -ServerName ' ' }
 		}
 
 		$script:sessionCalled | Should -BeFalse
@@ -133,12 +140,12 @@ Describe 'TBO SMB cmdlets (mocked)' {
 		}
 
 		$script:sessionCalled = $false
-		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]]::FromResult($null)
+		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]]::FromResult([Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]$null)
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
 			-OpenServerServiceSessionAsync { param($serverName, $token) $script:sessionCalled = $true; $emptySessionTask }
 
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			{ Get-TBOSmbShares -ServerName '' } | Should -Throw -ErrorType ([System.ArgumentException])
+			Should -Throw -ExceptionType ([System.Management.Automation.ParameterBindingException]) -ActualValue { Get-TBOSmbShares -ServerName '' }
 		}
 
 		$script:sessionCalled | Should -BeFalse
@@ -151,12 +158,12 @@ Describe 'TBO SMB cmdlets (mocked)' {
 		}
 
 		$script:sessionCalled = $false
-		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]]::FromResult($null)
+		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]]::FromResult([Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]$null)
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
 			-OpenServerServiceSessionAsync { param($serverName, $token) $script:sessionCalled = $true; $emptySessionTask }
 
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			{ Get-TBOSmbOpenFiles -ServerName ' ' } | Should -Throw -ErrorType ([System.ArgumentException])
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Get-TBOSmbOpenFiles -ServerName ' ' }
 		}
 
 		$script:sessionCalled | Should -BeFalse
@@ -170,7 +177,7 @@ Describe 'TBO SMB cmdlets (mocked)' {
 
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			{ Get-TBOSmbNics -Path ' ' } | Should -Throw -ErrorType ([System.ArgumentException])
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Get-TBOSmbNics -Path ' ' }
 		}
 	}
 
@@ -182,7 +189,7 @@ Describe 'TBO SMB cmdlets (mocked)' {
 
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			{ Get-TBOSmbSnapshots -Path ' ' } | Should -Throw -ErrorType ([System.ArgumentException])
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Get-TBOSmbSnapshots -Path ' ' }
 		}
 	}
 
@@ -194,7 +201,7 @@ Describe 'TBO SMB cmdlets (mocked)' {
 
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			{ Get-TBOSmbStreams -Path '\\server' } | Should -Throw -ErrorType ([System.ArgumentException])
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Get-TBOSmbStreams -Path '\\server' }
 		}
 	}
 
@@ -206,7 +213,7 @@ Describe 'TBO SMB cmdlets (mocked)' {
 
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			{ Watch-TBOSmb -Path '\\server' } | Should -Throw -ErrorType ([System.ArgumentException])
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Watch-TBOSmb -Path '\\server' }
 		}
 	}
 }

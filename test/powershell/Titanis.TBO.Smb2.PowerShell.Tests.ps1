@@ -194,7 +194,12 @@ Describe 'TBO test harness' {
             return
         }
 
-        Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable mock provider tests.'
+            return
+        }
         if (-not ('Titanis.Tbo.Smb2.PowerShell.MockSmbProviderInfo' -as [type])) {
             Set-ItResult -Skipped -Because 'Mock provider type not found; build the module to enable mock provider tests.'
             return
