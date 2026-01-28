@@ -9,8 +9,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Remove="Format.ps1xml" />
-    <None Remove="Titanis.TBO.Smb2.psd1" />
+    <None Remove="..\Format.ps1xml" />
+    <None Remove="..\Titanis.TBO.Smb2.psd1" />
+    <None Remove="..\Titanis.TBO.Smb2.psm1" />
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TitanisRepoRoot)' != '' ">
@@ -19,19 +20,22 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Format.ps1xml">
+    <Content Include="..\Format.ps1xml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="README.md">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="en-US\about_TBO_Smb2_Provider.help.txt">
+    <Content Include="..\en-US\about_TBO_Smb2_Provider.help.txt">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="Titanis.TBO.Smb2.PowerShell.dll-Help.xml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="Titanis.TBO.Smb2.psd1">
+    <Content Include="..\Titanis.TBO.Smb2.psd1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\Titanis.TBO.Smb2.psm1">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

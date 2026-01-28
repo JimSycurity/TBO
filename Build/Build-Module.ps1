@@ -11,9 +11,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$moduleRoot = (Resolve-Path -LiteralPath (Join-Path $repoRoot 'src')).Path
-$projectPath = Join-Path $moduleRoot 'Titanis.TBO.Smb2.PowerShell.csproj'
-$manifestPath = Join-Path $moduleRoot 'Titanis.TBO.Smb2.psd1'
+$moduleRoot = $repoRoot
+$projectPath = Join-Path $repoRoot 'src\Titanis.TBO.Smb2.PowerShell.csproj'
+$manifestPath = Join-Path $repoRoot 'Titanis.TBO.Smb2.psd1'
 $metadataPath = Join-Path $PSScriptRoot 'METADATA.md'
 
 if (-not (Test-Path -LiteralPath $projectPath)) {
@@ -136,7 +136,7 @@ $buildParams = @{
 	ExitCode   = $true
 }
 
-Push-Location $moduleRoot
+Push-Location (Join-Path $repoRoot 'src')
 $originalUseArtifactsOutput = $env:UseArtifactsOutput
 $env:UseArtifactsOutput = 'false'
 try {
@@ -148,7 +148,7 @@ try {
 			MergeModuleOnBuild            = $false
 			ResolveBinaryConflicts        = $true
 			ResolveBinaryConflictsName    = 'Titanis.TBO.Smb2.PowerShell'
-			NETProjectPath                = $moduleRoot
+			NETProjectPath                = (Join-Path $repoRoot 'src')
 			NETProjectName                = 'Titanis.TBO.Smb2.PowerShell'
 			NETConfiguration              = $Configuration
 			NETFramework                  = 'net8.0'

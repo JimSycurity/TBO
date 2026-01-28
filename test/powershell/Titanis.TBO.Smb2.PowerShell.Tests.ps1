@@ -34,7 +34,7 @@ BeforeAll {
         throw "Could not locate repo root (.git)."
     }
 
-    $script:moduleRoot = Join-Path $script:repoRoot 'src'
+    $script:moduleRoot = $script:repoRoot
     $script:manifestPath = Join-Path $script:moduleRoot 'Titanis.TBO.Smb2.psd1'
     $script:formatPath = Join-Path $script:moduleRoot 'Format.ps1xml'
     $script:helpRoot = Join-Path $script:moduleRoot 'en-US'
@@ -50,7 +50,7 @@ Describe 'Titanis.TBO.Smb2 manifest and help' {
     It 'defines required manifest fields' {
         $data = Import-PowerShellDataFile -Path $script:manifestPath
         $data.ModuleVersion | Should -Not -BeNullOrEmpty
-        $data.RootModule | Should -Be 'Titanis.TBO.Smb2.PowerShell.dll'
+        $data.RootModule | Should -Be 'Titanis.TBO.Smb2.psm1'
         $data.GUID | Should -Not -BeNullOrEmpty
         $data.FormatsToProcess | Should -Contain 'Format.ps1xml'
     }

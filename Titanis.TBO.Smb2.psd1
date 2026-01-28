@@ -1,4 +1,4 @@
-@{
+﻿@{
     AliasesToExport=@()
     Author='Jim Sykora'
     CmdletsToExport=@('*')
@@ -19,9 +19,5 @@
             Tags=@('ActiveDirectory',                'Backup Operators',                'BackupPrivilege',                'RestorePrivilege')
         }
     }
-    RootModule='Titanis.TBO.Smb2.PowerShell.dll'
+    RootModule='Titanis.TBO.Smb2.psm1'
 }
-
-
-
-
