@@ -33,8 +33,16 @@ if (-not $SkipTests) {
 		throw "Pester is required to run tests. Install with: Install-Module -Name Pester -Scope CurrentUser"
 	}
 	Write-Host "Running Pester tests..." -ForegroundColor DarkGray
-	$testResults = Invoke-Pester -Path (Join-Path $repoRoot 'test\powershell') -PassThru
-	if ($testResults.FailedCount -gt 0) {
+	$testPath = Join-Path $repoRoot 'test\powershell'
+$testCommand = @'
+$ErrorActionPreference = 'Stop'
+Import-Module Pester -ErrorAction Stop
+$result = Invoke-Pester -Path '__TEST_PATH__' -PassThru
+if ($result.FailedCount -gt 0) { exit 1 }
+'@
+	$testCommand = $testCommand.Replace('__TEST_PATH__', $testPath)
+	$null = & pwsh -NoProfile -Command $testCommand
+	if ($LASTEXITCODE -ne 0) {
 		throw "Pester tests failed."
 	}
 }
@@ -139,7 +147,37 @@ $buildParams = @{
 Push-Location (Join-Path $repoRoot 'src')
 $originalUseArtifactsOutput = $env:UseArtifactsOutput
 $env:UseArtifactsOutput = 'false'
+$dotnetWrapperRoot = $null
+$dotnetWrapperPath = $null
+$psPublishModule = Get-Module PSPublishModule
+$originalModuleDotnetAliasDefinition = $null
 try {
+	$dotnetWrapperRoot = Join-Path $env:TEMP ("tbo-dotnet-wrapper-" + [Guid]::NewGuid().ToString("N"))
+	$dotnetWrapperPath = Join-Path $dotnetWrapperRoot 'dotnet.cmd'
+	$dotnetRealPath = (Get-Command dotnet -CommandType Application -ErrorAction Stop).Source
+	$wrapperContent = @"
+@echo off
+setlocal
+set "DOTNET_REAL=$dotnetRealPath"
+if /I "%~1"=="publish" (
+  "%DOTNET_REAL%" %* -p:UseArtifactsOutput=false
+) else (
+  "%DOTNET_REAL%" %*
+)
+exit /b %errorlevel%
+"@
+	$null = New-Item -Path $dotnetWrapperRoot -ItemType Directory -Force
+	Set-Content -Path $dotnetWrapperPath -Value $wrapperContent -Encoding ASCII
+	if ($psPublishModule) {
+		$originalModuleDotnetAliasDefinition = & $psPublishModule {
+			(Get-Alias dotnet -ErrorAction SilentlyContinue).Definition
+		}
+		& $psPublishModule {
+			param($wrapperPath)
+			Set-Alias -Name dotnet -Value $wrapperPath -Scope Script
+		} $dotnetWrapperPath
+	}
+
 	Build-Module @buildParams -Settings {
 		New-ConfigurationManifest @manifest
 
@@ -162,6 +200,21 @@ try {
 		New-ConfigurationArtefact -Type Packed -Enable -Path "$PSScriptRoot\..\Artifacts\Packed" -IncludeTagName -ArtefactName "Titanis.TBO.Smb2.<TagModuleVersionWithPreRelease>.zip"
 	}
 } finally {
+	if ($psPublishModule) {
+		if ($originalModuleDotnetAliasDefinition) {
+			& $psPublishModule {
+				param($aliasDefinition)
+				Set-Alias -Name dotnet -Value $aliasDefinition -Scope Script
+			} $originalModuleDotnetAliasDefinition
+		} else {
+			& $psPublishModule {
+				Remove-Item -Path alias:dotnet -ErrorAction SilentlyContinue
+			}
+		}
+	}
+	if ($dotnetWrapperRoot) {
+		Remove-Item -Path $dotnetWrapperRoot -Recurse -Force -ErrorAction SilentlyContinue
+	}
 	if ($null -eq $originalUseArtifactsOutput) {
 		Remove-Item env:UseArtifactsOutput -ErrorAction SilentlyContinue
 	} else {
