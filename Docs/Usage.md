@@ -339,7 +339,8 @@ Set `TITANIS_TBO_LOG` to `1` or to a file path. When set to `1`, logs go to
 
 ```powershell
 # Dev build (fast local test loop).
-dotnet build .\src\Titanis.TBO.Smb2.PowerShell.csproj -c Release
+# Required when building from the TBO repo while referencing Titanis directly.
+dotnet build .\src\Titanis.TBO.Smb2.PowerShell.csproj -c Release /p:UseArtifactsOutput=false
 
 # Example: copy the built module folder for testing.
 # robocopy .\src\bin\Release\net8.0\ C:\Temp\Titanis.TBO.Smb2 /E

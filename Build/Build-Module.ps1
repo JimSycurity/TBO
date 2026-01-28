@@ -29,7 +29,8 @@ if (-not (Test-Path -LiteralPath $metadataPath)) {
 
 if (-not $NoDotnetBuild) {
 	Write-Host "Building Titanis.TBO.Smb2.PowerShell ($Configuration)..." -ForegroundColor DarkGray
-	$buildOutput = & dotnet build $projectPath -c $Configuration --nologo --verbosity quiet 2>&1
+	# Avoid Titanis artifacts path issues when building from the TBO repo.
+	$buildOutput = & dotnet build $projectPath -c $Configuration /p:UseArtifactsOutput=false --nologo --verbosity quiet 2>&1
 	if ($LASTEXITCODE -ne 0) {
 		$buildOutput | Out-Host
 		throw "dotnet build failed (exit $LASTEXITCODE)"
