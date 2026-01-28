@@ -215,51 +215,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			try
 			{
-				var serviceSpec = new RegistryPathSpec(
-					basePath.RootKey,
-					basePath.RootName,
-					CombineSubkeyPath(basePath.SubkeyPath, serviceName));
-
-				using var serviceKey = OpenRegistryKey(
-					client,
-					serviceSpec,
-					RegistryAccessRights.QueryValue,
-					cancellationToken);
-
-				var values = LoadValues(serviceKey, cancellationToken);
-				PopulateMissingValues(values, serviceKey, cancellationToken);
-
-				var imagePath = TryGetString(values, "ImagePath");
-				var objectName = TryGetString(values, "ObjectName");
-				var displayName = TryGetString(values, "DisplayName");
-				var start = TryGetInt(values, "Start");
-				var type = TryGetInt(values, "Type");
-				var errorControl = TryGetInt(values, "ErrorControl");
-
-				byte[]? sdBytes = null;
-				object? sd = null;
-				TryReadSecurityDescriptor(
-					smb,
-					client,
-					serviceSpec,
-					cancellationToken,
-					out sdBytes,
-					out sd);
-
-				this.WriteObject(new TboRegServiceInfo(
-					this.ServerName,
-					serviceName,
-					serviceSpec.KeyPath,
-					imagePath,
-					objectName,
-					start,
-					type,
-					errorControl,
-					displayName,
-					sd,
-					sdBytes));
+				WriteServiceInfo(smb, client, basePath, serviceName, cancellationToken);
 
 				return true;
+			}
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+			{
+				try
+				{
+					return ExecuteRegistryOperation(
+						smb,
+						cancellationToken,
+						session =>
+						{
+							WriteServiceInfo(smb, session.Client, basePath, serviceName, cancellationToken);
+							return true;
+						});
+				}
+				catch (NtstatusException retryEx) when (retryEx.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+				{
+					this.WriteWarning($"Get-TBORegServices failed to read service '{serviceName}': {retryEx.Message}");
+				}
+				catch (Exception retryEx)
+				{
+					smb.LogException($"Get-TBORegServices failed to read service '{serviceName}'", retryEx);
+					this.WriteWarning($"Get-TBORegServices failed to read service '{serviceName}': {retryEx.Message}");
+				}
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
@@ -273,6 +254,58 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return false;
+		}
+
+		private void WriteServiceInfo(
+			ISmbProviderInfo smb,
+			RemoteRegistryClient client,
+			RegistryPathSpec basePath,
+			string serviceName,
+			CancellationToken cancellationToken)
+		{
+			var serviceSpec = new RegistryPathSpec(
+				basePath.RootKey,
+				basePath.RootName,
+				CombineSubkeyPath(basePath.SubkeyPath, serviceName));
+
+			using var serviceKey = OpenRegistryKey(
+				client,
+				serviceSpec,
+				RegistryAccessRights.QueryValue,
+				cancellationToken);
+
+			var values = LoadValues(serviceKey, cancellationToken);
+			PopulateMissingValues(values, serviceKey, cancellationToken);
+
+			var imagePath = TryGetString(values, "ImagePath");
+			var objectName = TryGetString(values, "ObjectName");
+			var displayName = TryGetString(values, "DisplayName");
+			var start = TryGetInt(values, "Start");
+			var type = TryGetInt(values, "Type");
+			var errorControl = TryGetInt(values, "ErrorControl");
+
+			byte[]? sdBytes = null;
+			object? sd = null;
+			TryReadSecurityDescriptor(
+				smb,
+				client,
+				serviceSpec,
+				cancellationToken,
+				out sdBytes,
+				out sd);
+
+			this.WriteObject(new TboRegServiceInfo(
+				this.ServerName,
+				serviceName,
+				serviceSpec.KeyPath,
+				imagePath,
+				objectName,
+				start,
+				type,
+				errorControl,
+				displayName,
+				sd,
+				sdBytes));
 		}
 
 		private static bool MatchesAnyPattern(IReadOnlyList<WildcardPattern> patterns, string value)

@@ -8,6 +8,7 @@ using Titanis.Net;
 using Titanis.Security.Kerberos;
 using Titanis.Smb2;
 using HexString = Titanis.Cli.HexString;
+using RegistryRetryPolicyType = Titanis.Tbo.Smb2.PowerShell.RegistryRetryPolicy;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
@@ -30,11 +31,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				CompressionAlgorithms = Smb2ConnectionOptions.DefaultCompressionAlgorithms,
 				KdcPort = 88,
 				TicketCache = Environment.GetEnvironmentVariable(KerberosClient.Krb5CacheVariableName),
-				RegistryRetryPolicy = RegistryRetryPolicy.Practical,
-				RegistryRetryCount = 3,
-				RegistryRetryDelayMs = 100,
-				RegistryRetryMaxDelayMs = 1000,
-				RegistryRetryJitterMs = 100
+				RegistryRetryPolicy = RegistryRetryPolicyType.Practical,
+				RegistryRetryCount = 6,
+				RegistryRetryDelayMs = 200,
+				RegistryRetryMaxDelayMs = 2000,
+				RegistryRetryJitterMs = 200
 			};
 		}
 
