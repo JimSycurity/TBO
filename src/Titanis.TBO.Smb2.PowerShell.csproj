@@ -50,6 +50,7 @@
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\Titanis.DceRpc\Titanis.DceRpc.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Mslsar\Titanis.Msrpc.Mslsar.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Msrrp\Titanis.Msrpc.Msrrp.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Msscmr.Core\Titanis.Msrpc.Msscmr.Core.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Mssrvs\Titanis.Msrpc.Mssrvs.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\Titanis.Smb2\Titanis.Smb2.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\security\Titanis.Security.Kerberos\Titanis.Security.Kerberos.csproj" />

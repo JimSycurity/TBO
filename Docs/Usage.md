@@ -299,6 +299,16 @@ Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name '
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
 ```
 
+#### Find-TBORegWeakServices
+
+Scans service security descriptors and reports AccessAllowed entries that grant service configuration rights to non-system trustees.
+
+```powershell
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00040002 -IncludeUninteresting
+```
+
 #### Get-TBORegChildItem
 
 Lists subkeys and values beneath a remote registry key.
