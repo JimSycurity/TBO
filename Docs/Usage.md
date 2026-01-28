@@ -278,6 +278,15 @@ Enumerates user session SIDs from HKEY_USERS on the remote host. SYSTEM SIDs are
 Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol
 ```
 
+#### Get-TBORegServices
+
+Enumerates service registry keys (defaults to HKLM\SYSTEM\CurrentControlSet\Services) and returns service metadata plus security descriptors.
+
+```powershell
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsWindows
+```
+
 #### Get-TBORegChildItem
 
 Lists subkeys and values beneath a remote registry key.

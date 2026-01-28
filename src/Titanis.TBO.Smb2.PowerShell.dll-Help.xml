@@ -1436,6 +1436,73 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
 
   <command:command>
     <command:details>
+      <command:name>Get-TBORegServices</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBORegServices</command:noun>
+      <maml:description>
+        <maml:para>Enumerates services from HKLM\SYSTEM\CurrentControlSet\Services and reads key metadata plus the service security descriptor.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBORegServices</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>AsWindows</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Registry path to enumerate. Defaults to HKLM\SYSTEM\CurrentControlSet\Services.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>AsWindows</maml:name>
+        <maml:description>
+          <maml:para>Return the security descriptor as a Windows RawSecurityDescriptor.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates services and returns service metadata plus portable security descriptors.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsWindows</maml:code>
+        <maml:remarks>
+          <maml:para>Returns Windows RawSecurityDescriptor instances for each service.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBORegChildItem</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBORegChildItem</command:noun>
