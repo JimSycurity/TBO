@@ -338,9 +338,16 @@ Set `TITANIS_TBO_LOG` to `1` or to a file path. When set to `1`, logs go to
 ## Build
 
 ```powershell
+# Dev build (fast local test loop).
+dotnet build .\src\Titanis.TBO.Smb2.PowerShell.csproj -c Release
+
+# Example: copy the built module folder for testing.
+# robocopy .\src\bin\Release\net8.0\ C:\Temp\Titanis.TBO.Smb2 /E
+
 # Bump the version (major|minor|patch) before commit.
 .\Build\Update-Version.ps1 -Bump patch
 
-# Build with PSPublishModule.
+# Release packaging with PSPublishModule (outputs to .\Artifacts\).
+# Requires: Install-Module -Name PSPublishModule -Scope CurrentUser
 .\Build\Build-Module.ps1 -Configuration Release
 ```

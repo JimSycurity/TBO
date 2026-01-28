@@ -142,8 +142,9 @@ try {
 
 		New-ConfigurationBuild @newConfigurationBuildSplat
 
-		New-ConfigurationArtefact -Type Unpacked -Enable -Path "$PSScriptRoot\..\Artefacts\Unpacked\<TagModuleVersionWithPreRelease>"
-		New-ConfigurationArtefact -Type Packed -Enable -Path "$PSScriptRoot\..\Artefacts\Packed" -IncludeTagName -ArtefactName "Titanis.TBO.Smb2.<TagModuleVersionWithPreRelease>.zip"
+		# Use US spelling for output paths.
+		New-ConfigurationArtefact -Type Unpacked -Enable -Path "$PSScriptRoot\..\Artifacts\Unpacked\<TagModuleVersionWithPreRelease>"
+		New-ConfigurationArtefact -Type Packed -Enable -Path "$PSScriptRoot\..\Artifacts\Packed" -IncludeTagName -ArtefactName "Titanis.TBO.Smb2.<TagModuleVersionWithPreRelease>.zip"
 	}
 } finally {
 	Pop-Location
