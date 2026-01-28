@@ -12,7 +12,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public object GetDynamicParameters()
 			=> this._parms;
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			if (string.IsNullOrEmpty(this.ServerName))
 			{

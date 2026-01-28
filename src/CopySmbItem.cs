@@ -40,7 +40,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 
 		private CancellationTokenSource? _cancelSource;
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
 			CopyAsync(smb, this._cancelSource.Token).ConfigureAwait(false).GetAwaiter().GetResult();
@@ -52,7 +52,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			base.StopProcessing();
 		}
 
-		private async Task CopyAsync(SmbProviderInfo smb, CancellationToken cancellationToken)
+		private async Task CopyAsync(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			var source = ResolvePath(this.Source, nameof(Source));
 			var destination = ResolvePath(this.Destination, nameof(Destination));

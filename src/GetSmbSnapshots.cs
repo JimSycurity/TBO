@@ -25,7 +25,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private CancellationTokenSource? _cancelSource;
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
 
@@ -57,7 +57,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		private static FileSnapshotsInfo ReadSnapshots(
-			SmbProviderInfo smb,
+			ISmbProviderInfo smb,
 			UncPath uncPath,
 			CancellationToken cancellationToken)
 		{

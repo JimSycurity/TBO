@@ -37,7 +37,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private CancellationTokenSource? _cancelSource;
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
 			foreach (var path in GetTargetPaths())
@@ -61,7 +61,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				: this.Path;
 		}
 
-		private void Watch(SmbProviderInfo smb, UncPath uncPath, CancellationToken cancellationToken)
+		private void Watch(ISmbProviderInfo smb, UncPath uncPath, CancellationToken cancellationToken)
 		{
 			if (this.BufferSize <= 0)
 				this.BufferSize = DefaultBufferSize;

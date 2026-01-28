@@ -368,7 +368,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 	}
 
-	public partial class SmbProviderInfo : ProviderInfo, ISmb2TraceCallback
+	public partial class SmbProviderInfo : ProviderInfo, ISmb2TraceCallback, ISmbProviderInfo
 	{
 		private static readonly AsyncLocal<bool> s_forceZeroCreditFallback = new AsyncLocal<bool>();
 

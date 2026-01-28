@@ -136,13 +136,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private CancellationTokenSource? _cancelSource;
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
 			this.ProcessRecord(smb, this._cancelSource.Token);
 		}
 
-		protected abstract void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken);
+		protected abstract void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken);
 
 		protected override void StopProcessing()
 		{
@@ -150,7 +150,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			base.StopProcessing();
 		}
 
-		protected RemoteRegistrySession OpenRegistrySession(SmbProviderInfo smb, CancellationToken cancellationToken)
+		protected RemoteRegistrySession OpenRegistrySession(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			return smb.OpenRemoteRegistrySessionAsync(this.ServerName, cancellationToken).GetAwaiter().GetResult();
 		}
@@ -261,7 +261,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public SwitchParameter ResolveSid { get; set; }
 
-		protected override void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken)
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			if (this.ResolveSid.IsPresent)
 				throw new NotSupportedException("ResolveSid is not implemented yet.");
@@ -303,7 +303,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public SwitchParameter IncludeClass { get; set; }
 
-		protected override void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken)
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 			using var session = OpenRegistrySession(smb, cancellationToken);
@@ -325,7 +325,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Alias("KeyPath")]
 		public string Path { get; set; } = string.Empty;
 
-	protected override void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken)
+	protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 	{
 		var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 		if (parsedPath.IsRoot)
@@ -361,7 +361,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Alias("KeyPath")]
 		public string Path { get; set; } = string.Empty;
 
-	protected override void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken)
+	protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 	{
 		var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 		if (parsedPath.IsRoot)
@@ -398,7 +398,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter(Position = 2, ValueFromPipelineByPropertyName = true)]
 		public string? Name { get; set; }
 
-		protected override void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken)
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 			using var session = OpenRegistrySession(smb, cancellationToken);
@@ -462,7 +462,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public SwitchParameter IncludeData { get; set; }
 
-		protected override void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken)
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			bool includeSubkeys = this.IncludeSubkeys.IsPresent;
 			bool includeValues = this.IncludeValues.IsPresent;
@@ -549,7 +549,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public RegistryValueType? Type { get; set; }
 
-	protected override void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken)
+	protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 	{
 		var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 		var valueType = ResolveValueType(this.Value, this.Type);
@@ -673,7 +673,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter(Mandatory = true, Position = 2, ValueFromPipelineByPropertyName = true)]
 		public string? Name { get; set; }
 
-	protected override void ProcessRecord(SmbProviderInfo smb, CancellationToken cancellationToken)
+	protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 	{
 		var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 		var target = $"{this.ServerName}\\{parsedPath.KeyPath}\\{this.Name}";

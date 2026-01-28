@@ -1,6 +1,10 @@
 Set-StrictMode -Version Latest
 
 BeforeAll {
+    $script:testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+    if (Test-Path -LiteralPath $script:testHarnessPath) {
+        . $script:testHarnessPath
+    }
     function Get-RepoRoot {
         param([string[]]$paths)
 
@@ -168,8 +172,11 @@ Describe 'Titanis.TBO.Smb2 cmdlet help' {
             $help | Should -Not -BeNullOrEmpty
             $help.Synopsis | Should -Not -BeNullOrEmpty
 
-            $description = $help.Description | ForEach-Object { $_.Text } | Out-String
-            if (-not $description.Trim()) {
+            $description = ''
+            if ($help.PSObject.Properties.Match('Description').Count -gt 0) {
+                $description = $help.Description | ForEach-Object { $_.Text } | Out-String
+            }
+            if (-not $description.Trim() -and $help.PSObject.Properties.Match('Details').Count -gt 0) {
                 $description = $help.Details.Description | ForEach-Object { $_.Text } | Out-String
             }
             $description.Trim() | Should -Not -BeNullOrEmpty
@@ -177,5 +184,34 @@ Describe 'Titanis.TBO.Smb2 cmdlet help' {
             $examples = @($help.Examples.Example)
             $examples.Count | Should -BeGreaterThan 0
         }
+    }
+}
+
+Describe 'TBO test harness' {
+    It 'allows overriding provider info for SmbCmdlet' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.MockSmbProviderInfo' -as [type])) {
+            Set-ItResult -Skipped -Because 'Mock provider type not found; build the module to enable mock provider tests.'
+            return
+        }
+
+        $script:capturedServer = $null
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+            -GetConnectParametersFor { param($serverName, $defaultIfNone) $mock.DefaultConnectParameters } `
+            -SetConnectParameters { param($serverName, $parameters) $script:capturedServer = $serverName }
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            Set-TBOSmbConnectOptions -ServerName 'fileserver'
+        } finally {
+            $scope.Dispose()
+        }
+
+        $script:capturedServer | Should -Be 'fileserver'
     }
 }

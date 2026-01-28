@@ -40,7 +40,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private CancellationTokenSource? _cancelSource;
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
 			if (this.AsWindows.IsPresent && !RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -77,7 +77,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		private SecurityDescriptor? ReadSecurityDescriptor(
-			SmbProviderInfo smb,
+			ISmbProviderInfo smb,
 			UncPath uncPath,
 			SecurityInfo sections,
 			CancellationToken cancellationToken)
@@ -159,7 +159,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private CancellationTokenSource? _cancelSource;
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
 
@@ -242,7 +242,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		private void WriteSecurityDescriptor(
-			SmbProviderInfo smb,
+			ISmbProviderInfo smb,
 			UncPath uncPath,
 			SecurityDescriptor securityDescriptor,
 			SecurityInfo securityInfo,

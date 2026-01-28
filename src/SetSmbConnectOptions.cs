@@ -10,13 +10,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 {
 	public abstract class SmbCmdlet : PSCmdlet
 	{
+		internal static ISmbProviderInfo? ProviderInfoOverride { get; set; }
+
 		protected override void ProcessRecord()
 		{
-			var smb = (SmbProviderInfo)this.SessionState.Provider.GetOne(SmbProvider.ProviderName);
+			var smb = ProviderInfoOverride ?? (ISmbProviderInfo)this.SessionState.Provider.GetOne(SmbProvider.ProviderName);
 			this.ProcessRecord(smb);
 		}
 
-		protected abstract void ProcessRecord(SmbProviderInfo smb);
+		protected abstract void ProcessRecord(ISmbProviderInfo smb);
 	}
 
 	[Cmdlet(VerbsCommon.Set, "TBOSmbConnectOptions")]
@@ -29,7 +31,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public object GetDynamicParameters()
 			=> this._parms;
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			if (string.IsNullOrEmpty(this.ServerName))
 			{

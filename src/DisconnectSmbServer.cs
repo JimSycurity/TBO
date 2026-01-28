@@ -22,7 +22,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter(Mandatory = true, ParameterSetName = ParameterSetNames.All)]
 		public SwitchParameter All { get; set; }
 
-		protected override void ProcessRecord(SmbProviderInfo smb)
+		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			if (this.ParameterSetName == ParameterSetNames.All)
 			{
