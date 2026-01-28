@@ -290,6 +290,15 @@ Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsSddl
 Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
 ```
 
+#### Get-TBORegServiceDetails
+
+Returns additional registry-backed service metadata such as RequiredPrivileges, LaunchProtected, FailureActions, ErrorControl, ServiceSidType, and whether an _SC_ credential exists.
+
+```powershell
+Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'MDCoreSvc'
+Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
+```
+
 #### Get-TBORegChildItem
 
 Lists subkeys and values beneath a remote registry key.

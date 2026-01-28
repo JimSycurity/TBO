@@ -1616,6 +1616,73 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
 
   <command:command>
     <command:details>
+      <command:name>Get-TBORegServiceDetails</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBORegServiceDetails</command:noun>
+      <maml:description>
+        <maml:para>Reads additional registry-backed service details such as RequiredPrivileges, LaunchProtected, FailureActions, ErrorControl, ServiceSidType, and whether an _SC_ service credential exists.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBORegServiceDetails</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" position="2">
+          <maml:name>Name</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Registry path to enumerate. Defaults to HKLM\SYSTEM\CurrentControlSet\Services.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" position="2">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>Service key name(s) to enumerate. Supports wildcard patterns.</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'MDCoreSvc'</maml:code>
+        <maml:remarks>
+          <maml:para>Returns registry-backed details for a specific service, including RequiredPrivileges and the _SC_ credential check.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates service details using wildcard patterns.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBORegChildItem</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBORegChildItem</command:noun>
