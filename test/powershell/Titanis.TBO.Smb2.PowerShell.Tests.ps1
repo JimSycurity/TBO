@@ -18,6 +18,25 @@ BeforeAll {
         return $null
     }
 
+    function Get-HelpModuleBinary {
+        param([string]$repoRoot)
+
+        $candidateRoots = @(
+            (Join-Path $repoRoot 'src\bin\Release\net8.0\publish'),
+            (Join-Path $repoRoot 'src\bin\Debug\net8.0\publish')
+        )
+
+        foreach ($root in $candidateRoots) {
+            $binary = Join-Path $root 'Titanis.TBO.Smb2.PowerShell.dll'
+            $helpXml = Join-Path $root 'Titanis.TBO.Smb2.PowerShell.dll-Help.xml'
+            if ((Test-Path -LiteralPath $binary) -and (Test-Path -LiteralPath $helpXml)) {
+                return $binary
+            }
+        }
+
+        return $null
+    }
+
     $scriptPath = $PSCommandPath
     if (-not $scriptPath) { $scriptPath = $PSScriptRoot }
     if (-not $scriptPath) {
@@ -119,5 +138,44 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
         }
 
         (Get-PSProvider | Where-Object { $_.Name -eq 'TBO.Smb2' }).Count | Should -Be 1
+    }
+}
+
+Describe 'Titanis.TBO.Smb2 cmdlet help' {
+    BeforeAll {
+        $script:helpModule = $null
+        $binary = Get-HelpModuleBinary -repoRoot $script:repoRoot
+        if ($binary) {
+            try {
+                $script:helpModule = Import-Module -Name $binary -Force -PassThru -ErrorAction Stop
+            } catch {
+                $script:helpModule = $null
+            }
+        }
+    }
+
+    It 'provides synopsis, description, and examples for each cmdlet' {
+        if (-not $script:helpModule) {
+            Set-ItResult -Skipped -Because 'Publish output with help XML not found; build the module to validate Get-Help content.'
+            return
+        }
+
+        $cmdlets = Get-Command -Module $script:helpModule.Name -CommandType Cmdlet
+        $cmdlets | Should -Not -BeNullOrEmpty
+
+        foreach ($cmdlet in $cmdlets) {
+            $help = Get-Help -Name $cmdlet.Name -Full -ErrorAction Stop
+            $help | Should -Not -BeNullOrEmpty
+            $help.Synopsis | Should -Not -BeNullOrEmpty
+
+            $description = $help.Description | ForEach-Object { $_.Text } | Out-String
+            if (-not $description.Trim()) {
+                $description = $help.Details.Description | ForEach-Object { $_.Text } | Out-String
+            }
+            $description.Trim() | Should -Not -BeNullOrEmpty
+
+            $examples = @($help.Examples.Example)
+            $examples.Count | Should -BeGreaterThan 0
+        }
     }
 }
