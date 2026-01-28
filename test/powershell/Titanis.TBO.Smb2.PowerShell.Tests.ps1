@@ -18,9 +18,14 @@ BeforeAll {
         return $null
     }
 
-    $scriptPath = $MyInvocation.MyCommand.Path
-    if (-not $scriptPath) { $scriptPath = $PSCommandPath }
+    $scriptPath = $PSCommandPath
     if (-not $scriptPath) { $scriptPath = $PSScriptRoot }
+    if (-not $scriptPath) {
+        $command = $MyInvocation.MyCommand
+        if ($command -and $command.PSObject.Properties.Match('Path').Count -gt 0) {
+            $scriptPath = $command.Path
+        }
+    }
 
     $testRoot = if ($scriptPath) { Split-Path -Parent $scriptPath } else { (Get-Location).Path }
     $script:repoRoot = Get-RepoRoot -paths @($testRoot, (Get-Location).Path)

@@ -3,6 +3,7 @@ param(
 	[ValidateSet('Release', 'Debug')]
 	[string]$Configuration = 'Release',
 	[switch]$NoDotnetBuild,
+	[switch]$SkipTests,
 	[string]$ModuleVersion
 )
 
@@ -25,6 +26,17 @@ if (-not (Test-Path -LiteralPath $manifestPath)) {
 
 if (-not (Test-Path -LiteralPath $metadataPath)) {
 	throw "Metadata file not found: $metadataPath"
+}
+
+if (-not $SkipTests) {
+	if (-not (Get-Command Invoke-Pester -ErrorAction SilentlyContinue)) {
+		throw "Pester is required to run tests. Install with: Install-Module -Name Pester -Scope CurrentUser"
+	}
+	Write-Host "Running Pester tests..." -ForegroundColor DarkGray
+	$testResults = Invoke-Pester -Path (Join-Path $repoRoot 'test\powershell') -PassThru
+	if ($testResults.FailedCount -gt 0) {
+		throw "Pester tests failed."
+	}
 }
 
 if (-not $NoDotnetBuild) {
@@ -125,6 +137,8 @@ $buildParams = @{
 }
 
 Push-Location $moduleRoot
+$originalUseArtifactsOutput = $env:UseArtifactsOutput
+$env:UseArtifactsOutput = 'false'
 try {
 	Build-Module @buildParams -Settings {
 		New-ConfigurationManifest @manifest
@@ -148,5 +162,10 @@ try {
 		New-ConfigurationArtefact -Type Packed -Enable -Path "$PSScriptRoot\..\Artifacts\Packed" -IncludeTagName -ArtefactName "Titanis.TBO.Smb2.<TagModuleVersionWithPreRelease>.zip"
 	}
 } finally {
+	if ($null -eq $originalUseArtifactsOutput) {
+		Remove-Item env:UseArtifactsOutput -ErrorAction SilentlyContinue
+	} else {
+		$env:UseArtifactsOutput = $originalUseArtifactsOutput
+	}
 	Pop-Location
 }

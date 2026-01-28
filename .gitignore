@@ -2,6 +2,8 @@ bin/
 obj/
 artifacts/
 Artifacts/
+Lib/
+Titanis.TBO.Smb2.psd1
 .vs/
 *.user
 *.suo

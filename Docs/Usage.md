@@ -351,4 +351,7 @@ dotnet build .\src\Titanis.TBO.Smb2.PowerShell.csproj -c Release /p:UseArtifacts
 # Release packaging with PSPublishModule (outputs to .\Artifacts\).
 # Requires: Install-Module -Name PSPublishModule -Scope CurrentUser
 .\Build\Build-Module.ps1 -Configuration Release
+
+# Skip tests if you need a quick packaging run (not recommended).
+# .\Build\Build-Module.ps1 -Configuration Release -SkipTests
 ```
