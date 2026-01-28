@@ -150,9 +150,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			base.StopProcessing();
 		}
 
-		protected RemoteRegistrySession OpenRegistrySession(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		protected void ExecuteRegistryOperation(
+			ISmbProviderInfo smb,
+			CancellationToken cancellationToken,
+			Action<RemoteRegistrySession> action)
 		{
-			return smb.OpenRemoteRegistrySessionAsync(this.ServerName, cancellationToken).GetAwaiter().GetResult();
+			RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, action);
+		}
+
+		protected TResult ExecuteRegistryOperation<TResult>(
+			ISmbProviderInfo smb,
+			CancellationToken cancellationToken,
+			Func<RemoteRegistrySession, TResult> func)
+		{
+			return RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, func);
 		}
 
 		protected static RegistryPathSpec ParseRegistryPath(string path, string paramName)
@@ -266,30 +277,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (this.ResolveSid.IsPresent)
 				throw new NotSupportedException("ResolveSid is not implemented yet.");
 
-			using var session = OpenRegistrySession(smb, cancellationToken);
-			using var rootKey = session.Client.OpenRootKey(RegistryRootKey.Users, RegistryAccessRights.EnumerateSubkeys, cancellationToken).GetAwaiter().GetResult();
-
-			List<RegistrySubkeyInfo> subkeys;
-			try
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				subkeys = CollectSubkeys(rootKey, cancellationToken);
-			}
-			catch (Exception ex)
-			{
-				smb.LogException("Get-TBORegSessions failed to enumerate HKEY_USERS", ex);
-				throw;
-			}
+				using var rootKey = session.Client.OpenRootKey(RegistryRootKey.Users, RegistryAccessRights.EnumerateSubkeys, cancellationToken).GetAwaiter().GetResult();
 
-			foreach (var subkey in subkeys)
-			{
-				var sid = subkey.KeyName;
-				if (!UserSidRegex.IsMatch(sid))
-					continue;
-				if (SystemSids.Contains(sid))
-					continue;
+				List<RegistrySubkeyInfo> subkeys;
+				try
+				{
+					subkeys = CollectSubkeys(rootKey, cancellationToken);
+				}
+				catch (Exception ex)
+				{
+					smb.LogException("Get-TBORegSessions failed to enumerate HKEY_USERS", ex);
+					throw;
+				}
 
-				this.WriteObject(sid);
-			}
+				foreach (var subkey in subkeys)
+				{
+					var sid = subkey.KeyName;
+					if (!UserSidRegex.IsMatch(sid))
+						continue;
+					if (SystemSids.Contains(sid))
+						continue;
+
+					this.WriteObject(sid);
+				}
+			});
 		}
 	}
 
@@ -306,15 +319,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-			using var session = OpenRegistrySession(smb, cancellationToken);
-			using var key = OpenRegistryKey(
-				session.Client,
-				parsedPath,
-				RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys,
-				cancellationToken);
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
+			{
+				using var key = OpenRegistryKey(
+					session.Client,
+					parsedPath,
+					RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys,
+					cancellationToken);
 
-			var info = key.QueryInfo(this.IncludeClass.IsPresent, cancellationToken).GetAwaiter().GetResult();
-			this.WriteObject(new TboRegistryKeyInfo(this.ServerName, parsedPath.KeyPath, info));
+				var info = key.QueryInfo(this.IncludeClass.IsPresent, cancellationToken).GetAwaiter().GetResult();
+				this.WriteObject(new TboRegistryKeyInfo(this.ServerName, parsedPath.KeyPath, info));
+			});
 		}
 	}
 
@@ -325,32 +340,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Alias("KeyPath")]
 		public string Path { get; set; } = string.Empty;
 
-	protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
-	{
-		var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-		if (parsedPath.IsRoot)
-			throw new InvalidOperationException("Cannot create a root key.");
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		{
+			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
+			if (parsedPath.IsRoot)
+				throw new InvalidOperationException("Cannot create a root key.");
 
-		var target = $"{this.ServerName}\\{parsedPath.KeyPath}";
-		if (!this.ShouldProcess(target, "Create registry key"))
-			return;
+			var target = $"{this.ServerName}\\{parsedPath.KeyPath}";
+			if (!this.ShouldProcess(target, "Create registry key"))
+				return;
 
-		var subkeyPath = parsedPath.SubkeyPath!;
-		var parentPath = RegistryPath.GetParentKeyNameFromPath(subkeyPath);
-		var subkeyName = RegistryPath.GetSubkeyNameFromPath(subkeyPath);
-		var parentSpec = new RegistryPathSpec(parsedPath.RootKey, parsedPath.RootName, parentPath);
+			var subkeyPath = parsedPath.SubkeyPath!;
+			var parentPath = RegistryPath.GetParentKeyNameFromPath(subkeyPath);
+			var subkeyName = RegistryPath.GetSubkeyNameFromPath(subkeyPath);
+			var parentSpec = new RegistryPathSpec(parsedPath.RootKey, parsedPath.RootName, parentPath);
 
-			using var session = OpenRegistrySession(smb, cancellationToken);
-			using var parentKey = OpenRegistryKey(
-				session.Client,
-				parentSpec,
-				RegistryAccessRights.CreateSubkey,
-				RegistryAccessRights.EnumerateSubkeys,
-				cancellationToken);
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
+			{
+				using var parentKey = OpenRegistryKey(
+					session.Client,
+					parentSpec,
+					RegistryAccessRights.CreateSubkey,
+					RegistryAccessRights.EnumerateSubkeys,
+					cancellationToken);
 
-			var createAccess = RegistryAccessRights.CreateSubkey | RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys;
-			using var created = parentKey.CreateSubkey(subkeyName, createAccess, RegistryKeyOptions.BackupRestore, cancellationToken).GetAwaiter().GetResult();
-			this.WriteObject(new TboRegistryKeyInfo(this.ServerName, parsedPath.KeyPath, created.QueryInfo(cancellationToken).GetAwaiter().GetResult()));
+				var createAccess = RegistryAccessRights.CreateSubkey | RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys;
+				using var created = parentKey.CreateSubkey(subkeyName, createAccess, RegistryKeyOptions.BackupRestore, cancellationToken).GetAwaiter().GetResult();
+				this.WriteObject(new TboRegistryKeyInfo(this.ServerName, parsedPath.KeyPath, created.QueryInfo(cancellationToken).GetAwaiter().GetResult()));
+			});
 		}
 	}
 
@@ -361,30 +378,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Alias("KeyPath")]
 		public string Path { get; set; } = string.Empty;
 
-	protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
-	{
-		var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-		if (parsedPath.IsRoot)
-			throw new InvalidOperationException("Cannot remove a root key.");
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		{
+			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
+			if (parsedPath.IsRoot)
+				throw new InvalidOperationException("Cannot remove a root key.");
 
-		var target = $"{this.ServerName}\\{parsedPath.KeyPath}";
-		if (!this.ShouldProcess(target, "Remove registry key"))
-			return;
+			var target = $"{this.ServerName}\\{parsedPath.KeyPath}";
+			if (!this.ShouldProcess(target, "Remove registry key"))
+				return;
 
-		var subkeyPath = parsedPath.SubkeyPath!;
-		var parentPath = RegistryPath.GetParentKeyNameFromPath(subkeyPath);
-		var subkeyName = RegistryPath.GetSubkeyNameFromPath(subkeyPath);
-		var parentSpec = new RegistryPathSpec(parsedPath.RootKey, parsedPath.RootName, parentPath);
+			var subkeyPath = parsedPath.SubkeyPath!;
+			var parentPath = RegistryPath.GetParentKeyNameFromPath(subkeyPath);
+			var subkeyName = RegistryPath.GetSubkeyNameFromPath(subkeyPath);
+			var parentSpec = new RegistryPathSpec(parsedPath.RootKey, parsedPath.RootName, parentPath);
 
-			using var session = OpenRegistrySession(smb, cancellationToken);
-			using var parentKey = OpenRegistryKey(
-				session.Client,
-				parentSpec,
-				RegistryAccessRights.CreateSubkey,
-				RegistryAccessRights.EnumerateSubkeys,
-				cancellationToken);
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
+			{
+				using var parentKey = OpenRegistryKey(
+					session.Client,
+					parentSpec,
+					RegistryAccessRights.CreateSubkey,
+					RegistryAccessRights.EnumerateSubkeys,
+					cancellationToken);
 
-			parentKey.DeleteSubkey(subkeyName, cancellationToken).GetAwaiter().GetResult();
+				parentKey.DeleteSubkey(subkeyName, cancellationToken).GetAwaiter().GetResult();
+			});
 		}
 	}
 
@@ -401,46 +420,48 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-			using var session = OpenRegistrySession(smb, cancellationToken);
-			using var key = OpenRegistryKey(session.Client, parsedPath, RegistryAccessRights.QueryValue, cancellationToken);
-
-			var info = key.QueryInfo(cancellationToken).GetAwaiter().GetResult();
-			if (this.Name != null)
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				var valueInfo = key.GetValue(this.Name, cancellationToken).GetAwaiter().GetResult();
-				this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, valueInfo));
-				return;
-			}
+				using var key = OpenRegistryKey(session.Client, parsedPath, RegistryAccessRights.QueryValue, cancellationToken);
 
-			if (info.ValueCount == 0)
-				return;
+				var info = key.QueryInfo(cancellationToken).GetAwaiter().GetResult();
+				if (this.Name != null)
+				{
+					var valueInfo = key.GetValue(this.Name, cancellationToken).GetAwaiter().GetResult();
+					this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, valueInfo));
+					return;
+				}
 
-			List<RegistryValueInfo> values;
-			try
-			{
-				values = CollectValues(key, includeData: true, cancellationToken);
-			}
-			catch (NotSupportedException ex)
-			{
-				smb.LogException("Get-TBORegValue failed to enumerate values with data", ex);
-				values = CollectValues(key, includeData: false, cancellationToken);
+				if (info.ValueCount == 0)
+					return;
+
+				List<RegistryValueInfo> values;
+				try
+				{
+					values = CollectValues(key, includeData: true, cancellationToken);
+				}
+				catch (NotSupportedException ex)
+				{
+					smb.LogException("Get-TBORegValue failed to enumerate values with data", ex);
+					values = CollectValues(key, includeData: false, cancellationToken);
+					foreach (var valueInfo in values)
+					{
+						var fullInfo = key.GetValue(valueInfo.Name, cancellationToken).GetAwaiter().GetResult();
+						this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, fullInfo));
+					}
+					return;
+				}
+				catch (Exception ex)
+				{
+					smb.LogException("Get-TBORegValue failed to enumerate values", ex);
+					throw;
+				}
+
 				foreach (var valueInfo in values)
 				{
-					var fullInfo = key.GetValue(valueInfo.Name, cancellationToken).GetAwaiter().GetResult();
-					this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, fullInfo));
+					this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, valueInfo));
 				}
-				return;
-			}
-			catch (Exception ex)
-			{
-				smb.LogException("Get-TBORegValue failed to enumerate values", ex);
-				throw;
-			}
-
-			foreach (var valueInfo in values)
-			{
-				this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, valueInfo));
-			}
+			});
 		}
 	}
 
@@ -479,57 +500,59 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				access |= RegistryAccessRights.QueryValue;
 
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-			using var session = OpenRegistrySession(smb, cancellationToken);
-			using var key = OpenRegistryKey(session.Client, parsedPath, access, cancellationToken);
-
-			if (includeSubkeys)
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				List<RegistrySubkeyInfo> subkeys;
-				try
+				using var key = OpenRegistryKey(session.Client, parsedPath, access, cancellationToken);
+
+				if (includeSubkeys)
 				{
-					subkeys = CollectSubkeys(key, cancellationToken);
-				}
-				catch (Exception ex)
-				{
-					smb.LogException("Get-TBORegChildItem failed to enumerate subkeys", ex);
-					throw;
+					List<RegistrySubkeyInfo> subkeys;
+					try
+					{
+						subkeys = CollectSubkeys(key, cancellationToken);
+					}
+					catch (Exception ex)
+					{
+						smb.LogException("Get-TBORegChildItem failed to enumerate subkeys", ex);
+						throw;
+					}
+
+					foreach (var subkey in subkeys)
+					{
+						this.WriteObject(new TboRegistrySubkeyInfo(this.ServerName, parsedPath.KeyPath, subkey));
+					}
 				}
 
-				foreach (var subkey in subkeys)
+				if (includeValues)
 				{
-					this.WriteObject(new TboRegistrySubkeyInfo(this.ServerName, parsedPath.KeyPath, subkey));
-				}
-			}
+					List<RegistryValueInfo> values;
+					try
+					{
+						values = CollectValues(key, includeData: this.IncludeData.IsPresent, cancellationToken);
+					}
+					catch (NotSupportedException ex)
+					{
+						smb.LogException("Get-TBORegChildItem failed to enumerate values with data", ex);
+						values = CollectValues(key, includeData: false, cancellationToken);
+						foreach (var valueInfo in values)
+						{
+							var fullInfo = key.GetValue(valueInfo.Name, cancellationToken).GetAwaiter().GetResult();
+							this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, fullInfo));
+						}
+						return;
+					}
+					catch (Exception ex)
+					{
+						smb.LogException("Get-TBORegChildItem failed to enumerate values", ex);
+						throw;
+					}
 
-			if (includeValues)
-			{
-				List<RegistryValueInfo> values;
-				try
-				{
-					values = CollectValues(key, includeData: this.IncludeData.IsPresent, cancellationToken);
-				}
-				catch (NotSupportedException ex)
-				{
-					smb.LogException("Get-TBORegChildItem failed to enumerate values with data", ex);
-					values = CollectValues(key, includeData: false, cancellationToken);
 					foreach (var valueInfo in values)
 					{
-						var fullInfo = key.GetValue(valueInfo.Name, cancellationToken).GetAwaiter().GetResult();
-						this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, fullInfo));
+						this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, valueInfo));
 					}
-					return;
 				}
-				catch (Exception ex)
-				{
-					smb.LogException("Get-TBORegChildItem failed to enumerate values", ex);
-					throw;
-				}
-
-				foreach (var valueInfo in values)
-				{
-					this.WriteObject(new TboRegistryValueInfo(this.ServerName, parsedPath.KeyPath, valueInfo));
-				}
-			}
+			});
 		}
 	}
 
@@ -549,25 +572,27 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public RegistryValueType? Type { get; set; }
 
-	protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
-	{
-		var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-		var valueType = ResolveValueType(this.Value, this.Type);
-		var data = EncodeValue(valueType, this.Value);
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		{
+			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
+			var valueType = ResolveValueType(this.Value, this.Type);
+			var data = EncodeValue(valueType, this.Value);
 
-		var target = $"{this.ServerName}\\{parsedPath.KeyPath}\\{this.Name}";
-		if (!this.ShouldProcess(target, "Set registry value"))
-			return;
+			var target = $"{this.ServerName}\\{parsedPath.KeyPath}\\{this.Name}";
+			if (!this.ShouldProcess(target, "Set registry value"))
+				return;
 
-		using var session = OpenRegistrySession(smb, cancellationToken);
-		using var key = OpenRegistryKey(
-			session.Client,
-			parsedPath,
-				RegistryAccessRights.SetValue,
-				RegistryAccessRights.EnumerateSubkeys,
-				cancellationToken);
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
+			{
+				using var key = OpenRegistryKey(
+					session.Client,
+					parsedPath,
+					RegistryAccessRights.SetValue,
+					RegistryAccessRights.EnumerateSubkeys,
+					cancellationToken);
 
-			key.SetValue(this.Name, valueType, data, cancellationToken).GetAwaiter().GetResult();
+				key.SetValue(this.Name, valueType, data, cancellationToken).GetAwaiter().GetResult();
+			});
 		}
 
 		private static RegistryValueType ResolveValueType(object value, RegistryValueType? type)
@@ -673,22 +698,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter(Mandatory = true, Position = 2, ValueFromPipelineByPropertyName = true)]
 		public string? Name { get; set; }
 
-	protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
-	{
-		var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-		var target = $"{this.ServerName}\\{parsedPath.KeyPath}\\{this.Name}";
-		if (!this.ShouldProcess(target, "Remove registry value"))
-			return;
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		{
+			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
+			var target = $"{this.ServerName}\\{parsedPath.KeyPath}\\{this.Name}";
+			if (!this.ShouldProcess(target, "Remove registry value"))
+				return;
 
-		using var session = OpenRegistrySession(smb, cancellationToken);
-		using var key = OpenRegistryKey(
-			session.Client,
-			parsedPath,
-				RegistryAccessRights.SetValue,
-				RegistryAccessRights.EnumerateSubkeys,
-				cancellationToken);
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
+			{
+				using var key = OpenRegistryKey(
+					session.Client,
+					parsedPath,
+					RegistryAccessRights.SetValue,
+					RegistryAccessRights.EnumerateSubkeys,
+					cancellationToken);
 
-			key.DeleteValue(this.Name, cancellationToken).GetAwaiter().GetResult();
+				key.DeleteValue(this.Name, cancellationToken).GetAwaiter().GetResult();
+			});
 		}
 	}
 }

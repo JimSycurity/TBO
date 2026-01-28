@@ -303,6 +303,41 @@
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryPolicy</maml:name>
+        <maml:description>
+          <maml:para>Retry policy for remote registry operations when STATUS_PIPE_BUSY is encountered (Practical, Retry, Backoff, Reconnect, None).</maml:para>
+        </maml:description>
+        <command:parameterValue>RegistryRetryPolicy</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryCount</maml:name>
+        <maml:description>
+          <maml:para>Number of retry attempts for registry operations when the pipe is busy.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryDelayMs</maml:name>
+        <maml:description>
+          <maml:para>Initial delay in milliseconds between registry retries.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryMaxDelayMs</maml:name>
+        <maml:description>
+          <maml:para>Maximum delay in milliseconds between registry retries when using backoff.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryJitterMs</maml:name>
+        <maml:description>
+          <maml:para>Jitter in milliseconds added to registry retry delays.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -488,6 +523,41 @@
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryPolicy</maml:name>
+        <maml:description>
+          <maml:para>Retry policy for remote registry operations when STATUS_PIPE_BUSY is encountered (Practical, Retry, Backoff, Reconnect, None).</maml:para>
+        </maml:description>
+        <command:parameterValue>RegistryRetryPolicy</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryCount</maml:name>
+        <maml:description>
+          <maml:para>Number of retry attempts for registry operations when the pipe is busy.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryDelayMs</maml:name>
+        <maml:description>
+          <maml:para>Initial delay in milliseconds between registry retries.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryMaxDelayMs</maml:name>
+        <maml:description>
+          <maml:para>Maximum delay in milliseconds between registry retries when using backoff.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryJitterMs</maml:name>
+        <maml:description>
+          <maml:para>Jitter in milliseconds added to registry retry delays.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -495,6 +565,13 @@
         <maml:code>Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'</maml:code>
         <maml:remarks>
           <maml:para>Sets registry connection defaults for a specific server.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryPolicy Practical -RetryCount 3 -RetryDelayMs 100 -RetryMaxDelayMs 1000 -RetryJitterMs 100</maml:code>
+        <maml:remarks>
+          <maml:para>Configures retry/backoff behavior for remote registry operations.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

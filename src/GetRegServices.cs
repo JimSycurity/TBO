@@ -74,35 +74,37 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var basePath = string.IsNullOrWhiteSpace(this.Path) ? DefaultServicesPath : this.Path;
 			var parsedPath = ParseRegistryPath(basePath, nameof(this.Path));
 
-			using var session = OpenRegistrySession(smb, cancellationToken);
-			using var servicesKey = OpenRegistryKey(
-				session.Client,
-				parsedPath,
-				RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
-				cancellationToken);
-
-			var keyInfo = servicesKey.QueryInfo(cancellationToken).GetAwaiter().GetResult();
-			var requestedNames = FilterNames(this.Name);
-			if (requestedNames.Count > 0)
+			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				ProcessRequestedNames(smb, session.Client, parsedPath, servicesKey, keyInfo, requestedNames, cancellationToken);
-				return;
-			}
-
-			var subkeys = CollectServiceSubkeys(smb, servicesKey, keyInfo, parsedPath, cancellationToken);
-			foreach (var subkey in subkeys)
-			{
-				if (string.IsNullOrWhiteSpace(subkey.KeyName))
-					continue;
-
-				TryWriteServiceInfo(
-					smb,
+				using var servicesKey = OpenRegistryKey(
 					session.Client,
 					parsedPath,
-					subkey.KeyName,
-					cancellationToken,
-					warnOnMissing: false);
-			}
+					RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
+					cancellationToken);
+
+				var keyInfo = servicesKey.QueryInfo(cancellationToken).GetAwaiter().GetResult();
+				var requestedNames = FilterNames(this.Name);
+				if (requestedNames.Count > 0)
+				{
+					ProcessRequestedNames(smb, session.Client, parsedPath, servicesKey, keyInfo, requestedNames, cancellationToken);
+					return;
+				}
+
+				var subkeys = CollectServiceSubkeys(smb, servicesKey, keyInfo, parsedPath, cancellationToken);
+				foreach (var subkey in subkeys)
+				{
+					if (string.IsNullOrWhiteSpace(subkey.KeyName))
+						continue;
+
+					TryWriteServiceInfo(
+						smb,
+						session.Client,
+						parsedPath,
+						subkey.KeyName,
+						cancellationToken,
+						warnOnMissing: false);
+				}
+			});
 		}
 
 		private void ProcessRequestedNames(

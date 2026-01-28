@@ -106,6 +106,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
+		private void ExecuteRegistryOperation(string serverName, CancellationToken token, Action<RemoteRegistrySession> action)
+		{
+			var smb = GetSmbProviderInfo();
+			RegistryRetryHelper.Execute(smb, serverName, token, action);
+		}
+
+		private TResult ExecuteRegistryOperation<TResult>(string serverName, CancellationToken token, Func<RemoteRegistrySession, TResult> func)
+		{
+			var smb = GetSmbProviderInfo();
+			return RegistryRetryHelper.Execute(smb, serverName, token, func);
+		}
+
 		protected override object NewDriveDynamicParameters()
 			=> new SmbConnectionParameters();
 
@@ -149,10 +161,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return true;
 
 			return this.BeginOperation(token =>
-			{
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				return TryOpenKey(session.Client, RegistryPathParser.Parse(providerPath, nameof(path)), RegistryAccessRights.QueryValue, token) != null;
-			});
+				ExecuteRegistryOperation(
+					drive.ServerName,
+					token,
+					session => TryOpenKey(session.Client, RegistryPathParser.Parse(providerPath, nameof(path)), RegistryAccessRights.QueryValue, token) != null));
 		}
 
 		protected override bool ItemExists(string path)
@@ -162,16 +174,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return true;
 
 			return this.BeginOperation(token =>
-			{
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
+				ExecuteRegistryOperation(
+					drive.ServerName,
+					token,
+					session =>
+					{
+						var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
 
-				using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
-				if (key != null)
-					return true;
+						using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
+						if (key != null)
+							return true;
 
-				return TryValueExists(session.Client, parsed, token);
-			});
+						return TryValueExists(session.Client, parsed, token);
+					}));
 		}
 
 		protected override void GetItem(string path)
@@ -190,23 +205,25 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					return;
 				}
 
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys, token);
-				if (key != null)
+				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					var info = key.QueryInfo(token).GetAwaiter().GetResult();
-					this.WriteItemObject(new TboRegistryKeyInfo(drive.ServerName, parsed.KeyPath, info), parsed.KeyPath, true);
-					return;
-				}
+					using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys, token);
+					if (key != null)
+					{
+						var info = key.QueryInfo(token).GetAwaiter().GetResult();
+						this.WriteItemObject(new TboRegistryKeyInfo(drive.ServerName, parsed.KeyPath, info), parsed.KeyPath, true);
+						return;
+					}
 
-				if (TryGetValue(session.Client, parsed, token, out var valueInfo, out var parentKeyPath))
-				{
-					var itemPath = CombineProviderPath(parentKeyPath, NormalizeValueName(valueInfo.Name));
-					this.WriteItemObject(new TboRegistryValueInfo(drive.ServerName, parentKeyPath, valueInfo), itemPath, false);
-					return;
-				}
+					if (TryGetValue(session.Client, parsed, token, out var valueInfo, out var parentKeyPath))
+					{
+						var itemPath = CombineProviderPath(parentKeyPath, NormalizeValueName(valueInfo.Name));
+						this.WriteItemObject(new TboRegistryValueInfo(drive.ServerName, parentKeyPath, valueInfo), itemPath, false);
+						return;
+					}
 
-				throw new ItemNotFoundException($"Registry path not found: {parsed.KeyPath}");
+					throw new ItemNotFoundException($"Registry path not found: {parsed.KeyPath}");
+				});
 			});
 		}
 
@@ -226,43 +243,45 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this.BeginOperation(token =>
 			{
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue, token);
-				var childParams = this.DynamicParameters as TboRegGetChildItemParams;
-				var includeValues = childParams?.IncludeValues.IsPresent ?? false;
-				var includeData = childParams?.IncludeData.IsPresent ?? false;
-				if (includeData)
-					includeValues = true;
-
-				foreach (var subkey in EnumerateSubkeys(key, token))
+				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					var propertyNames = Array.Empty<string>();
-					try
+					using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue, token);
+					var childParams = this.DynamicParameters as TboRegGetChildItemParams;
+					var includeValues = childParams?.IncludeValues.IsPresent ?? false;
+					var includeData = childParams?.IncludeData.IsPresent ?? false;
+					if (includeData)
+						includeValues = true;
+
+					foreach (var subkey in EnumerateSubkeys(key, token))
 					{
-						using var subkeyHandle = key.OpenSubkey(subkey.KeyName, RegistryAccessRights.QueryValue, BackupOptions, token).GetAwaiter().GetResult();
-						propertyNames = CollectValueNames(subkeyHandle, token);
-					}
-					catch (OperationCanceledException)
-					{
-						throw;
-					}
-					catch
-					{
+						var propertyNames = Array.Empty<string>();
+						try
+						{
+							using var subkeyHandle = key.OpenSubkey(subkey.KeyName, RegistryAccessRights.QueryValue, BackupOptions, token).GetAwaiter().GetResult();
+							propertyNames = CollectValueNames(subkeyHandle, token);
+						}
+						catch (OperationCanceledException)
+						{
+							throw;
+						}
+						catch
+						{
+						}
+
+						var item = new TboRegistrySubkeyInfo(drive.ServerName, parsed.KeyPath, subkey, propertyNames);
+						this.WriteItemObject(item, item.KeyPath, true);
 					}
 
-					var item = new TboRegistrySubkeyInfo(drive.ServerName, parsed.KeyPath, subkey, propertyNames);
-					this.WriteItemObject(item, item.KeyPath, true);
-				}
-
-				if (includeValues)
-				{
-					foreach (var value in EnumerateValues(key, includeData, token))
+					if (includeValues)
 					{
-						var normalizedName = NormalizeValueName(value.Name);
-						var valueInfo = new TboRegistryValueInfo(drive.ServerName, parsed.KeyPath, value);
-						this.WriteItemObject(valueInfo, CombineProviderPath(parsed.KeyPath, normalizedName), false);
+						foreach (var value in EnumerateValues(key, includeData, token))
+						{
+							var normalizedName = NormalizeValueName(value.Name);
+							var valueInfo = new TboRegistryValueInfo(drive.ServerName, parsed.KeyPath, value);
+							this.WriteItemObject(valueInfo, CombineProviderPath(parsed.KeyPath, normalizedName), false);
+						}
 					}
-				}
+				});
 			});
 		}
 
@@ -273,13 +292,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return RootKeys.Length > 0;
 
 			return this.BeginOperation(token =>
-			{
-				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys, token);
-				var info = key.QueryInfo(token).GetAwaiter().GetResult();
-				return info.SubkeyCount > 0 || info.ValueCount > 0;
-			});
+				ExecuteRegistryOperation(
+					drive.ServerName,
+					token,
+					session =>
+					{
+						var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
+						using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys, token);
+						var info = key.QueryInfo(token).GetAwaiter().GetResult();
+						return info.SubkeyCount > 0 || info.ValueCount > 0;
+					}));
 		}
 
 		protected override void NewItem(string path, string itemTypeName, object newItemValue)
@@ -303,18 +325,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var subkeyName = RegistryPath.GetSubkeyNameFromPath(subkeyPath);
 				var parentSpec = new RegistryPathSpec(parsed.RootKey, parsed.RootName, parentPath);
 
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				using var parentKey = OpenRegistryKey(
-					session.Client,
-					parentSpec,
-					RegistryAccessRights.CreateSubkey,
-					RegistryAccessRights.EnumerateSubkeys,
-					token);
+				ExecuteRegistryOperation(drive.ServerName, token, session =>
+				{
+					using var parentKey = OpenRegistryKey(
+						session.Client,
+						parentSpec,
+						RegistryAccessRights.CreateSubkey,
+						RegistryAccessRights.EnumerateSubkeys,
+						token);
 
-				var createAccess = RegistryAccessRights.CreateSubkey | RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys;
-				using var created = parentKey.CreateSubkey(subkeyName, createAccess, BackupOptions, token).GetAwaiter().GetResult();
-				var info = created.QueryInfo(token).GetAwaiter().GetResult();
-				this.WriteItemObject(new TboRegistryKeyInfo(drive.ServerName, parsed.KeyPath, info), parsed.KeyPath, true);
+					var createAccess = RegistryAccessRights.CreateSubkey | RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys;
+					using var created = parentKey.CreateSubkey(subkeyName, createAccess, BackupOptions, token).GetAwaiter().GetResult();
+					var info = created.QueryInfo(token).GetAwaiter().GetResult();
+					this.WriteItemObject(new TboRegistryKeyInfo(drive.ServerName, parsed.KeyPath, info), parsed.KeyPath, true);
+				});
 			});
 		}
 
@@ -327,23 +351,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this.BeginOperation(token =>
 			{
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
-				using var session = OpenRegistrySession(drive.ServerName, token);
-
-				var existingKey = TryOpenKey(session.Client, parsed, RegistryAccessRights.EnumerateSubkeys, token);
-				if (existingKey != null)
+				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					existingKey.Dispose();
-					RemoveRegistryKey(session.Client, parsed, recurse, token);
-					return;
-				}
+					var existingKey = TryOpenKey(session.Client, parsed, RegistryAccessRights.EnumerateSubkeys, token);
+					if (existingKey != null)
+					{
+						existingKey.Dispose();
+						RemoveRegistryKey(session.Client, parsed, recurse, token);
+						return;
+					}
 
-				if (TryValueExists(session.Client, parsed, token))
-				{
-					RemoveRegistryValue(session.Client, parsed, token);
-					return;
-				}
+					if (TryValueExists(session.Client, parsed, token))
+					{
+						RemoveRegistryValue(session.Client, parsed, token);
+						return;
+					}
 
-				throw new ItemNotFoundException($"Registry path not found: {parsed.KeyPath}");
+					throw new ItemNotFoundException($"Registry path not found: {parsed.KeyPath}");
+				});
 			});
 		}
 
@@ -356,29 +381,31 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this.BeginOperation(token =>
 			{
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
-
-				var output = new PSObject();
-				if (providerSpecificPickList != null && providerSpecificPickList.Count > 0)
+				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					foreach (var entry in providerSpecificPickList)
-					{
-						var valueName = DenormalizeValueName(entry);
-						var valueInfo = key.GetValue(valueName, token).GetAwaiter().GetResult();
-						output.Properties.Add(new PSNoteProperty(NormalizeValueName(valueInfo.Name), valueInfo.TypedValue));
-					}
-				}
-				else
-				{
-					var values = EnumerateValues(key, includeData: true, token);
-					foreach (var valueInfo in values)
-					{
-						output.Properties.Add(new PSNoteProperty(NormalizeValueName(valueInfo.Name), valueInfo.TypedValue));
-					}
-				}
+					using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
 
-				this.WritePropertyObject(output, parsed.KeyPath);
+					var output = new PSObject();
+					if (providerSpecificPickList != null && providerSpecificPickList.Count > 0)
+					{
+						foreach (var entry in providerSpecificPickList)
+						{
+							var valueName = DenormalizeValueName(entry);
+							var valueInfo = key.GetValue(valueName, token).GetAwaiter().GetResult();
+							output.Properties.Add(new PSNoteProperty(NormalizeValueName(valueInfo.Name), valueInfo.TypedValue));
+						}
+					}
+					else
+					{
+						var values = EnumerateValues(key, includeData: true, token);
+						foreach (var valueInfo in values)
+						{
+							output.Properties.Add(new PSNoteProperty(NormalizeValueName(valueInfo.Name), valueInfo.TypedValue));
+						}
+					}
+
+					this.WritePropertyObject(output, parsed.KeyPath);
+				});
 			});
 		}
 
@@ -397,22 +424,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this.BeginOperation(token =>
 			{
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				using var key = OpenRegistryKey(
-					session.Client,
-					parsed,
-					RegistryAccessRights.SetValue,
-					RegistryAccessRights.EnumerateSubkeys,
-					token);
-
-				var setParams = this.DynamicParameters as TboRegSetPropertyParams;
-				foreach (var entry in EnumeratePropertyValues(propertyValue))
+				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					var valueName = DenormalizeValueName(entry.Key);
-					var valueType = ResolveValueType(entry.Value, setParams?.Type);
-					var data = EncodeValue(valueType, entry.Value);
-					key.SetValue(valueName, valueType, data, token).GetAwaiter().GetResult();
-				}
+					using var key = OpenRegistryKey(
+						session.Client,
+						parsed,
+						RegistryAccessRights.SetValue,
+						RegistryAccessRights.EnumerateSubkeys,
+						token);
+
+					var setParams = this.DynamicParameters as TboRegSetPropertyParams;
+					foreach (var entry in EnumeratePropertyValues(propertyValue))
+					{
+						var valueName = DenormalizeValueName(entry.Key);
+						var valueType = ResolveValueType(entry.Value, setParams?.Type);
+						var data = EncodeValue(valueType, entry.Value);
+						key.SetValue(valueName, valueType, data, token).GetAwaiter().GetResult();
+					}
+				});
 			});
 		}
 
@@ -440,15 +469,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this.BeginOperation(token =>
 			{
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
-				using var session = OpenRegistrySession(drive.ServerName, token);
-				using var key = OpenRegistryKey(
-					session.Client,
-					parsed,
-					RegistryAccessRights.SetValue,
-					RegistryAccessRights.EnumerateSubkeys,
-					token);
-				var valueName = DenormalizeValueName(propertyName);
-				key.DeleteValue(valueName, token).GetAwaiter().GetResult();
+				ExecuteRegistryOperation(drive.ServerName, token, session =>
+				{
+					using var key = OpenRegistryKey(
+						session.Client,
+						parsed,
+						RegistryAccessRights.SetValue,
+						RegistryAccessRights.EnumerateSubkeys,
+						token);
+					var valueName = DenormalizeValueName(propertyName);
+					key.DeleteValue(valueName, token).GetAwaiter().GetResult();
+				});
 			});
 		}
 
@@ -488,16 +519,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return this.BeginOperation(token =>
 			{
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
-				using var session = OpenRegistrySession(drive.ServerName, token);
+				return ExecuteRegistryOperation(
+					drive.ServerName,
+					token,
+					session =>
+					{
+						if (TryGetValue(session.Client, parsed, token, out var valueInfo, out _))
+							return (IContentReader)new TboRegContentReader(valueInfo);
 
-				if (TryGetValue(session.Client, parsed, token, out var valueInfo, out _))
-					return (IContentReader)new TboRegContentReader(valueInfo);
+						using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
+						if (key != null)
+							throw new NotSupportedException("Get-Content requires a registry value path. Use Get-ChildItem or Get-ItemProperty for keys.");
 
-				using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
-				if (key != null)
-					throw new NotSupportedException("Get-Content requires a registry value path. Use Get-ChildItem or Get-ItemProperty for keys.");
-
-				throw new ItemNotFoundException($"Registry value not found: {parsed.KeyPath}");
+						throw new ItemNotFoundException($"Registry value not found: {parsed.KeyPath}");
+					});
 			});
 		}
 
@@ -625,12 +660,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private SmbProviderInfo GetSmbProviderInfo()
 			=> (SmbProviderInfo)this.SessionState.Provider.GetOne(SmbProvider.ProviderName);
-
-		private RemoteRegistrySession OpenRegistrySession(string serverName, CancellationToken cancellationToken)
-		{
-			var smb = GetSmbProviderInfo();
-			return smb.OpenRemoteRegistrySessionAsync(serverName, cancellationToken).GetAwaiter().GetResult();
-		}
 
 		private static RegistryKey OpenRegistryKey(
 			RemoteRegistryClient client,

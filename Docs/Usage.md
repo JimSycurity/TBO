@@ -112,6 +112,7 @@ Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -HostNa
 Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
 Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -TicketCache C:\temp\krb5cc
 Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -AesKey 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef -Kdc corp1-dc01.corp1.lab.home-labs.lol
+Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryPolicy Practical -RetryCount 3 -RetryDelayMs 100 -RetryMaxDelayMs 1000 -RetryJitterMs 100
 ```
 
 ### Copy-TBOSmbItem

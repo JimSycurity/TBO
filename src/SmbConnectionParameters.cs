@@ -29,7 +29,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				CompressionCapabilities = CompressionCaps.None,
 				CompressionAlgorithms = Smb2ConnectionOptions.DefaultCompressionAlgorithms,
 				KdcPort = 88,
-				TicketCache = Environment.GetEnvironmentVariable(KerberosClient.Krb5CacheVariableName)
+				TicketCache = Environment.GetEnvironmentVariable(KerberosClient.Krb5CacheVariableName),
+				RegistryRetryPolicy = RegistryRetryPolicy.Practical,
+				RegistryRetryCount = 3,
+				RegistryRetryDelayMs = 100,
+				RegistryRetryMaxDelayMs = 1000,
+				RegistryRetryJitterMs = 100
 			};
 		}
 
@@ -64,6 +69,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public CompressionAlgorithm[]? CompressionAlgorithms { get; set; }
 
+		[Parameter]
+		[Alias("RetryPolicy", "RegRetryPolicy")]
+		public RegistryRetryPolicy? RegistryRetryPolicy { get; set; }
+		[Parameter]
+		[Alias("RetryCount", "RegRetryCount")]
+		public int? RegistryRetryCount { get; set; }
+		[Parameter]
+		[Alias("RetryDelayMs", "RegRetryDelayMs")]
+		public int? RegistryRetryDelayMs { get; set; }
+		[Parameter]
+		[Alias("RetryMaxDelayMs", "RegRetryMaxDelayMs")]
+		public int? RegistryRetryMaxDelayMs { get; set; }
+		[Parameter]
+		[Alias("RetryJitterMs", "RegRetryJitterMs")]
+		public int? RegistryRetryJitterMs { get; set; }
+
 		public SmbConnectionParameters MergeOnto(SmbConnectionParameters baseParams)
 		{
 			if (baseParams is null) throw new ArgumentNullException(nameof(baseParams));
@@ -84,6 +105,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				SigningAlgorithms = this.SigningAlgorithms ?? baseParams.SigningAlgorithms,
 				CompressionCapabilities = this.CompressionCapabilities ?? baseParams.CompressionCapabilities,
 				CompressionAlgorithms = this.CompressionAlgorithms ?? baseParams.CompressionAlgorithms,
+				RegistryRetryPolicy = this.RegistryRetryPolicy ?? baseParams.RegistryRetryPolicy,
+				RegistryRetryCount = this.RegistryRetryCount ?? baseParams.RegistryRetryCount,
+				RegistryRetryDelayMs = this.RegistryRetryDelayMs ?? baseParams.RegistryRetryDelayMs,
+				RegistryRetryMaxDelayMs = this.RegistryRetryMaxDelayMs ?? baseParams.RegistryRetryMaxDelayMs,
+				RegistryRetryJitterMs = this.RegistryRetryJitterMs ?? baseParams.RegistryRetryJitterMs,
 
 				UserName = this.UserName ?? baseParams.UserName,
 				UserDomain = this.UserDomain ?? baseParams.UserDomain,
