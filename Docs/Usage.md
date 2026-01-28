@@ -285,6 +285,7 @@ Enumerates service registry keys (defaults to HKLM\SYSTEM\CurrentControlSet\Serv
 ```powershell
 Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol
 Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsWindows
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
 ```
 
 #### Get-TBORegChildItem

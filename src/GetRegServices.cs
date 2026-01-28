@@ -62,6 +62,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter(Position = 1)]
 		public string Path { get; set; } = DefaultServicesPath;
 
+		[Parameter(Position = 2)]
+		[Alias("ServiceName")]
+		public string[]? Name { get; set; }
+
 		[Parameter]
 		public SwitchParameter AsWindows { get; set; }
 
@@ -77,6 +81,93 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
 				cancellationToken);
 
+			var keyInfo = servicesKey.QueryInfo(cancellationToken).GetAwaiter().GetResult();
+			var requestedNames = FilterNames(this.Name);
+			if (requestedNames.Count > 0)
+			{
+				ProcessRequestedNames(smb, session.Client, parsedPath, servicesKey, keyInfo, requestedNames, cancellationToken);
+				return;
+			}
+
+			var subkeys = CollectServiceSubkeys(smb, servicesKey, keyInfo, parsedPath, cancellationToken);
+			foreach (var subkey in subkeys)
+			{
+				if (string.IsNullOrWhiteSpace(subkey.KeyName))
+					continue;
+
+				TryWriteServiceInfo(
+					smb,
+					session.Client,
+					parsedPath,
+					subkey.KeyName,
+					cancellationToken,
+					warnOnMissing: false);
+			}
+		}
+
+		private void ProcessRequestedNames(
+			ISmbProviderInfo smb,
+			RemoteRegistryClient client,
+			RegistryPathSpec servicesPath,
+			RegistryKey servicesKey,
+			RegistryKeyInfo servicesInfo,
+			List<string> requestedNames,
+			CancellationToken cancellationToken)
+		{
+			var exactNames = new List<string>();
+			var wildcardPatterns = new List<WildcardPattern>();
+			var wildcardInputs = new List<string>();
+			foreach (var name in requestedNames)
+			{
+				if (WildcardPattern.ContainsWildcardCharacters(name))
+				{
+					wildcardPatterns.Add(new WildcardPattern(name, WildcardOptions.IgnoreCase));
+					wildcardInputs.Add(name);
+				}
+				else
+					exactNames.Add(name);
+			}
+
+			var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var name in exactNames)
+			{
+				if (string.IsNullOrWhiteSpace(name))
+					continue;
+
+				if (TryWriteServiceInfo(smb, client, servicesPath, name, cancellationToken, warnOnMissing: true))
+					emitted.Add(name);
+			}
+
+			if (wildcardPatterns.Count == 0)
+				return;
+
+			var subkeys = CollectServiceSubkeys(smb, servicesKey, servicesInfo, servicesPath, cancellationToken);
+			var wildcardMatched = false;
+			foreach (var subkey in subkeys)
+			{
+				var keyName = subkey.KeyName;
+				if (string.IsNullOrWhiteSpace(keyName) || emitted.Contains(keyName))
+					continue;
+
+				if (!MatchesAnyPattern(wildcardPatterns, keyName))
+					continue;
+
+				wildcardMatched = true;
+				if (TryWriteServiceInfo(smb, client, servicesPath, keyName, cancellationToken, warnOnMissing: false))
+					emitted.Add(keyName);
+			}
+
+			if (!wildcardMatched)
+				this.WriteWarning($"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
+		}
+
+		private List<RegistrySubkeyInfo> CollectServiceSubkeys(
+			ISmbProviderInfo smb,
+			RegistryKey servicesKey,
+			RegistryKeyInfo servicesInfo,
+			RegistryPathSpec servicesPath,
+			CancellationToken cancellationToken)
+		{
 			List<RegistrySubkeyInfo> subkeys;
 			try
 			{
@@ -88,63 +179,116 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw;
 			}
 
-			foreach (var subkey in subkeys)
+			if (servicesInfo.SubkeyCount > 0 && subkeys.Count != servicesInfo.SubkeyCount)
 			{
-				if (string.IsNullOrEmpty(subkey.KeyName))
-					continue;
-
-				try
-				{
-					var serviceSpec = new RegistryPathSpec(
-						parsedPath.RootKey,
-						parsedPath.RootName,
-						CombineSubkeyPath(parsedPath.SubkeyPath, subkey.KeyName));
-
-					using var serviceKey = OpenRegistryKey(
-						session.Client,
-						serviceSpec,
-						RegistryAccessRights.QueryValue,
-						cancellationToken);
-
-					var values = LoadValues(serviceKey, cancellationToken);
-					PopulateMissingValues(values, serviceKey, cancellationToken);
-
-					var imagePath = TryGetString(values, "ImagePath");
-					var objectName = TryGetString(values, "ObjectName");
-					var displayName = TryGetString(values, "DisplayName");
-					var start = TryGetInt(values, "Start");
-					var type = TryGetInt(values, "Type");
-					var errorControl = TryGetInt(values, "ErrorControl");
-
-					byte[]? sdBytes = null;
-					object? sd = null;
-					TryReadSecurityDescriptor(
-						smb,
-						session.Client,
-						serviceSpec,
-						cancellationToken,
-						out sdBytes,
-						out sd);
-
-					var keyPath = serviceSpec.KeyPath;
-					this.WriteObject(new TboRegServiceInfo(
-						this.ServerName,
-						subkey.KeyName,
-						keyPath,
-						imagePath,
-						objectName,
-						start,
-						type,
-						errorControl,
-						displayName,
-						sd,
-						sdBytes));
-				}
-				catch (Exception ex)
-				{
-					smb.LogException($"Get-TBORegServices failed to read service '{subkey.KeyName}'", ex);
-				}
+				this.WriteWarning(
+					$"Get-TBORegServices enumerated {subkeys.Count} of {servicesInfo.SubkeyCount} subkeys under {servicesPath.KeyPath}. Some services may be missing.");
 			}
+
+			return subkeys;
+		}
+
+		private static List<string> FilterNames(string[]? names)
+		{
+			if (names == null || names.Length == 0)
+				return new List<string>();
+
+			var filtered = new List<string>(names.Length);
+			foreach (var name in names)
+			{
+				if (!string.IsNullOrWhiteSpace(name))
+					filtered.Add(name.Trim());
+			}
+
+			return filtered;
+		}
+
+		private bool TryWriteServiceInfo(
+			ISmbProviderInfo smb,
+			RemoteRegistryClient client,
+			RegistryPathSpec basePath,
+			string serviceName,
+			CancellationToken cancellationToken,
+			bool warnOnMissing)
+		{
+			try
+			{
+				var serviceSpec = new RegistryPathSpec(
+					basePath.RootKey,
+					basePath.RootName,
+					CombineSubkeyPath(basePath.SubkeyPath, serviceName));
+
+				using var serviceKey = OpenRegistryKey(
+					client,
+					serviceSpec,
+					RegistryAccessRights.QueryValue,
+					cancellationToken);
+
+				var values = LoadValues(serviceKey, cancellationToken);
+				PopulateMissingValues(values, serviceKey, cancellationToken);
+
+				var imagePath = TryGetString(values, "ImagePath");
+				var objectName = TryGetString(values, "ObjectName");
+				var displayName = TryGetString(values, "DisplayName");
+				var start = TryGetInt(values, "Start");
+				var type = TryGetInt(values, "Type");
+				var errorControl = TryGetInt(values, "ErrorControl");
+
+				byte[]? sdBytes = null;
+				object? sd = null;
+				TryReadSecurityDescriptor(
+					smb,
+					client,
+					serviceSpec,
+					cancellationToken,
+					out sdBytes,
+					out sd);
+
+				this.WriteObject(new TboRegServiceInfo(
+					this.ServerName,
+					serviceName,
+					serviceSpec.KeyPath,
+					imagePath,
+					objectName,
+					start,
+					type,
+					errorControl,
+					displayName,
+					sd,
+					sdBytes));
+
+				return true;
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex))
+			{
+				if (warnOnMissing)
+					this.WriteWarning($"Service key not found: {basePath.KeyPath}\\{serviceName}");
+			}
+			catch (Exception ex)
+			{
+				smb.LogException($"Get-TBORegServices failed to read service '{serviceName}'", ex);
+				this.WriteWarning($"Get-TBORegServices failed to read service '{serviceName}': {ex.Message}");
+			}
+
+			return false;
+		}
+
+		private static bool MatchesAnyPattern(IReadOnlyList<WildcardPattern> patterns, string value)
+		{
+			foreach (var pattern in patterns)
+			{
+				if (pattern.IsMatch(value))
+					return true;
+			}
+
+			return false;
+		}
+
+		private static bool IsMissingKey(Win32Exception ex)
+		{
+			return ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
+				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND
+				or (int)Win32ErrorCode.ERROR_BAD_PATHNAME;
 		}
 
 		private void TryReadSecurityDescriptor(
