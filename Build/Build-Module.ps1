@@ -34,15 +34,16 @@ if (-not $SkipTests) {
 	}
 	Write-Host "Running Pester tests..." -ForegroundColor DarkGray
 	$testPath = Join-Path $repoRoot 'test\powershell'
-$testCommand = @'
+	$testCommand = @'
 $ErrorActionPreference = 'Stop'
 Import-Module Pester -ErrorAction Stop
 $result = Invoke-Pester -Path '__TEST_PATH__' -PassThru
 if ($result.FailedCount -gt 0) { exit 1 }
 '@
 	$testCommand = $testCommand.Replace('__TEST_PATH__', $testPath)
-	$null = & pwsh -NoProfile -Command $testCommand
-	if ($LASTEXITCODE -ne 0) {
+	& pwsh -NoProfile -Command $testCommand 2>&1 | ForEach-Object { $_ }
+	$testExitCode = $LASTEXITCODE
+	if ($testExitCode -ne 0) {
 		throw "Pester tests failed."
 	}
 }
