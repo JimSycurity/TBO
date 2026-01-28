@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Management.Automation;
+using System.Security.AccessControl;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Winterop;
@@ -67,10 +68,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string[]? Name { get; set; }
 
 		[Parameter]
+		public SwitchParameter AsSddl { get; set; }
+
+		[Parameter]
 		public SwitchParameter AsWindows { get; set; }
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			if (this.AsSddl.IsPresent && this.AsWindows.IsPresent)
+				throw new ArgumentException("Only one of -AsSddl or -AsWindows can be specified.");
+
 			var basePath = string.IsNullOrWhiteSpace(this.Path) ? DefaultServicesPath : this.Path;
 			var parsedPath = ParseRegistryPath(basePath, nameof(this.Path));
 
@@ -353,9 +360,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (sdBytes == null || sdBytes.Length == 0)
 					return;
 
-				sd = this.AsWindows.IsPresent
-					? (object?)TBOSD.FromRegistryBinaryAsWindows(sdBytes)
-					: TBOSD.FromRegistryBinary(sdBytes);
+				if (this.AsSddl.IsPresent)
+				{
+					sd = OperatingSystem.IsWindows()
+						? SecurityDescriptorHelpers.FromRegistryBinaryAsWindows(sdBytes).GetSddlForm(AccessControlSections.All)
+						: TBOSD.FromRegistryBinary(sdBytes).ToSddlString(Titanis.Winterop.Security.SecurityDescriptorSections.All);
+				}
+				else if (this.AsWindows.IsPresent)
+				{
+					sd = TBOSD.FromRegistryBinaryAsWindows(sdBytes);
+				}
+				else
+				{
+					sd = TBOSD.FromRegistryBinary(sdBytes);
+				}
 			}
 			catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
 				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND
@@ -365,6 +383,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			catch (Exception ex)
 			{
 				smb.LogException($"Get-TBORegServices failed to read security descriptor for '{serviceSpec.KeyPath}'", ex);
+				this.WriteWarning($"Get-TBORegServices failed to read security descriptor for '{serviceSpec.KeyPath}'. SecurityDescriptorBytes is available; try -AsWindows or -AsSddl for raw output.");
 			}
 		}
 

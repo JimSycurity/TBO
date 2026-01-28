@@ -16,8 +16,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (value is null)
 				throw new ArgumentNullException(nameof(value));
 
-			var descriptor = SecurityDescriptorHelpers.FromRegistryBinary(value);
-			return new RawSecurityDescriptor(descriptor.ToByteArray(), 0);
+			return SecurityDescriptorHelpers.FromRegistryBinaryAsWindows(value);
 		}
 
 		public static SecurityDescriptor FromRegistryBase64(string base64)

@@ -1536,6 +1536,10 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
           <command:parameterValue>String[]</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
+          <maml:name>AsSddl</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
           <maml:name>AsWindows</maml:name>
           <command:parameterValue>Switch</command:parameterValue>
         </command:parameter>
@@ -1564,6 +1568,13 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
         <command:parameterValue>String[]</command:parameterValue>
       </command:parameter>
       <command:parameter>
+        <maml:name>AsSddl</maml:name>
+        <maml:description>
+          <maml:para>Return the security descriptor as an SDDL string.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
         <maml:name>AsWindows</maml:name>
         <maml:description>
           <maml:para>Return the security descriptor as a Windows RawSecurityDescriptor.</maml:para>
@@ -1588,6 +1599,13 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       </command:example>
       <command:example>
         <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsSddl</maml:code>
+        <maml:remarks>
+          <maml:para>Returns security descriptors as SDDL strings.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
         <maml:code>Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'</maml:code>
         <maml:remarks>
           <maml:para>Filters services using wildcard patterns.</maml:para>

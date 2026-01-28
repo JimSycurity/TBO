@@ -66,6 +66,26 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
+		internal static RawSecurityDescriptor FromRegistryBinaryAsWindows(byte[] value)
+		{
+			if (!OperatingSystem.IsWindows())
+				throw new PlatformNotSupportedException("Windows security descriptors are only supported on Windows.");
+			if (value is null)
+				throw new ArgumentNullException(nameof(value));
+
+			try
+			{
+				return new RawSecurityDescriptor(value, 0);
+			}
+			catch (ArgumentException ex)
+			{
+				if (TryDecodeBase64(value, out var decoded))
+					return new RawSecurityDescriptor(decoded, 0);
+
+				throw new ArgumentException("Value is not a valid security descriptor or base64-encoded security descriptor.", nameof(value), ex);
+			}
+		}
+
 		internal static SecurityDescriptor FromRegistryBase64(string base64)
 		{
 			if (string.IsNullOrWhiteSpace(base64))
