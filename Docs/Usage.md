@@ -282,12 +282,14 @@ Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol
 #### Get-TBORegServices
 
 Enumerates service registry keys (defaults to HKLM\SYSTEM\CurrentControlSet\Services) and returns service metadata plus security descriptors.
+Use `-AsSddl` or `-AsWindows` to review service DACLs in alternate formats.
 
 ```powershell
 Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol
 Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsWindows
 Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsSddl
 Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*' -AsSddl | Select-Object KeyName, SecurityDescriptor
 ```
 
 #### Get-TBORegServiceDetails
@@ -302,11 +304,13 @@ Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name '
 #### Find-TBORegWeakServices
 
 Scans service security descriptors and reports AccessAllowed entries that grant service configuration rights to non-system trustees.
+The default `AccessMask` is `0x00040002` (ChangeConfig + WriteDac).
 
 ```powershell
 Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol
 Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
 Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00040002 -IncludeUninteresting
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00000002
 ```
 
 #### Get-TBORegChildItem
