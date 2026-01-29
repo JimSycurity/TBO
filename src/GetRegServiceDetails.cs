@@ -623,8 +623,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (!value.HasValue)
 				return null;
 
-			var formatted = Enum.Format(typeof(TEnum), value.Value, "F");
-			return $"{formatted} ({value.Value})";
+			var enumType = typeof(TEnum);
+			var underlyingType = Enum.GetUnderlyingType(enumType);
+			try
+			{
+				var converted = Convert.ChangeType(value.Value, underlyingType, CultureInfo.InvariantCulture);
+				var formatted = Enum.Format(enumType, converted, "F");
+				return $"{formatted} ({value.Value})";
+			}
+			catch
+			{
+				return value.Value.ToString(CultureInfo.InvariantCulture);
+			}
 		}
 
 		private static string? FormatBool(uint? value)
