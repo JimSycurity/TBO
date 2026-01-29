@@ -805,7 +805,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return null;
 
 			var typed = info.TypedValue;
-			return typed == null ? null : Convert.ToString(typed, CultureInfo.InvariantCulture);
+			if (typed != null)
+				return Convert.ToString(typed, CultureInfo.InvariantCulture);
+
+			if (info.Bytes is { Length: > 0 }
+				&& info.ValueType is RegistryValueType.String or RegistryValueType.ExpandString)
+				return TryDecodeUtf16String(info.Bytes);
+
+			return null;
 		}
 
 		private static uint? TryGetDword(Dictionary<string, RegistryValueInfo>? values, string name)
@@ -850,6 +857,25 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			var decoded = Encoding.Unicode.GetString(data);
 			return decoded.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+		}
+
+		private static string? TryDecodeUtf16String(byte[] bytes)
+		{
+			int length = bytes.Length;
+			if ((length % 2) != 0)
+				return null;
+
+			if (length >= 2 && bytes[^1] == 0 && bytes[^2] == 0)
+				length -= 2;
+
+			try
+			{
+				return Encoding.Unicode.GetString(bytes, 0, length);
+			}
+			catch
+			{
+				return null;
+			}
 		}
 
 		private static string CombineSubkeyPath(string? basePath, string childName)
