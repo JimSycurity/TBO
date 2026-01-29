@@ -43,6 +43,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string? ErrorControl { get; init; }
 		public IReadOnlyList<string>? RequiredPrivileges { get; init; }
 		public byte[]? FailureActions { get; init; }
+		public TboRegServiceFailureActionsInfo? FailureActionsInfo { get; init; }
 		public string? ServiceSidType { get; init; }
 		public string? ServiceSid { get; init; }
 		public string? LaunchProtected { get; init; }
@@ -96,6 +97,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public byte[]? SecurityDescriptorBytes { get; init; }
 		public bool? HasServiceCredential { get; init; }
 		public string? ServiceCredentialKeyPath { get; init; }
+	}
+
+	public sealed class TboRegServiceFailureActionsInfo
+	{
+		public uint ResetPeriodSeconds { get; init; }
+		public string? RebootMessage { get; init; }
+		public string? Command { get; init; }
+		public IReadOnlyList<TboRegServiceFailureActionInfo> Actions { get; init; } = Array.Empty<TboRegServiceFailureActionInfo>();
+	}
+
+	public sealed class TboRegServiceFailureActionInfo
+	{
+		public string ActionType { get; init; } = string.Empty;
+		public uint DelayMs { get; init; }
 	}
 
 	[Cmdlet(VerbsCommon.Get, "TBORegServiceDetails")]
@@ -335,6 +350,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var errorControl = FormatEnum<ServiceErrorControl>(TryGetDword(values, "ErrorControl"));
 			var requiredPrivileges = TryGetStringArray(values, "RequiredPrivileges");
 			var failureActions = TryGetBytes(values, "FailureActions");
+			var failureActionsInfo = TryParseFailureActions(failureActions);
 
 			var serviceSidType = FormatEnum<ServiceSidType>(TryGetDword(values, "ServiceSidType"));
 			var serviceSid = TryComputeServiceSid(serviceName);
@@ -420,6 +436,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				ErrorControl = errorControl,
 				RequiredPrivileges = requiredPrivileges,
 				FailureActions = failureActions,
+				FailureActionsInfo = failureActionsInfo,
 				ServiceSidType = serviceSidType,
 				ServiceSid = serviceSid,
 				LaunchProtected = launchProtected,
@@ -779,6 +796,87 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			info = default;
 			return values != null && values.TryGetValue(name, out info);
+		}
+
+		private static TboRegServiceFailureActionsInfo? TryParseFailureActions(byte[]? bytes)
+		{
+			if (bytes is not { Length: >= 20 })
+				return null;
+
+			try
+			{
+				uint resetPeriod = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(0, 4));
+				uint rebootMsgOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4, 4));
+				uint commandOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8, 4));
+				uint actionCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(12, 4));
+				uint actionsOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(16, 4));
+
+				var rebootMsg = ReadUtf16Z(bytes, rebootMsgOffset);
+				var command = ReadUtf16Z(bytes, commandOffset);
+
+				var actions = new List<TboRegServiceFailureActionInfo>();
+				if (actionCount > 0 && actionsOffset < bytes.Length)
+				{
+					ulong maxActionBytes = (ulong)actionCount * 8;
+					if (actionsOffset + maxActionBytes <= (ulong)bytes.Length)
+					{
+						var actionSpan = bytes.AsSpan((int)actionsOffset, (int)maxActionBytes);
+						for (int i = 0; i < (int)actionCount; i++)
+						{
+							var offset = i * 8;
+							int actionType = BinaryPrimitives.ReadInt32LittleEndian(actionSpan.Slice(offset, 4));
+							uint delayMs = BinaryPrimitives.ReadUInt32LittleEndian(actionSpan.Slice(offset + 4, 4));
+							actions.Add(new TboRegServiceFailureActionInfo
+							{
+								ActionType = FormatFailureActionType(actionType),
+								DelayMs = delayMs
+							});
+						}
+					}
+				}
+
+				return new TboRegServiceFailureActionsInfo
+				{
+					ResetPeriodSeconds = resetPeriod,
+					RebootMessage = rebootMsg,
+					Command = command,
+					Actions = actions
+				};
+			}
+			catch
+			{
+				return null;
+			}
+		}
+
+		private static string? ReadUtf16Z(byte[] bytes, uint offset)
+		{
+			if (offset == 0 || offset >= bytes.Length)
+				return null;
+
+			var span = bytes.AsSpan((int)offset);
+			int end = 0;
+			for (int i = 0; i + 1 < span.Length; i += 2)
+			{
+				if (span[i] == 0 && span[i + 1] == 0)
+				{
+					end = i;
+					break;
+				}
+			}
+
+			if (end == 0)
+				end = span.Length - (span.Length % 2);
+
+			return end > 0 ? Encoding.Unicode.GetString(span.Slice(0, end)) : null;
+		}
+
+		private static string FormatFailureActionType(int value)
+		{
+			if (Enum.IsDefined(typeof(ServiceFailureActionType), value))
+				return ((ServiceFailureActionType)value).ToString();
+
+			return value.ToString(CultureInfo.InvariantCulture);
 		}
 
 		private static IReadOnlyList<string>? TryGetStringArray(Dictionary<string, RegistryValueInfo>? values, string name)
