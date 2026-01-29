@@ -423,6 +423,35 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				cancellationToken,
 				out var serviceCredentialKeyPath);
 
+			if (failureActionsInfo != null
+				&& failureActions != null
+				&& failureActionsInfo.Actions?.Any(action => string.Equals(action.ActionType, nameof(ServiceFailureActionType.RunCommand), StringComparison.OrdinalIgnoreCase)) == true
+				&& string.IsNullOrWhiteSpace(failureActionsInfo.Command))
+			{
+				if (TryParseFailureActionsHeader(failureActions, out var header))
+				{
+					WriteVerbose(
+						$"FailureActions header for {serviceName}: length={failureActions.Length}, resetPeriod={header.ResetPeriodSeconds}, " +
+						$"rebootMsgOffset={header.RebootMsgOffset}, commandOffset={header.CommandOffset}, actionsOffset={header.ActionsOffset}, actionCount={header.ActionCount}.");
+				}
+
+				var candidates = CollectFailureActionsCandidates(failureActions, 12);
+				if (candidates.Count == 0)
+				{
+					WriteVerbose($"FailureActions string candidates for {serviceName}: none found.");
+				}
+				else
+				{
+					foreach (var candidate in candidates)
+					{
+						var value = candidate.Value.Length > 120
+							? candidate.Value.Substring(0, 120) + "..."
+							: candidate.Value;
+						WriteVerbose($"FailureActions candidate [{candidate.Encoding}] @0x{candidate.Offset:X}: {value}");
+					}
+				}
+			}
+
 			this.WriteObject(new TboRegServiceDetailsInfo
 			{
 				ServerName = this.ServerName,
@@ -996,6 +1025,89 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return best;
 		}
 
+		private static bool TryParseFailureActionsHeader(byte[] bytes, out FailureActionsHeader header)
+		{
+			header = default;
+			if (bytes.Length < 20)
+				return false;
+
+			header = new FailureActionsHeader(
+				BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(0, 4)),
+				BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4, 4)),
+				BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(8, 4)),
+				BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(12, 4)),
+				BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(16, 4)));
+			return true;
+		}
+
+		private static IReadOnlyList<FailureActionStringCandidate> CollectFailureActionsCandidates(byte[] bytes, int maxCount)
+		{
+			var results = new List<FailureActionStringCandidate>();
+			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+			void AddCandidate(int offset, string encoding, string value)
+			{
+				if (results.Count >= maxCount)
+					return;
+				if (string.IsNullOrWhiteSpace(value))
+					return;
+				if (!seen.Add($"{encoding}:{value}"))
+					return;
+
+				results.Add(new FailureActionStringCandidate(offset, encoding, value));
+			}
+
+			for (int i = 0; i + 1 < bytes.Length; i++)
+			{
+				if (bytes[i] == 0 && bytes[i + 1] == 0)
+					continue;
+
+				var value = TryDecodeUtf16Z(bytes, i);
+				if (!string.IsNullOrWhiteSpace(value))
+					AddCandidate(i, "UTF16", value);
+
+				int advance = 1;
+				for (int j = i; j + 1 < bytes.Length; j += 2)
+				{
+					if (bytes[j] == 0 && bytes[j + 1] == 0)
+					{
+						advance = Math.Max(1, (j - i) + 2);
+						break;
+					}
+				}
+
+				i += Math.Max(advance - 1, 0);
+				if (results.Count >= maxCount)
+					return results;
+			}
+
+			for (int i = 0; i < bytes.Length; i++)
+			{
+				if (bytes[i] == 0)
+					continue;
+
+				var value = ReadAnsiZ(bytes, i);
+				if (!string.IsNullOrWhiteSpace(value))
+					AddCandidate(i, "ANSI", value);
+
+				int advance = 1;
+				for (int j = i; j < bytes.Length; j++)
+				{
+					if (bytes[j] == 0)
+					{
+						advance = (j - i) + 1;
+						break;
+					}
+				}
+
+				i += Math.Max(advance - 1, 0);
+				if (results.Count >= maxCount)
+					return results;
+			}
+
+			return results;
+		}
+
 		private static IEnumerable<string> EnumerateUtf16ZStrings(byte[] bytes)
 		{
 			for (int i = 0; i + 1 < bytes.Length; i++)
@@ -1048,6 +1160,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static bool IsLikelyPathChar(char value)
 			=> value == ':' || value == '\\' || value == '/' || value == '.';
+
+		private readonly record struct FailureActionsHeader(
+			uint ResetPeriodSeconds,
+			uint RebootMsgOffset,
+			uint CommandOffset,
+			uint ActionCount,
+			uint ActionsOffset);
+
+		private readonly record struct FailureActionStringCandidate(int Offset, string Encoding, string Value);
 
 		private static string FormatFailureActionType(int value)
 		{
