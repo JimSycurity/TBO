@@ -111,12 +111,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				: noClobber
 					? Smb2CreateDisposition.Create
 					: Smb2CreateDisposition.OverwriteIf;
+			var desiredAccess = (uint)(
+				Smb2FileAccessRights.ReadData
+				| Smb2FileAccessRights.WriteData
+				| Smb2FileAccessRights.AppendData
+				| Smb2FileAccessRights.ReadAttributes
+				| Smb2FileAccessRights.WriteAttributes
+				| Smb2FileAccessRights.ReadEa
+				| Smb2FileAccessRights.WriteEa
+				| Smb2FileAccessRights.ReadControl
+				| Smb2FileAccessRights.Synchronize);
 
 			var createInfo = new Smb2CreateInfo
 			{
 				CreateDisposition = createDisposition,
-				DesiredAccess = (uint)Smb2FileAccessRights.DefaultCreateAccess,
-				ShareAccess = Smb2ShareAccess.ReadWrite,
+				DesiredAccess = desiredAccess,
+				ShareAccess = Smb2ShareAccess.ReadWriteDelete,
 				ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
 				CreateOptions = Smb2FileCreateOptions.NonDirectory
 					| Smb2FileCreateOptions.SynchronousIoNonalert
