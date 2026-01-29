@@ -1620,7 +1620,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:verb>Get</command:verb>
       <command:noun>TBORegServiceDetails</command:noun>
       <maml:description>
-        <maml:para>Reads additional registry-backed service details such as RequiredPrivileges, LaunchProtected, FailureActions, ErrorControl, ServiceSidType, and whether an _SC_ service credential exists.</maml:para>
+        <maml:para>Reads extended registry-backed service details including core configuration, dependencies, security descriptor, Parameters subkey values, and whether an _SC_ service credential exists.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>

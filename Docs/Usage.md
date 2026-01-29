@@ -292,7 +292,7 @@ Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestSe
 
 #### Get-TBORegServiceDetails
 
-Returns additional registry-backed service metadata such as RequiredPrivileges, LaunchProtected, FailureActions, ErrorControl, ServiceSidType, and whether an _SC_ credential exists.
+Returns extended registry-backed service metadata including core configuration, dependency lists, Parameters subkey values, security descriptors, and whether an _SC_ credential exists.
 
 ```powershell
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'MDCoreSvc'
