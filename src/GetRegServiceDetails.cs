@@ -811,8 +811,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				uint actionCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(12, 4));
 				uint actionsOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(16, 4));
 
-				var rebootMsg = ReadUtf16Z(bytes, rebootMsgOffset, rebootMsgOffset, commandOffset, actionsOffset);
-				var command = ReadUtf16Z(bytes, commandOffset, rebootMsgOffset, commandOffset, actionsOffset);
+				var rebootMsg = ReadServiceString(bytes, rebootMsgOffset);
+				var command = ReadServiceString(bytes, commandOffset);
 
 				var actions = new List<TboRegServiceFailureActionInfo>();
 				if (actionCount > 0 && actionsOffset < bytes.Length)
@@ -849,26 +849,42 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static string? ReadUtf16Z(byte[] bytes, uint offset, params uint[] offsets)
+		private static string? ReadServiceString(byte[] bytes, uint offset)
 		{
 			if (offset == 0 || offset >= bytes.Length)
 				return null;
 
-			int maxEnd = bytes.Length;
-			if (offsets is { Length: > 0 })
+			var utf16 = TryDecodeUtf16Z(bytes.AsSpan((int)offset));
+			if (IsLikelyValidServiceString(utf16))
+				return utf16;
+
+			var ansi = ReadAnsiZ(bytes.AsSpan((int)offset));
+			if (IsLikelyValidServiceString(ansi))
+				return ansi;
+
+			var doubled = offset * 2;
+			if (doubled > 0 && doubled < bytes.Length)
 			{
-				for (int i = 0; i < offsets.Length; i++)
-				{
-					var candidate = offsets[i];
-					if (candidate > offset && candidate < maxEnd)
-						maxEnd = (int)candidate;
-				}
+				utf16 = TryDecodeUtf16Z(bytes.AsSpan((int)doubled));
+				if (IsLikelyValidServiceString(utf16))
+					return utf16;
+
+				ansi = ReadAnsiZ(bytes.AsSpan((int)doubled));
+				if (IsLikelyValidServiceString(ansi))
+					return ansi;
 			}
 
-			if (maxEnd <= offset)
+			return utf16 ?? ansi;
+		}
+
+		private static string? TryDecodeUtf16Z(ReadOnlySpan<byte> span)
+		{
+			if (span.Length < 2)
 				return null;
 
-			var span = bytes.AsSpan((int)offset, maxEnd - (int)offset);
+			if (!LooksLikeUtf16(span))
+				return null;
+
 			int end = 0;
 			for (int i = 0; i + 1 < span.Length; i += 2)
 			{
@@ -884,6 +900,54 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			return end > 0 ? Encoding.Unicode.GetString(span.Slice(0, end)) : null;
 		}
+
+		private static string? ReadAnsiZ(ReadOnlySpan<byte> span)
+		{
+			int end = 0;
+			for (int i = 0; i < span.Length; i++)
+			{
+				if (span[i] == 0)
+				{
+					end = i;
+					break;
+				}
+			}
+
+			if (end == 0)
+				end = span.Length;
+
+			return end > 0 ? Encoding.ASCII.GetString(span.Slice(0, end)) : null;
+		}
+
+		private static bool LooksLikeUtf16(ReadOnlySpan<byte> span)
+		{
+			int pairs = Math.Min(span.Length / 2, 64);
+			if (pairs == 0)
+				return false;
+
+			int zeroHigh = 0;
+			for (int i = 0; i < pairs; i++)
+			{
+				if (span[i * 2 + 1] == 0)
+					zeroHigh++;
+			}
+
+			return zeroHigh >= pairs * 0.6;
+		}
+
+		private static bool IsLikelyValidServiceString(string? value)
+		{
+			if (string.IsNullOrWhiteSpace(value))
+				return false;
+
+			if (value.Length == 1 && !char.IsLetterOrDigit(value[0]) && !IsLikelyPathChar(value[0]))
+				return false;
+
+			return true;
+		}
+
+		private static bool IsLikelyPathChar(char value)
+			=> value == ':' || value == '\\' || value == '/' || value == '.';
 
 		private static string FormatFailureActionType(int value)
 		{
