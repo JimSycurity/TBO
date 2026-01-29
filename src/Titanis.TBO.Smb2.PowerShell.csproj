@@ -47,6 +47,7 @@
   <ItemGroup Condition=" '$(TitanisRepoRoot)' != '' ">
     <ProjectReference Include="$(TitanisRepoRoot)\src\base\Titanis.Cli\Titanis.Cli.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\base\Titanis.Winterop.FileInfo\Titanis.Winterop.FileInfo.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\base\Titanis.Winterop.Sam\Titanis.Winterop.Sam.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\Titanis.DceRpc\Titanis.DceRpc.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Mslsar\Titanis.Msrpc.Mslsar.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Msrrp\Titanis.Msrpc.Msrrp.csproj" />

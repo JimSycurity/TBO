@@ -312,6 +312,14 @@ Derives the boot key (syskey) and LSA encryption key from the remote registry.
 Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol
 ```
 
+#### Get-TBORegSamHashes
+
+Derives local SAM account hashes using the remote registry (backup semantics required).
+
+```powershell
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
+```
+
 #### Find-TBORegWeakServices
 
 Scans service security descriptors and reports AccessAllowed entries that grant service configuration rights to non-system trustees.
