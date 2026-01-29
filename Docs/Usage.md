@@ -38,7 +38,15 @@ Provider-qualified UNC paths can be used without creating a drive:
 Get-ChildItem TBO.Smb2::\\corp1-web01.corp1.lab.home-labs.lol\C$\Windows
 ```
 
-Use `Get-Help about_TBO_Smb2_Provider` for supported item types, dynamic parameters, and limitations (for example, content writing is not implemented).
+Writing text content is supported via `Out-File`, `Set-Content`, or `Add-Content`:
+
+```powershell
+'testing' | Out-File tbo:\Temp\test.txt
+Add-Content tbo:\Temp\test.txt -Value 'more'
+Get-Content tbo:\Temp\test.txt
+```
+
+Use `Get-Help about_TBO_Smb2_Provider` for supported item types, dynamic parameters, and limitations.
 
 On Windows, `Get-Acl` and `Set-Acl` work with `tbo:\` and provider-qualified UNC paths. Snapshot paths are read-only.
 

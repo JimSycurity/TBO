@@ -318,12 +318,35 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		public void ClearContent(string path)
 		{
-			throw new NotImplementedException();
+			var snapshotPath = ResolveSnapshotPath(path);
+			if (snapshotPath.HasTimeWarpToken)
+				throw new NotSupportedException("Snapshot paths are read-only.");
+
+			UncPath uncPath = snapshotPath.ResolvedPath;
+
+			this.BeginOperation(cancellationToken =>
+			{
+				using var file = (Smb2OpenFile)this.smb.SmbClient.CreateFileAsync(uncPath, new Smb2CreateInfo
+				{
+					CreateDisposition = Smb2CreateDisposition.OverwriteIf,
+					DesiredAccess = (uint)Smb2AccessRights.DefaultCreateAccess,
+					ShareAccess = Smb2ShareAccess.ReadWrite,
+					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
+					CreateOptions = Smb2FileCreateOptions.NonDirectory
+						| Smb2FileCreateOptions.SynchronousIoNonalert
+						| Smb2FileCreateOptions.OpenForBackupIntent,
+					FileAttributes = Winterop.FileAttributes.Normal,
+					TimeWarpToken = snapshotPath.TimeWarpToken
+				}, FileAccess.ReadWrite, cancellationToken).Result;
+
+				using var stream = file.GetStream(true);
+				stream.SetLength(0);
+			});
 		}
 
 		public object ClearContentDynamicParameters(string path)
 		{
-			throw new NotImplementedException();
+			return null;
 		}
 
 		public IContentReader GetContentReader(string path)
@@ -359,12 +382,48 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		public IContentWriter GetContentWriter(string path)
 		{
-			throw new NotImplementedException();
+			var snapshotPath = ResolveSnapshotPath(path);
+			if (snapshotPath.HasTimeWarpToken)
+				throw new NotSupportedException("Snapshot paths are read-only.");
+
+			UncPath uncPath = snapshotPath.ResolvedPath;
+
+			return this.BeginOperation(cancellationToken =>
+			{
+				var parms = this.DynamicParameters as SmbSetContentParams ?? new SmbSetContentParams();
+				var encoding = parms.Encoding ?? Encoding.UTF8;
+				var append = parms.Append.IsPresent;
+				var noClobber = parms.NoClobber.IsPresent && !parms.Force.IsPresent;
+				var createDisposition = append
+					? Smb2CreateDisposition.OpenIf
+					: noClobber
+						? Smb2CreateDisposition.Create
+						: Smb2CreateDisposition.OverwriteIf;
+
+				var file = (Smb2OpenFile)this.smb.SmbClient.CreateFileAsync(uncPath, new Smb2CreateInfo
+				{
+					CreateDisposition = createDisposition,
+					DesiredAccess = (uint)Smb2AccessRights.DefaultCreateAccess,
+					ShareAccess = Smb2ShareAccess.ReadWrite,
+					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
+					CreateOptions = Smb2FileCreateOptions.NonDirectory
+						| Smb2FileCreateOptions.SynchronousIoNonalert
+						| Smb2FileCreateOptions.OpenForBackupIntent,
+					FileAttributes = Winterop.FileAttributes.Normal,
+					TimeWarpToken = snapshotPath.TimeWarpToken
+				}, FileAccess.ReadWrite, cancellationToken).Result;
+
+				var stream = file.GetStream(true);
+				if (append)
+					stream.Seek(0, SeekOrigin.End);
+
+				return (IContentWriter)new SmbContentWriter(stream, encoding, parms.NoNewline.IsPresent);
+			});
 		}
 
 		public object GetContentWriterDynamicParameters(string path)
 		{
-			return null;
+			return new SmbSetContentParams();
 		}
 	}
 
