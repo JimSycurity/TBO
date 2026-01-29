@@ -30,6 +30,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		AntimalwareLight = 3
 	}
 
+	internal enum ServiceTriggerDataType
+	{
+		Binary = 1,
+		String = 2,
+		Level = 3,
+		KeywordAny = 4,
+		KeywordAll = 5
+	}
+
 	public sealed class TboRegServiceDetailsInfo
 	{
 		public string ServerName { get; init; } = string.Empty;
@@ -44,6 +53,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public IReadOnlyList<string>? RequiredPrivileges { get; init; }
 		public byte[]? FailureActions { get; init; }
 		public TboRegServiceFailureActionsInfo? FailureActionsInfo { get; init; }
+		public IReadOnlyList<TboRegServiceTriggerInfo>? TriggerInfo { get; init; }
 		public string? ServiceSidType { get; init; }
 		public string? ServiceSid { get; init; }
 		public string? LaunchProtected { get; init; }
@@ -111,6 +121,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		public string ActionType { get; init; } = string.Empty;
 		public uint DelayMs { get; init; }
+	}
+
+	public sealed class TboRegServiceTriggerInfo
+	{
+		public string KeyName { get; init; } = string.Empty;
+		public string? TriggerType { get; init; }
+		public string? Action { get; init; }
+		public Guid? Subtype { get; init; }
+		public string? SubtypeName { get; init; }
+		public IReadOnlyList<TboRegServiceTriggerDataItem>? DataItems { get; init; }
+	}
+
+	public sealed class TboRegServiceTriggerDataItem
+	{
+		public int Index { get; init; }
+		public string? DataType { get; init; }
+		public object? Data { get; init; }
+		public byte[]? DataBytes { get; init; }
 	}
 
 	[Cmdlet(VerbsCommon.Get, "TBORegServiceDetails")]
@@ -340,6 +368,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var subkeys = TryCollectSubkeyNames(smb, serviceKey, cancellationToken);
 			var parametersValues = TryLoadSubkeyValues(smb, client, serviceSpec, ParametersSubkeyName, cancellationToken);
+			var triggerInfo = TryReadTriggerInfo(smb, client, serviceSpec, cancellationToken);
 
 			var imagePath = TryGetString(values, "ImagePath");
 			var objectName = TryGetString(values, "ObjectName");
@@ -350,7 +379,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var errorControl = FormatEnum<ServiceErrorControl>(TryGetDword(values, "ErrorControl"));
 			var requiredPrivileges = TryGetStringArray(values, "RequiredPrivileges");
 			var failureActions = TryGetBytes(values, "FailureActions");
-			var failureActionsInfo = TryParseFailureActions(failureActions);
+			var failureCommand = TryGetString(values, "FailureCommand");
+			var failureActionsInfo = TryParseFailureActions(failureActions, failureCommand);
 
 			var serviceSidType = FormatEnum<ServiceSidType>(TryGetDword(values, "ServiceSidType"));
 			var serviceSid = TryComputeServiceSid(serviceName);
@@ -466,6 +496,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				RequiredPrivileges = requiredPrivileges,
 				FailureActions = failureActions,
 				FailureActionsInfo = failureActionsInfo,
+				TriggerInfo = triggerInfo,
 				ServiceSidType = serviceSidType,
 				ServiceSid = serviceSid,
 				LaunchProtected = launchProtected,
@@ -664,6 +695,80 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
+		private IReadOnlyList<TboRegServiceTriggerInfo>? TryReadTriggerInfo(
+			ISmbProviderInfo smb,
+			RemoteRegistryClient client,
+			RegistryPathSpec serviceSpec,
+			CancellationToken cancellationToken)
+		{
+			var triggerSpec = new RegistryPathSpec(
+				serviceSpec.RootKey,
+				serviceSpec.RootName,
+				CombineSubkeyPath(serviceSpec.SubkeyPath, "TriggerInfo"));
+
+			try
+			{
+				using var triggerKey = OpenRegistryKey(
+					client,
+					triggerSpec,
+					RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys,
+					cancellationToken);
+
+				var subkeys = CollectSubkeys(triggerKey, cancellationToken)
+					.Select(subkey => subkey.KeyName)
+					.Where(name => !string.IsNullOrWhiteSpace(name))
+					.ToList();
+
+				if (subkeys.Count == 0)
+					return null;
+
+				subkeys.Sort(CompareTriggerKeyNames);
+
+				var results = new List<TboRegServiceTriggerInfo>(subkeys.Count);
+				foreach (var keyName in subkeys)
+				{
+					var subkeySpec = new RegistryPathSpec(
+						triggerSpec.RootKey,
+						triggerSpec.RootName,
+						CombineSubkeyPath(triggerSpec.SubkeyPath, keyName));
+
+					using var subkey = OpenRegistryKey(client, subkeySpec, RegistryAccessRights.QueryValue, cancellationToken);
+					var values = LoadValues(subkey, cancellationToken);
+
+					var triggerType = FormatEnum<ServiceTriggerType>(TryGetDword(values, "Type"));
+					var action = FormatEnum<ServiceTriggerAction>(TryGetDword(values, "Action"));
+					var subtype = TryGetGuid(values, "Guid");
+					string? subtypeName = null;
+					if (subtype.HasValue && TriggerSubtypeNames.TryGetValue(subtype.Value, out var subtypeInfo))
+						subtypeName = subtypeInfo;
+
+					var dataItems = TryParseTriggerDataItems(values);
+
+					results.Add(new TboRegServiceTriggerInfo
+					{
+						KeyName = keyName,
+						TriggerType = triggerType,
+						Action = action,
+						Subtype = subtype,
+						SubtypeName = subtypeName,
+						DataItems = dataItems
+					});
+				}
+
+				return results;
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex))
+			{
+				return null;
+			}
+			catch (Exception ex)
+			{
+				smb.LogException($"Get-TBORegServiceDetails failed to read TriggerInfo for '{serviceSpec.KeyPath}'", ex);
+				this.WriteWarning($"Get-TBORegServiceDetails failed to read TriggerInfo for '{serviceSpec.KeyPath}': {ex.Message}");
+				return null;
+			}
+		}
+
 		private static string? FormatEnum<TEnum>(uint? value) where TEnum : struct, Enum
 		{
 			if (!value.HasValue)
@@ -727,6 +832,31 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return false;
 		}
 
+		private static int CompareTriggerKeyNames(string? left, string? right)
+		{
+			if (string.IsNullOrEmpty(left))
+				return string.IsNullOrEmpty(right) ? 0 : 1;
+			if (string.IsNullOrEmpty(right))
+				return -1;
+
+			var leftIsNumeric = TryParseTriggerIndex(left, out var leftIndex);
+			var rightIsNumeric = TryParseTriggerIndex(right, out var rightIndex);
+
+			if (leftIsNumeric && rightIsNumeric)
+				return leftIndex.CompareTo(rightIndex);
+			if (leftIsNumeric)
+				return -1;
+			if (rightIsNumeric)
+				return 1;
+
+			return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
+		}
+
+		private static bool TryParseTriggerIndex(string value, out int index)
+		{
+			return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out index);
+		}
+
 		private static bool IsMissingKey(Win32Exception ex)
 		{
 			return ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
@@ -763,6 +893,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				"ErrorControl",
 				"RequiredPrivileges",
 				"FailureActions",
+				"FailureCommand",
 				"ServiceSidType",
 				"LaunchProtected",
 				"ConfigurationFlags",
@@ -827,7 +958,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return values != null && values.TryGetValue(name, out info);
 		}
 
-		private static TboRegServiceFailureActionsInfo? TryParseFailureActions(byte[]? bytes)
+		private static Guid? TryGetGuid(Dictionary<string, RegistryValueInfo>? values, string name)
+		{
+			if (!TryGetValue(values, name, out var info))
+				return null;
+
+			if (info.TypedValue is Guid typedGuid)
+				return typedGuid;
+
+			if (info.TypedValue is string typedString && Guid.TryParse(typedString, out var parsedGuid))
+				return parsedGuid;
+
+			if (info.Bytes is { Length: >= 16 } bytes)
+				return new Guid(bytes.AsSpan(0, 16));
+
+			return null;
+		}
+
+		private static TboRegServiceFailureActionsInfo? TryParseFailureActions(byte[]? bytes, string? fallbackCommand)
 		{
 			if (bytes is not { Length: >= 20 })
 				return null;
@@ -870,7 +1018,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 
 				if (hasRunCommand && !LooksLikeCommand(command))
-					command = null;
+				{
+					if (!string.IsNullOrWhiteSpace(fallbackCommand))
+						command = fallbackCommand;
+					else
+						command = null;
+				}
 
 				return new TboRegServiceFailureActionsInfo
 				{
@@ -1178,6 +1331,38 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return value.ToString(CultureInfo.InvariantCulture);
 		}
 
+		private static readonly Dictionary<Guid, string> TriggerSubtypeNames = new()
+		{
+			{ new Guid("1ce20aba-9851-4421-9430-1ddeb766e809"), "DOMAIN_JOIN_GUID" },
+			{ new Guid("ddaf516e-58c2-4866-9574-c3b615d42ea1"), "DOMAIN_LEAVE_GUID" },
+			{ new Guid("b7569e07-8421-4ee0-ad10-86915afdad09"), "FIREWALL_PORT_OPEN_GUID" },
+			{ new Guid("a144ed38-8e12-4de4-9d96-e64740b1a524"), "FIREWALL_PORT_CLOSE_GUID" },
+			{ new Guid("659FCAE6-5BDB-4DA9-B1FF-CA2A178D46E0"), "MACHINE_POLICY_PRESENT_GUID" },
+			{ new Guid("4f27f2de-14e2-430b-a549-7cd48cbc8245"), "NETWORK_MANAGER_FIRST_IP_ADDRESS_ARRIVAL_GUID" },
+			{ new Guid("cc4ba62a-162e-4648-847a-b6bdf993e335"), "NETWORK_MANAGER_LAST_IP_ADDRESS_REMOVAL_GUID" },
+			{ new Guid("54FB46C8-F089-464C-B1FD-59D1B62C3B50"), "USER_POLICY_PRESENT_GUID" },
+			{ new Guid("1F81D131-3FAC-4537-9E0C-7E7B0C2F4B55"), "NAMED_PIPE_EVENT_GUID" },
+			{ new Guid("BC90D167-9470-4139-A9BA-BE0BBBF5B74D"), "RPC_INTERFACE_EVENT_GUID" },
+			{ new Guid("2d7a2816-0c5e-45fc-9ce7-570e5ecde9c9"), "CustomSystemStateChange" },
+			{ new Guid("0850302A-B344-4FDA-9BE9-90576B8D46F0"), "Bluetooth" },
+			{ new Guid("C1E9BC6D-1DAE-421A-9369-CC7FF0D6E359"), "BluetoothMtpEnum" },
+			{ new Guid("97f115c8-599a-4153-8894-d2d12899918a"), "LightSensor" },
+			{ new Guid("E5323777-F976-4F5B-9B55-B94699C46E44"), "VideoCamera" },
+			{ new Guid("24E552D7-6523-47F7-A647-D3465BF1F5CA"), "CameraSensor" },
+			{ new Guid("50dd5230-ba8a-11d1-bf5d-0000f805f530"), "SmartcardReader" },
+			{ new Guid("199fe037-2b82-40a9-82ac-e1d46c792b99"), "LsaSrv" },
+			{ new Guid("D02A9C27-79B8-40D6-9B97-CF3F8B7B5D60"), "Microsoft-Windows-AppIDServiceTrigger" },
+			{ new Guid("277c9237-51d8-5c1c-b089-f02c683e5ba7"), "Microsoft-Windows-StartNameRes" },
+			{ new Guid("fbcfac3f-8460-419f-8e48-1f0b49cdb85e"), "Microsoft-Windows-NetworkProfileTriggerProvider" },
+			{ new Guid("ce20d1c3-a247-4c41-bcb8-3c7f52c8b805"), "Microsoft-Windows-Kernel-Tm-Trigger" },
+			{ new Guid("aedd909f-41c6-401a-9e41-dfc33006af5d"), "Microsoft-Windows-Smartcard-Trigger" },
+			{ new Guid("f5528ada-be5f-4f14-8aef-a95de7281161"), "Microsoft-Windows-Kernel-Licensing-StartServiceTrigger" },
+			{ new Guid("8e6a5303-a4ce-498f-afdb-e03a8a82b077"), "Microsoft-Windows-Ntfs-UBPM" },
+			{ new Guid("aa1f73e8-15fd-45d2-abfd-e7f64f78eb11"), "Microsoft-Windows-Kernel-PowerTrigger" },
+			{ new Guid("22b6d684-fa63-4578-87c9-effcbe6643c7"), "Microsoft-Windows-WebdavClient-LookupServiceTrigger" },
+			{ new Guid("e46eead8-0c54-4489-9898-8fa79d059e0e"), "Microsoft-Windows-Feedback-Service-TriggerProvider" }
+		};
+
 		private static IReadOnlyList<string>? TryGetStringArray(Dictionary<string, RegistryValueInfo>? values, string name)
 		{
 			if (!TryGetValue(values, name, out var info))
@@ -1194,6 +1379,86 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return DecodeMultiString(info.Bytes);
 
 			return null;
+		}
+
+		private static IReadOnlyList<TboRegServiceTriggerDataItem>? TryParseTriggerDataItems(Dictionary<string, RegistryValueInfo>? values)
+		{
+			if (values == null || values.Count == 0)
+				return null;
+
+			var indices = new SortedSet<int>();
+			foreach (var key in values.Keys)
+			{
+				if (TryGetDataIndex(key, "DataType", out var dataTypeIndex))
+				{
+					indices.Add(dataTypeIndex);
+					continue;
+				}
+
+				if (TryGetDataIndex(key, "Data", out var dataIndex))
+					indices.Add(dataIndex);
+			}
+
+			if (indices.Count == 0)
+				return null;
+
+			var items = new List<TboRegServiceTriggerDataItem>(indices.Count);
+			foreach (var index in indices)
+			{
+				var dataType = TryGetDword(values, $"DataType{index}");
+				var dataBytes = TryGetBytes(values, $"Data{index}");
+				var data = DecodeTriggerData(dataType, dataBytes);
+
+				items.Add(new TboRegServiceTriggerDataItem
+				{
+					Index = index,
+					DataType = FormatEnum<ServiceTriggerDataType>(dataType),
+					Data = data,
+					DataBytes = dataBytes
+				});
+			}
+
+			return items;
+		}
+
+		private static bool TryGetDataIndex(string key, string prefix, out int index)
+		{
+			index = default;
+			if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+				return false;
+
+			var suffix = key.Substring(prefix.Length);
+			return int.TryParse(suffix, NumberStyles.Integer, CultureInfo.InvariantCulture, out index);
+		}
+
+		private static object? DecodeTriggerData(uint? dataType, byte[]? data)
+		{
+			if (data == null || data.Length == 0)
+				return null;
+
+			if (dataType == (uint)ServiceTriggerDataType.String)
+			{
+				var decoded = DecodeMultiString(data);
+				if (decoded.Count > 1)
+					return decoded;
+				if (decoded.Count == 1)
+					return decoded[0];
+
+				return TryDecodeUtf16String(data);
+			}
+
+			if (dataType == (uint)ServiceTriggerDataType.Level)
+				return data[0];
+
+			if (dataType == (uint)ServiceTriggerDataType.KeywordAny
+				|| dataType == (uint)ServiceTriggerDataType.KeywordAll)
+			{
+				return data.Length >= 8
+					? BinaryPrimitives.ReadUInt64LittleEndian(data.AsSpan(0, 8))
+					: null;
+			}
+
+			return data;
 		}
 
 		private static string? TryGetString(Dictionary<string, RegistryValueInfo>? values, string name)
