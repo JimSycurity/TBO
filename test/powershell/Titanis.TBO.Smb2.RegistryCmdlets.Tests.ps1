@@ -165,4 +165,58 @@ Describe 'TBO registry cmdlets (mocked)' {
 
 		$script:sessionCalled | Should -BeFalse
 	}
+
+	It 'Get-TBORegServices rejects conflicting security descriptor formats before connecting' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$script:sessionCalled = $false
+		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]]::FromResult([Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]$null)
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRemoteRegistrySessionAsync { param($serverName, $token) $script:sessionCalled = $true; $emptySessionTask }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Get-TBORegServices -ServerName 'server' -AsSddl -AsWindows }
+		}
+
+		$script:sessionCalled | Should -BeFalse
+	}
+
+	It 'Get-TBORegServices rejects unsupported root keys before connecting' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$script:sessionCalled = $false
+		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]]::FromResult([Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]$null)
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRemoteRegistrySessionAsync { param($serverName, $token) $script:sessionCalled = $true; $emptySessionTask }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Get-TBORegServices -ServerName 'server' -Path 'HKQQ\\Software' }
+		}
+
+		$script:sessionCalled | Should -BeFalse
+	}
+
+	It 'Find-TBORegWeakServices rejects unsupported root keys before connecting' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$script:sessionCalled = $false
+		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]]::FromResult([Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]$null)
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRemoteRegistrySessionAsync { param($serverName, $token) $script:sessionCalled = $true; $emptySessionTask }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Should -Throw -ExceptionType ([System.ArgumentException]) -ActualValue { Find-TBORegWeakServices -ServerName 'server' -Path 'HKQQ\\Software' }
+		}
+
+		$script:sessionCalled | Should -BeFalse
+	}
 }
