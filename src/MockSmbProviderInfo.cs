@@ -26,8 +26,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public Action<string, object>? SetConnectParametersAction { get; set; }
 		public Func<string, CancellationToken, Task<ServerServiceSession>>? OpenServerServiceSessionAsyncFunc { get; set; }
 		public Func<string, CancellationToken, Task<RemoteRegistrySession>>? OpenRemoteRegistrySessionAsyncFunc { get; set; }
-		public Func<string, int?, Task>? DisconnectServerAsyncFunc { get; set; }
-		public Func<Task>? DisconnectAllAsyncFunc { get; set; }
+		public Func<string, int?, bool, Task>? DisconnectServerAsyncFunc { get; set; }
+		public Func<bool, Task>? DisconnectAllAsyncFunc { get; set; }
 		public Action<string, Exception>? LogExceptionAction { get; set; }
 
 		Smb2Client ISmbProviderInfo.SmbClient
@@ -74,11 +74,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return this.OpenRemoteRegistrySessionAsyncFunc(serverName, cancellationToken);
 		}
 
-		Task ISmbProviderInfo.DisconnectServerAsync(string serverName, int? port)
-			=> this.DisconnectServerAsyncFunc?.Invoke(serverName, port) ?? Task.CompletedTask;
+		Task ISmbProviderInfo.DisconnectServerAsync(string serverName, int? port, bool force)
+			=> this.DisconnectServerAsyncFunc?.Invoke(serverName, port, force) ?? Task.CompletedTask;
 
-		Task ISmbProviderInfo.DisconnectAllAsync()
-			=> this.DisconnectAllAsyncFunc?.Invoke() ?? Task.CompletedTask;
+		Task ISmbProviderInfo.DisconnectAllAsync(bool force)
+			=> this.DisconnectAllAsyncFunc?.Invoke(force) ?? Task.CompletedTask;
 
 		void ISmbProviderInfo.LogException(string context, Exception ex)
 			=> this.LogExceptionAction?.Invoke(context, ex);

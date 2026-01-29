@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Titanis.Winterop;
@@ -80,6 +82,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var parms = smb.GetConnectParametersFor(serverName, true) as SmbConnectionParameters;
 			var options = RegistryRetryOptions.From(parms);
+			var port = parms?.RemotePort;
 
 			int attempt = 0;
 			bool reconnectFallbackUsed = false;
@@ -110,8 +113,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 								reconnectFallbackUsed = true;
 								attempt = options.RetryCount;
 								currentDelayMs = options.DelayMs;
-								session?.Dispose();
-								session = null;
+								DisposeSession(ref session);
 								continue;
 							}
 
@@ -119,11 +121,33 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						}
 
 						if (options.ReconnectOnRetry)
+							DisposeSession(ref session);
+
+						ApplyDelay(options, ref currentDelayMs, cancellationToken);
+					}
+					catch (Exception ex) when (IsTransportException(ex))
+					{
+						if (!options.RetryEnabled)
+							throw;
+
+						attempt++;
+						if (attempt > options.RetryCount)
 						{
-							session?.Dispose();
-							session = null;
+							if (options.ReconnectAfterRetries && !reconnectFallbackUsed)
+							{
+								reconnectFallbackUsed = true;
+								attempt = options.RetryCount;
+								currentDelayMs = options.DelayMs;
+								DisposeSession(ref session);
+								TryForceDisconnect(smb, serverName, port);
+								continue;
+							}
+
+							throw;
 						}
 
+						DisposeSession(ref session);
+						TryForceDisconnect(smb, serverName, port);
 						ApplyDelay(options, ref currentDelayMs, cancellationToken);
 					}
 				}
@@ -151,5 +175,41 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static bool IsPipeBusy(NtstatusException ex)
 			=> ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY;
+
+		private static bool IsTransportException(Exception ex)
+		{
+			if (ex is IOException or SocketException)
+				return true;
+			return ex.InnerException != null && IsTransportException(ex.InnerException);
+		}
+
+		private static void DisposeSession(ref RemoteRegistrySession? session)
+		{
+			if (session == null)
+				return;
+
+			try
+			{
+				session.Dispose();
+			}
+			catch
+			{
+			}
+			finally
+			{
+				session = null;
+			}
+		}
+
+		private static void TryForceDisconnect(ISmbProviderInfo smb, string serverName, int? port)
+		{
+			try
+			{
+				smb.DisconnectServerAsync(serverName, port, true).GetAwaiter().GetResult();
+			}
+			catch
+			{
+			}
+		}
 	}
 }

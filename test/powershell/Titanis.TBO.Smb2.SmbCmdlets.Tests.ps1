@@ -84,9 +84,10 @@ Describe 'TBO SMB cmdlets (mocked)' {
 
 		$script:disconnectAllCalled = $false
 		$script:disconnectServerCalled = $false
+		$script:capturedForce = $null
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
-			-DisconnectAllAsync { $script:disconnectAllCalled = $true; [System.Threading.Tasks.Task]::CompletedTask } `
-			-DisconnectServerAsync { param($serverName, $port) $script:disconnectServerCalled = $true; [System.Threading.Tasks.Task]::CompletedTask }
+			-DisconnectAllAsync { param($force) $script:disconnectAllCalled = $true; $script:capturedForce = $force; [System.Threading.Tasks.Task]::CompletedTask } `
+			-DisconnectServerAsync { param($serverName, $port, $force) $script:disconnectServerCalled = $true; [System.Threading.Tasks.Task]::CompletedTask }
 
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
 			Disconnect-TBOSmbServer -All
@@ -94,6 +95,7 @@ Describe 'TBO SMB cmdlets (mocked)' {
 
 		$script:disconnectAllCalled | Should -BeTrue
 		$script:disconnectServerCalled | Should -BeFalse
+		$script:capturedForce | Should -BeFalse
 	}
 
 	It 'Disconnect-TBOSmbServer uses server name and port when provided' {
@@ -104,8 +106,9 @@ Describe 'TBO SMB cmdlets (mocked)' {
 
 		$script:capturedServer = $null
 		$script:capturedPort = $null
+		$script:capturedForce = $null
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
-			-DisconnectServerAsync { param($serverName, $port) $script:capturedServer = $serverName; $script:capturedPort = $port; [System.Threading.Tasks.Task]::CompletedTask }
+			-DisconnectServerAsync { param($serverName, $port, $force) $script:capturedServer = $serverName; $script:capturedPort = $port; $script:capturedForce = $force; [System.Threading.Tasks.Task]::CompletedTask }
 
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
 			Disconnect-TBOSmbServer -ServerName 'fileserver' -RemotePort 445
@@ -113,6 +116,41 @@ Describe 'TBO SMB cmdlets (mocked)' {
 
 		$script:capturedServer | Should -Be 'fileserver'
 		$script:capturedPort | Should -Be 445
+		$script:capturedForce | Should -BeFalse
+	}
+
+	It 'Disconnect-TBOSmbServer -All -Force passes force to disconnect' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$script:capturedForce = $null
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-DisconnectAllAsync { param($force) $script:capturedForce = $force; [System.Threading.Tasks.Task]::CompletedTask }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Disconnect-TBOSmbServer -All -Force
+		}
+
+		$script:capturedForce | Should -BeTrue
+	}
+
+	It 'Disconnect-TBOSmbServer -Force passes force to disconnect' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$script:capturedForce = $null
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-DisconnectServerAsync { param($serverName, $port, $force) $script:capturedForce = $force; [System.Threading.Tasks.Task]::CompletedTask }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Disconnect-TBOSmbServer -ServerName 'fileserver' -Force
+		}
+
+		$script:capturedForce | Should -BeTrue
 	}
 
 	It 'Get-TBOSmbSessions validates ServerName before connecting' {

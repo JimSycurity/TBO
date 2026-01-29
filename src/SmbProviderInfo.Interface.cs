@@ -38,11 +38,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		Task<RemoteRegistrySession> ISmbProviderInfo.OpenRemoteRegistrySessionAsync(string serverName, CancellationToken cancellationToken)
 			=> this.OpenRemoteRegistrySessionAsync(serverName, cancellationToken);
 
-		Task ISmbProviderInfo.DisconnectServerAsync(string serverName, int? port)
-			=> this.DisconnectServerAsync(serverName, port);
+		Task ISmbProviderInfo.DisconnectServerAsync(string serverName, int? port, bool force)
+			=> this.DisconnectServerAsync(serverName, port, force);
 
-		Task ISmbProviderInfo.DisconnectAllAsync()
-			=> this.DisconnectAllAsync();
+		Task ISmbProviderInfo.DisconnectAllAsync(bool force)
+			=> this.DisconnectAllAsync(force);
 
 		void ISmbProviderInfo.LogException(string context, Exception ex)
 			=> this.LogException(context, ex);

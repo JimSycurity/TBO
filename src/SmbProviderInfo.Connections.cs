@@ -4,18 +4,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 {
 	public partial class SmbProviderInfo
 	{
-		internal Task DisconnectServerAsync(string serverName, int? port = null)
+		internal Task DisconnectServerAsync(string serverName, int? port = null, bool force = false)
 		{
 			return Task.WhenAll(
-				this.SmbClient.DisconnectServerAsync(serverName, port),
-				this.RpcSmbClient.DisconnectServerAsync(serverName, port));
+				this.SmbClient.DisconnectServerAsync(serverName, port, force),
+				this.RpcSmbClient.DisconnectServerAsync(serverName, port, force));
 		}
 
-		internal Task DisconnectAllAsync()
+		internal Task DisconnectAllAsync(bool force = false)
 		{
 			return Task.WhenAll(
-				this.SmbClient.DisconnectAllAsync(),
-				this.RpcSmbClient.DisconnectAllAsync());
+				this.SmbClient.DisconnectAllAsync(force),
+				this.RpcSmbClient.DisconnectAllAsync(force));
 		}
 	}
 }

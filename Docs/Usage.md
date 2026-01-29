@@ -89,6 +89,7 @@ Closes cached SMB connections, sessions, and tree connects for a server or all s
 
 ```powershell
 Disconnect-TBOSmbServer -ServerName corp1-web01.corp1.lab.home-labs.lol
+Disconnect-TBOSmbServer -ServerName corp1-web01.corp1.lab.home-labs.lol -Force
 Disconnect-TBOSmbServer -All
 ```
 

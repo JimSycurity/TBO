@@ -80,11 +80,19 @@
           <maml:name>RemotePort</maml:name>
           <command:parameterValue>Int32</command:parameterValue>
         </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Force</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
       </command:syntaxItem>
       <command:syntaxItem>
         <command:name>Disconnect-TBOSmbServer</command:name>
         <command:parameter required="true">
           <maml:name>All</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Force</maml:name>
           <command:parameterValue>Switch</command:parameterValue>
         </command:parameter>
       </command:syntaxItem>
@@ -111,6 +119,13 @@
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Force</maml:name>
+        <maml:description>
+          <maml:para>Forces cached connection cleanup even if the server already closed the session.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -125,6 +140,13 @@
         <maml:code>Disconnect-TBOSmbServer -All</maml:code>
         <maml:remarks>
           <maml:para>Disconnects cached connections for all servers.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Disconnect-TBOSmbServer -ServerName corp1-web01.corp1.lab.home-labs.lol -Force</maml:code>
+        <maml:remarks>
+          <maml:para>Forces cached connection cleanup after a server-side disconnect.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

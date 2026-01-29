@@ -22,15 +22,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter(Mandatory = true, ParameterSetName = ParameterSetNames.All)]
 		public SwitchParameter All { get; set; }
 
+		[Parameter]
+		public SwitchParameter Force { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			if (this.ParameterSetName == ParameterSetNames.All)
 			{
-				smb.DisconnectAllAsync().GetAwaiter().GetResult();
+				smb.DisconnectAllAsync(this.Force.IsPresent).GetAwaiter().GetResult();
 				return;
 			}
 
-			smb.DisconnectServerAsync(this.ServerName, this.RemotePort).GetAwaiter().GetResult();
+			smb.DisconnectServerAsync(this.ServerName, this.RemotePort, this.Force.IsPresent).GetAwaiter().GetResult();
 		}
 	}
 }
