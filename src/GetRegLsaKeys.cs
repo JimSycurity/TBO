@@ -50,7 +50,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				{
 					try
 					{
-						lsaKey = ExtractLsaKey(session.Client, bootKey, cancellationToken, out lsaKeySource);
+						lsaKey = ExtractLsaKey(smb, session.Client, bootKey, cancellationToken, out lsaKeySource);
 					}
 					catch (Exception ex)
 					{
@@ -110,6 +110,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		private byte[]? ExtractLsaKey(
+			ISmbProviderInfo smb,
 			RemoteRegistryClient client,
 			byte[] bootKey,
 			CancellationToken cancellationToken,
@@ -121,9 +122,29 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
 				PolicyPath);
 
-			using var policyKey = OpenRegistryKey(client, policySpec, RegistryAccessRights.QueryValue, cancellationToken);
+			byte[]? polEkList = null;
+			byte[]? legacy = null;
+			try
+			{
+				using var policyKey = OpenRegistryKey(client, policySpec, RegistryAccessRights.QueryValue, cancellationToken);
+				polEkList = TryReadValueBytes(policyKey, "PolEKList", cancellationToken);
+				legacy = TryReadValueBytes(policyKey, "PolSecretEncryptionKey", cancellationToken);
+			}
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+			{
+				polEkList = ExecuteRegistryOperationWithResult(smb, cancellationToken, session =>
+				{
+					using var policyKey = OpenRegistryKey(session.Client, policySpec, RegistryAccessRights.QueryValue, cancellationToken);
+					return TryReadValueBytes(policyKey, "PolEKList", cancellationToken);
+				});
 
-			var polEkList = TryReadValueBytes(policyKey, "PolEKList", cancellationToken);
+				legacy = ExecuteRegistryOperationWithResult(smb, cancellationToken, session =>
+				{
+					using var policyKey = OpenRegistryKey(session.Client, policySpec, RegistryAccessRights.QueryValue, cancellationToken);
+					return TryReadValueBytes(policyKey, "PolSecretEncryptionKey", cancellationToken);
+				});
+			}
+
 			if (polEkList != null && polEkList.Length > 0)
 			{
 				var decrypted = DecryptLsaData(polEkList, bootKey);
@@ -134,7 +155,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 			}
 
-			var legacy = TryReadValueBytes(policyKey, "PolSecretEncryptionKey", cancellationToken);
 			if (legacy != null && legacy.Length >= 76)
 			{
 				var lsaKey = DecryptLegacyLsaKey(legacy, bootKey);
@@ -146,6 +166,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return null;
+		}
+
+		private T ExecuteRegistryOperationWithResult<T>(
+			ISmbProviderInfo smb,
+			CancellationToken cancellationToken,
+			Func<RemoteRegistrySession, T> func)
+		{
+			return RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, func);
 		}
 
 		private static byte[]? TryReadValueBytes(RegistryKey key, string name, CancellationToken cancellationToken)
