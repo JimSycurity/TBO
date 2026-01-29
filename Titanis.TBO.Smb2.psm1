@@ -111,3 +111,12 @@ function Out-File {
 }
 
 Export-ModuleMember -Function Out-File
+
+# Ensure the shim wins over the built-in cmdlet in the caller's session.
+try {
+    if (-not (Get-Command Out-File -CommandType Function -ErrorAction SilentlyContinue)) {
+        Set-Item -Path Function:\global:Out-File -Value $function:Out-File -Force
+    }
+}
+catch {
+}
