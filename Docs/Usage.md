@@ -38,10 +38,10 @@ Provider-qualified UNC paths can be used without creating a drive:
 Get-ChildItem TBO.Smb2::\\corp1-web01.corp1.lab.home-labs.lol\C$\Windows
 ```
 
-Writing text content is supported via `Out-File`, `Set-Content`, or `Add-Content`:
+Writing text content is supported via `Set-Content`/`Add-Content` on the provider or the `Out-TBOSmbFile` cmdlet:
 
 ```powershell
-'testing' | Out-File tbo:\Temp\test.txt
+'testing' | Out-TBOSmbFile -Path tbo:\Temp\test.txt
 Add-Content tbo:\Temp\test.txt -Value 'more'
 Get-Content tbo:\Temp\test.txt
 ```
@@ -132,6 +132,16 @@ Copies files between local paths and SMB paths using backup intent. Supports UNC
 Copy-TBOSmbItem -Source tbo:\Windows\System32\config\SAM -Destination C:\Temp\SAM.bak
 Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -CreateDirectories
 Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -Force
+```
+
+### Out-TBOSmbFile
+
+Writes text content to an SMB path using backup intent. Accepts UNC or `tbo:\` paths.
+
+```powershell
+'testing' | Out-TBOSmbFile -Path tbo:\Temp\test.txt
+Get-Content tbo:\Temp\test.txt
+'more' | Out-TBOSmbFile -Path tbo:\Temp\test.txt -Append
 ```
 
 ### Get-TBOSmbSnapshots

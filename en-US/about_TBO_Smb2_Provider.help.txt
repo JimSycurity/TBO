@@ -18,7 +18,8 @@ PROVIDER FEATURES
     - New-Item: File, Directory, Symlink, SymlinkDir, Junction, MountPoint.
     - Remove-Item: Removes files, directories, symlinks, junctions, and mount points.
     - Set-ItemProperty: Updates timestamps or attributes (touch behavior).
-    - Content: Get-Content, Set-Content, Add-Content, and Out-File are supported (text content).
+    - Content: Get-Content, Set-Content, and Add-Content are supported (text content).
+    - Write content cmdlet: Use Out-TBOSmbFile for pipeline output to SMB paths.
     - Security: Use Get-TBOSmbSecurityDescriptor / Set-TBOSmbSecurityDescriptor.
     - ACL: Get-Acl / Set-Acl are supported on Windows (security descriptors only).
 
@@ -61,7 +62,7 @@ EXAMPLES
         Get-Content .\Windows\System32\drivers\etc\hosts
 
     Example 3b: Write content
-        'testing' | Out-File .\Temp\test.txt
+        'testing' | Out-TBOSmbFile -Path .\Temp\test.txt
         Add-Content .\Temp\test.txt -Value 'more'
         Get-Content .\Temp\test.txt
 

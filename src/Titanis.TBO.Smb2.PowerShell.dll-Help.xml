@@ -62,6 +62,107 @@
 
   <command:command>
     <command:details>
+      <command:name>Out-TBOSmbFile</command:name>
+      <command:verb>Out</command:verb>
+      <command:noun>TBOSmbFile</command:noun>
+      <maml:description>
+        <maml:para>Writes text content to an SMB file using backup intent.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Out-TBOSmbFile</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Out-TBOSmbFile</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>LiteralPath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Target path. Accepts UNC paths or TBO.Smb2 PSDrive paths.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>LiteralPath</maml:name>
+        <maml:description>
+          <maml:para>Literal target path. Use when the path contains wildcard characters.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>InputObject</maml:name>
+        <maml:description>
+          <maml:para>Content to write to the file. Accepts pipeline input.</maml:para>
+        </maml:description>
+        <command:parameterValue>Object</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Append</maml:name>
+        <maml:description>
+          <maml:para>Append content to the target file instead of overwriting.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>NoClobber</maml:name>
+        <maml:description>
+          <maml:para>Do not overwrite existing files. Cannot be used with Append.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Force</maml:name>
+        <maml:description>
+          <maml:para>Override NoClobber if specified.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>NoNewline</maml:name>
+        <maml:description>
+          <maml:para>Do not append a newline after each object.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Encoding</maml:name>
+        <maml:description>
+          <maml:para>Text encoding to use (default: UTF8).</maml:para>
+        </maml:description>
+        <command:parameterValue>Encoding</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>'testing' | Out-TBOSmbFile -Path tbo:\Temp\test.txt</maml:code>
+        <maml:remarks>
+          <maml:para>Writes content to a remote file using the TBO.Smb2 drive.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>'more' | Out-TBOSmbFile -Path \\corp1-web01\C$\Temp\test.txt -Append</maml:code>
+        <maml:remarks>
+          <maml:para>Appends content to a remote file using a UNC path.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Disconnect-TBOSmbServer</command:name>
       <command:verb>Disconnect</command:verb>
       <command:noun>TBOSmbServer</command:noun>
