@@ -813,6 +813,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				var rebootMsg = ReadServiceString(bytes, rebootMsgOffset);
 				var command = ReadServiceString(bytes, commandOffset);
+				if (!LooksLikeCommand(command))
+					command = FindCommandCandidate(bytes);
 
 				var actions = new List<TboRegServiceFailureActionInfo>();
 				if (actionCount > 0 && actionsOffset < bytes.Length)
@@ -854,22 +856,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (offset == 0 || offset >= bytes.Length)
 				return null;
 
-			var utf16 = TryDecodeUtf16Z(bytes.AsSpan((int)offset));
+			var utf16 = TryDecodeUtf16Z(bytes, (int)offset);
 			if (IsLikelyValidServiceString(utf16))
 				return utf16;
 
-			var ansi = ReadAnsiZ(bytes.AsSpan((int)offset));
+			var ansi = ReadAnsiZ(bytes, (int)offset);
 			if (IsLikelyValidServiceString(ansi))
 				return ansi;
 
 			var doubled = offset * 2;
 			if (doubled > 0 && doubled < bytes.Length)
 			{
-				utf16 = TryDecodeUtf16Z(bytes.AsSpan((int)doubled));
+				utf16 = TryDecodeUtf16Z(bytes, (int)doubled);
 				if (IsLikelyValidServiceString(utf16))
 					return utf16;
 
-				ansi = ReadAnsiZ(bytes.AsSpan((int)doubled));
+				ansi = ReadAnsiZ(bytes, (int)doubled);
 				if (IsLikelyValidServiceString(ansi))
 					return ansi;
 			}
@@ -877,58 +879,64 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return utf16 ?? ansi;
 		}
 
-		private static string? TryDecodeUtf16Z(ReadOnlySpan<byte> span)
+		private static string? TryDecodeUtf16Z(byte[] bytes, int offset)
 		{
-			if (span.Length < 2)
+			if (offset < 0 || offset + 1 >= bytes.Length)
 				return null;
 
-			if (!LooksLikeUtf16(span))
+			if (!LooksLikeUtf16(bytes, offset))
 				return null;
 
-			int end = 0;
-			for (int i = 0; i + 1 < span.Length; i += 2)
+			int end = -1;
+			for (int i = offset; i + 1 < bytes.Length; i += 2)
 			{
-				if (span[i] == 0 && span[i + 1] == 0)
+				if (bytes[i] == 0 && bytes[i + 1] == 0)
 				{
 					end = i;
 					break;
 				}
 			}
 
-			if (end == 0)
-				end = span.Length - (span.Length % 2);
+			int length = (end >= offset) ? end - offset : bytes.Length - offset;
+			length -= length % 2;
+			if (length <= 0)
+				return null;
 
-			return end > 0 ? Encoding.Unicode.GetString(span.Slice(0, end)) : null;
+			return Encoding.Unicode.GetString(bytes, offset, length);
 		}
 
-		private static string? ReadAnsiZ(ReadOnlySpan<byte> span)
+		private static string? ReadAnsiZ(byte[] bytes, int offset)
 		{
-			int end = 0;
-			for (int i = 0; i < span.Length; i++)
+			if (offset < 0 || offset >= bytes.Length)
+				return null;
+
+			int end = -1;
+			for (int i = offset; i < bytes.Length; i++)
 			{
-				if (span[i] == 0)
+				if (bytes[i] == 0)
 				{
 					end = i;
 					break;
 				}
 			}
 
-			if (end == 0)
-				end = span.Length;
+			int length = (end >= offset) ? end - offset : bytes.Length - offset;
+			if (length <= 0)
+				return null;
 
-			return end > 0 ? Encoding.ASCII.GetString(span.Slice(0, end)) : null;
+			return Encoding.ASCII.GetString(bytes, offset, length);
 		}
 
-		private static bool LooksLikeUtf16(ReadOnlySpan<byte> span)
+		private static bool LooksLikeUtf16(byte[] bytes, int offset)
 		{
-			int pairs = Math.Min(span.Length / 2, 64);
+			int pairs = Math.Min((bytes.Length - offset) / 2, 64);
 			if (pairs == 0)
 				return false;
 
 			int zeroHigh = 0;
 			for (int i = 0; i < pairs; i++)
 			{
-				if (span[i * 2 + 1] == 0)
+				if (bytes[offset + i * 2 + 1] == 0)
 					zeroHigh++;
 			}
 
@@ -944,6 +952,92 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return false;
 
 			return true;
+		}
+
+		private static bool LooksLikeCommand(string? value)
+		{
+			if (string.IsNullOrWhiteSpace(value))
+				return false;
+
+			return value.Contains(":\\", StringComparison.OrdinalIgnoreCase)
+				|| value.Contains("\\\\", StringComparison.OrdinalIgnoreCase)
+				|| value.Contains(".exe", StringComparison.OrdinalIgnoreCase)
+				|| value.Contains(".cmd", StringComparison.OrdinalIgnoreCase)
+				|| value.Contains(".bat", StringComparison.OrdinalIgnoreCase);
+		}
+
+		private static string? FindCommandCandidate(byte[] bytes)
+		{
+			string? best = null;
+			foreach (var candidate in EnumerateUtf16ZStrings(bytes))
+			{
+				if (LooksLikeCommand(candidate))
+					return candidate;
+
+				if (best == null && IsLikelyValidServiceString(candidate))
+					best = candidate;
+			}
+
+			foreach (var candidate in EnumerateAnsiZStrings(bytes))
+			{
+				if (LooksLikeCommand(candidate))
+					return candidate;
+
+				if (best == null && IsLikelyValidServiceString(candidate))
+					best = candidate;
+			}
+
+			return best;
+		}
+
+		private static IEnumerable<string> EnumerateUtf16ZStrings(byte[] bytes)
+		{
+			for (int i = 0; i + 1 < bytes.Length; i += 2)
+			{
+				if (bytes[i] == 0 && bytes[i + 1] == 0)
+					continue;
+
+				var value = TryDecodeUtf16Z(bytes, i);
+				if (!string.IsNullOrWhiteSpace(value))
+					yield return value;
+
+				int advance = 2;
+				for (int j = i; j + 1 < bytes.Length; j += 2)
+				{
+					if (bytes[j] == 0 && bytes[j + 1] == 0)
+					{
+						advance = (j - i) + 2;
+						break;
+					}
+				}
+
+				i += Math.Max(advance - 2, 0);
+			}
+		}
+
+		private static IEnumerable<string> EnumerateAnsiZStrings(byte[] bytes)
+		{
+			for (int i = 0; i < bytes.Length; i++)
+			{
+				if (bytes[i] == 0)
+					continue;
+
+				var value = ReadAnsiZ(bytes, i);
+				if (!string.IsNullOrWhiteSpace(value))
+					yield return value;
+
+				int advance = 1;
+				for (int j = i; j < bytes.Length; j++)
+				{
+					if (bytes[j] == 0)
+					{
+						advance = (j - i) + 1;
+						break;
+					}
+				}
+
+				i += Math.Max(advance - 1, 0);
+			}
 		}
 
 		private static bool IsLikelyPathChar(char value)
