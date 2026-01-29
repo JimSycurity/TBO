@@ -304,6 +304,14 @@ Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name '
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv' | Select-Object -Expand TriggerInfo
 ```
 
+#### Get-TBORegLsaKeys
+
+Derives the boot key (syskey) and LSA encryption key from the remote registry.
+
+```powershell
+Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol
+```
+
 #### Find-TBORegWeakServices
 
 Scans service security descriptors and reports AccessAllowed entries that grant service configuration rights to non-system trustees.
