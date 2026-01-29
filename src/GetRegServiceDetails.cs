@@ -811,8 +811,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				uint actionCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(12, 4));
 				uint actionsOffset = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(16, 4));
 
-				var rebootMsg = ReadUtf16Z(bytes, rebootMsgOffset);
-				var command = ReadUtf16Z(bytes, commandOffset);
+				var rebootMsg = ReadUtf16Z(bytes, rebootMsgOffset, actionsOffset);
+				var command = ReadUtf16Z(bytes, commandOffset, actionsOffset);
 
 				var actions = new List<TboRegServiceFailureActionInfo>();
 				if (actionCount > 0 && actionsOffset < bytes.Length)
@@ -849,12 +849,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static string? ReadUtf16Z(byte[] bytes, uint offset)
+		private static string? ReadUtf16Z(byte[] bytes, uint offset, uint maxEndOffset)
 		{
 			if (offset == 0 || offset >= bytes.Length)
 				return null;
 
-			var span = bytes.AsSpan((int)offset);
+			var maxEnd = maxEndOffset > offset && maxEndOffset <= bytes.Length
+				? (int)maxEndOffset
+				: bytes.Length;
+			if (maxEnd <= offset)
+				return null;
+
+			var span = bytes.AsSpan((int)offset, maxEnd - (int)offset);
 			int end = 0;
 			for (int i = 0; i + 1 < span.Length; i += 2)
 			{

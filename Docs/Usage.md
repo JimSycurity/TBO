@@ -300,6 +300,7 @@ Returns extended registry-backed service metadata including core configuration, 
 ```powershell
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'MDCoreSvc'
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
+Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService2' | Select-Object -Expand FailureActionsInfo
 ```
 
 #### Find-TBORegWeakServices
