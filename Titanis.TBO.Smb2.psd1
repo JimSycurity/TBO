@@ -7,7 +7,7 @@
     Copyright='(c) 2026. All rights reserved.'
     Description='A PowerShell module utilizing the TrustedSec Titanis library to perform operations with backup privileges.'
     FormatsToProcess=@('Format.ps1xml')
-    FunctionsToExport=@()
+    FunctionsToExport=@('Out-File')
     GUID='807d7d1b-e298-4078-9173-18b4f2ab75f2'
     ModuleVersion='0.9.0'
     PowerShellVersion='7.0'
