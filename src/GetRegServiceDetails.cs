@@ -817,6 +817,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					command = FindCommandCandidate(bytes);
 
 				var actions = new List<TboRegServiceFailureActionInfo>();
+				bool hasRunCommand = false;
 				if (actionCount > 0 && actionsOffset < bytes.Length)
 				{
 					ulong maxActionBytes = (ulong)actionCount * 8;
@@ -828,6 +829,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 							var offset = i * 8;
 							int actionType = BinaryPrimitives.ReadInt32LittleEndian(actionSpan.Slice(offset, 4));
 							uint delayMs = BinaryPrimitives.ReadUInt32LittleEndian(actionSpan.Slice(offset + 4, 4));
+							if (actionType == (int)ServiceFailureActionType.RunCommand)
+								hasRunCommand = true;
 							actions.Add(new TboRegServiceFailureActionInfo
 							{
 								ActionType = FormatFailureActionType(actionType),
@@ -836,6 +839,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						}
 					}
 				}
+
+				if (hasRunCommand && !LooksLikeCommand(command))
+					command = null;
 
 				return new TboRegServiceFailureActionsInfo
 				{
@@ -992,7 +998,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static IEnumerable<string> EnumerateUtf16ZStrings(byte[] bytes)
 		{
-			for (int i = 0; i + 1 < bytes.Length; i += 2)
+			for (int i = 0; i + 1 < bytes.Length; i++)
 			{
 				if (bytes[i] == 0 && bytes[i + 1] == 0)
 					continue;
@@ -1001,17 +1007,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (!string.IsNullOrWhiteSpace(value))
 					yield return value;
 
-				int advance = 2;
+				int advance = 1;
 				for (int j = i; j + 1 < bytes.Length; j += 2)
 				{
 					if (bytes[j] == 0 && bytes[j + 1] == 0)
 					{
-						advance = (j - i) + 2;
+						advance = Math.Max(1, (j - i) + 2);
 						break;
 					}
 				}
 
-				i += Math.Max(advance - 2, 0);
+				i += Math.Max(advance - 1, 0);
 			}
 		}
 
