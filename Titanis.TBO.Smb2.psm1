@@ -49,29 +49,34 @@ function Out-File {
             }
         }
 
-        if (-not $isTboPath) {
-            $wrappedCmd = $ExecutionContext.InvokeCommand.GetCommand('Microsoft.PowerShell.Utility\\Out-File', [System.Management.Automation.CommandTypes]::Cmdlet)
-            $scriptCmd = { & $wrappedCmd @PSBoundParameters }
-            $script:steppablePipeline = $scriptCmd.GetSteppablePipeline($MyInvocation.CommandOrigin)
-            $script:steppablePipeline.Begin($PSCmdlet)
-        }
-        else {
-            $script:buffer = New-Object System.Collections.Generic.List[object]
-        }
+        $script:isTboPath = $isTboPath
+        $script:buffer = New-Object System.Collections.Generic.List[object]
     }
 
     process {
-        if ($script:steppablePipeline) {
-            $script:steppablePipeline.Process($_)
-        }
-        else {
-            [void]$script:buffer.Add($InputObject)
-        }
+        [void]$script:buffer.Add($InputObject)
     }
 
     end {
-        if ($script:steppablePipeline) {
-            $script:steppablePipeline.End()
+        if (-not $script:isTboPath) {
+            $outParams = @{}
+            if ($PSCmdlet.ParameterSetName -eq 'LiteralPath') {
+                $outParams.LiteralPath = $LiteralPath
+            }
+            else {
+                $outParams.FilePath = $FilePath
+            }
+
+            if ($Append) { $outParams.Append = $true }
+            if ($NoClobber) { $outParams.NoClobber = $true }
+            if ($Force) { $outParams.Force = $true }
+            if ($NoNewline) { $outParams.NoNewline = $true }
+            if ($Encoding) { $outParams.Encoding = $Encoding }
+            if ($Width) { $outParams.Width = $Width }
+            if ($PassThru) { $outParams.PassThru = $true }
+
+            $outParams.InputObject = $script:buffer
+            Microsoft.PowerShell.Utility\Out-File @outParams
             return
         }
 
@@ -109,8 +114,6 @@ function Out-File {
         }
     }
 }
-
-Export-ModuleMember -Function Out-File
 
 # Ensure the shim wins over the built-in cmdlet in the caller's session.
 try {

@@ -392,9 +392,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				var parms = this.DynamicParameters as SmbSetContentParams ?? new SmbSetContentParams();
 				var encoding = parms.Encoding ?? Encoding.UTF8;
-				var append = parms.Append.IsPresent;
-				var noClobber = parms.NoClobber.IsPresent && !parms.Force.IsPresent;
-				var createDisposition = append
+				var isAddContent = string.Equals(
+					this.Context?.MyInvocation?.MyCommand?.Name,
+					"Add-Content",
+					StringComparison.OrdinalIgnoreCase);
+				var force = this.Context?.Force ?? false;
+				var noClobber = this.Context?.MyInvocation?.BoundParameters?.ContainsKey("NoClobber") == true
+					&& this.Context.MyInvocation.BoundParameters["NoClobber"] is true;
+
+				if (force)
+					noClobber = false;
+
+				var createDisposition = isAddContent
 					? Smb2CreateDisposition.OpenIf
 					: noClobber
 						? Smb2CreateDisposition.Create
@@ -414,7 +423,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}, FileAccess.ReadWrite, cancellationToken).Result;
 
 				var stream = file.GetStream(true);
-				if (append)
+				if (isAddContent)
 					stream.Seek(0, SeekOrigin.End);
 
 				return (IContentWriter)new SmbContentWriter(stream, encoding, parms.NoNewline.IsPresent);
