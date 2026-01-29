@@ -7,6 +7,7 @@ using System.Management.Automation;
 using System.Management.Automation.Provider;
 using System.Management.Automation.Remoting;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -392,13 +393,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				var parms = this.DynamicParameters as SmbSetContentParams ?? new SmbSetContentParams();
 				var encoding = parms.Encoding ?? Encoding.UTF8;
-				var isAddContent = string.Equals(
-					this.Context?.MyInvocation?.MyCommand?.Name,
-					"Add-Content",
-					StringComparison.OrdinalIgnoreCase);
-				var force = this.Context?.Force ?? false;
-				var noClobber = this.Context?.MyInvocation?.BoundParameters?.ContainsKey("NoClobber") == true
-					&& this.Context.MyInvocation.BoundParameters["NoClobber"] is true;
+				var invocation = GetProviderInvocationInfo(this);
+				var commandName = invocation?.MyCommand?.Name;
+				var isAddContent = string.Equals(commandName, "Add-Content", StringComparison.OrdinalIgnoreCase);
+				var force = GetContextSwitch(this, "Force");
+				var noClobber = invocation?.BoundParameters != null
+					&& invocation.BoundParameters.ContainsKey("NoClobber")
+					&& invocation.BoundParameters["NoClobber"] is true;
 
 				if (force)
 					noClobber = false;
@@ -433,6 +434,35 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public object GetContentWriterDynamicParameters(string path)
 		{
 			return new SmbSetContentParams();
+		}
+
+		private static InvocationInfo? GetProviderInvocationInfo(CmdletProvider provider)
+		{
+			var context = GetProviderContext(provider);
+			if (context == null)
+				return null;
+
+			var prop = context.GetType().GetProperty("MyInvocation", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+			return prop?.GetValue(context) as InvocationInfo;
+		}
+
+		private static bool GetContextSwitch(CmdletProvider provider, string name)
+		{
+			var context = GetProviderContext(provider);
+			if (context == null)
+				return false;
+
+			var prop = context.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+			if (prop == null || prop.PropertyType != typeof(bool))
+				return false;
+
+			return prop.GetValue(context) is bool value && value;
+		}
+
+		private static object? GetProviderContext(CmdletProvider provider)
+		{
+			var prop = typeof(CmdletProvider).GetProperty("Context", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+			return prop?.GetValue(provider);
 		}
 	}
 
