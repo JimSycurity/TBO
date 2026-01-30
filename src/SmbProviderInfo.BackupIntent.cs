@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Titanis.Net;
 using Titanis.Smb2;
 using Titanis.Winterop;
+using Titanis.Winterop.Security;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
@@ -61,6 +62,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				var shareToUse = share ?? await this.SmbClient.GetShare(sharePath.GetShare(), timeoutToken).ConfigureAwait(false);
 				await using var dir = await shareToUse.OpenDirectoryAsync(string.Empty, timeoutToken).ConfigureAwait(false);
+				await dir.QueryDirAsync(
+					"*",
+					Smb2Directory.Smb2DirQueryOptions.None,
+					SecurityInfo.None,
+					Smb2Directory.DefaultQueryBufferSize,
+					timeoutToken).ConfigureAwait(false);
 
 				lock (this._backupIntentProbe)
 				{
