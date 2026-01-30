@@ -332,6 +332,17 @@ Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'One
 Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\Microsoft\Windows\*'
 ```
 
+#### Get-TBOScheduledTaskDetails
+
+Reads scheduled task XML definitions, parses triggers/actions/principal/settings, and returns the task file security descriptor.
+Use `-AsSddl` or `-AsWindows` (Windows only) to change the security descriptor format.
+
+```powershell
+Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask'
+Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask' | Get-TBOScheduledTaskDetails
+Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\Microsoft\Windows\Defrag\*' -AsSddl
+```
+
 #### Get-TBORegLsaKeys
 
 Derives the boot key (syskey) and LSA encryption key from the remote registry.
