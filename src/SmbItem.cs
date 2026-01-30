@@ -12,11 +12,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		private UncPath itemPath;
 		private Smb2DirEntry entry;
+		private readonly Winterop.ReparseTag? reparseTagOverride;
+		private readonly string? linkTargetOverride;
 
-		public SmbItem(UncPath itemPath, Smb2DirEntry entry)
+		public SmbItem(UncPath itemPath, Smb2DirEntry entry, Winterop.ReparseTag? reparseTagOverride = null, string? linkTargetOverride = null)
 		{
 			this.itemPath = itemPath;
 			this.entry = entry;
+			this.reparseTagOverride = reparseTagOverride;
+			this.linkTargetOverride = linkTargetOverride;
 		}
 
 		public string? Name => this.entry.FileName;
@@ -34,8 +38,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string FileAttributesText => FileAttributeFormatter.FormatValue(this.FileAttributes);
 		public string? ShortName => this.entry.ShortName;
 		public ulong FileId => this.entry.FileId;
-		public Winterop.ReparseTag ReparseTag => this.entry.ReparseTag;
-		public string LinkTarget => this.entry.LinkTarget;
+		public Winterop.ReparseTag ReparseTag => this.reparseTagOverride ?? this.entry.ReparseTag;
+		public string? LinkTarget => this.linkTargetOverride ?? this.entry.LinkTarget;
 
 		public string ItemClass
 		{

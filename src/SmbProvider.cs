@@ -256,14 +256,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (connectParams?.IncludeRootReparseInfo != null)
 						includeRootReparseInfo = connectParams.IncludeRootReparseInfo.Value;
 
-					var queryOptions = string.IsNullOrEmpty(uncPath.ShareRelativePath) && !includeRootReparseInfo
-						? Smb2Directory.Smb2DirQueryOptions.None
-						: Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo;
+					bool includeReparseInfo = !string.IsNullOrEmpty(uncPath.ShareRelativePath) || includeRootReparseInfo;
 
-					if (queryOptions == Smb2Directory.Smb2DirQueryOptions.None)
+					if (!includeReparseInfo)
 						this.smb.LogDiagnostic($"Skipping reparse info for root enumeration on '{snapshotPath.OriginalPath}'.");
 
-					var entries = dir.QueryDirAsync("*", queryOptions, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult();
+					var entries = dir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult();
 
 					foreach (var entry in entries)
 					{
@@ -272,11 +270,58 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						if (entry.FileName is "." or "..")
 							continue;
 						UncPath itemPath = snapshotPath.OriginalPath.Append(entry.FileName);
-						var smbItem = new SmbItem(itemPath, entry);
+						Winterop.ReparseTag? reparseTag = null;
+						string? linkTarget = null;
+						if (includeReparseInfo && 0 != (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint))
+						{
+							if (TryReadReparseInfo(snapshotPath.ResolvedPath.Append(entry.FileName), snapshotPath.TimeWarpToken, cancellationToken, out var tag, out var target))
+							{
+								reparseTag = tag;
+								linkTarget = target;
+							}
+						}
+						var smbItem = new SmbItem(itemPath, entry, reparseTag, linkTarget);
 						this.WriteItemObject(smbItem, itemPath.ToString(), 0 != (entry.FileAttributes & Winterop.FileAttributes.Directory));
 					}
 				}
 			});
+		}
+
+		private bool TryReadReparseInfo(UncPath resolvedPath, DateTime? timeWarpToken, CancellationToken cancellationToken, out Winterop.ReparseTag? tag, out string? linkTarget)
+		{
+			tag = null;
+			linkTarget = null;
+
+			try
+			{
+				using var file = this.smb.SmbClient.CreateFileAsync(resolvedPath, new Smb2CreateInfo
+				{
+					CreateDisposition = Smb2CreateDisposition.Open,
+					DesiredAccess = (uint)(Smb2AccessRights.ReadAttributes | Smb2AccessRights.ReadEa),
+					ShareAccess = Smb2ShareAccess.ReadWriteDelete,
+					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
+					CreateOptions = Smb2FileCreateOptions.SynchronousIoNonalert
+						| Smb2FileCreateOptions.OpenReparsePoint
+						| Smb2FileCreateOptions.OpenNoRecall
+						| Smb2FileCreateOptions.OpenForBackupIntent,
+					FileAttributes = 0,
+					TimeWarpToken = timeWarpToken
+				}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
+
+				var reparseInfo = file.GetReparseInfoAsync(cancellationToken).GetAwaiter().GetResult();
+				tag = reparseInfo.Tag;
+				if (reparseInfo is Winterop.SymbolicLinkInfo symlink)
+					linkTarget = symlink.PrintName;
+				else if (reparseInfo is Winterop.MountPointInfo mount)
+					linkTarget = mount.PrintName;
+
+				return true;
+			}
+			catch (Exception ex)
+			{
+				this.smb.LogDiagnostic($"Reparse info probe failed for '{resolvedPath}': {ex.Message}");
+				return false;
+			}
 		}
 
 		protected override string GetChildName(string path)

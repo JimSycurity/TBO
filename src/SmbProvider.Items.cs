@@ -114,6 +114,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						FileAttributes = Winterop.FileAttributes.None,
 						CreateOptions = Smb2FileCreateOptions.Directory
 							| Smb2FileCreateOptions.SynchronousIoNonalert
+							| Smb2FileCreateOptions.OpenReparsePoint
 							| Smb2FileCreateOptions.OpenForBackupIntent,
 						ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
 						RequestMaximalAccess = true,
@@ -125,8 +126,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (!file.IsDirectory)
 						return false;
 
+					if (0 != (file.FileAttributes & Winterop.FileAttributes.ReparsePoint))
+						return false;
+
 					var dir = (Smb2Directory)file;
-					foreach (var entry in dir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult())
+					foreach (var entry in dir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult())
 					{
 						if (string.IsNullOrEmpty(entry.FileName))
 							continue;
