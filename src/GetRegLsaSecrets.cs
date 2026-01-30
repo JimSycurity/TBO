@@ -15,6 +15,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string KeyPath { get; init; } = string.Empty;
 		public DateTime? LastWriteTime { get; init; }
 		public string? Secret { get; init; }
+		public string? DpapiMachineKey { get; init; }
+		public string? DpapiUserKey { get; init; }
 		public byte[]? SecretBytes { get; init; }
 		public byte[]? SecretRawBytes { get; init; }
 		public byte[]? EncryptedBytes { get; init; }
@@ -71,10 +73,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 					byte[]? payload = null;
 					string? secretText = null;
+					string? dpapiMachineKey = null;
+					string? dpapiUserKey = null;
 					if (TryExtractSecretPayload(decrypted, out var payloadBytes))
 					{
 						payload = payloadBytes;
-						secretText = TryDecodeSecretString(payloadBytes);
+						secretText = FormatSecretText(name, payloadBytes, TryDecodeSecretString(payloadBytes));
+						if (TrySplitDpapiSecret(name, payloadBytes, out var machineKey, out var userKey))
+						{
+							dpapiMachineKey = machineKey;
+							dpapiUserKey = userKey;
+						}
 					}
 
 					var keyPath = $"HKEY_LOCAL_MACHINE\\{SecretsPath}\\{name}\\CurrVal";
@@ -85,6 +94,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						KeyPath = keyPath,
 						LastWriteTime = lastWriteTime,
 						Secret = secretText,
+						DpapiMachineKey = dpapiMachineKey,
+						DpapiUserKey = dpapiUserKey,
 						SecretBytes = payload,
 						SecretRawBytes = decrypted,
 						EncryptedBytes = secretBlob

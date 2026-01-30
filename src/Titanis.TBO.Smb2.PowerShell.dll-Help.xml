@@ -2052,6 +2052,8 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:noun>TBORegLsaSecrets</command:noun>
       <maml:description>
         <maml:para>Decrypts LSA secrets from the remote registry using the derived LSA key.</maml:para>
+        <maml:para>Binary secrets such as DPAPI_SYSTEM, NL$KM, and $MACHINE.ACC are returned as hex strings in Secret.</maml:para>
+        <maml:para>For DPAPI_SYSTEM, the machine/user halves are split into DpapiMachineKey and DpapiUserKey.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -2129,7 +2131,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:verb>Get</command:verb>
       <command:noun>TBORegMachineAccount</command:noun>
       <maml:description>
-        <maml:para>Decrypts the $MACHINE.ACC secret and returns the machine account password and NT hash.</maml:para>
+        <maml:para>Decrypts the $MACHINE.ACC secret and returns the machine account password and NT hash. The password may be emitted as hex when it is not a readable string.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -2223,6 +2225,69 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
         <maml:code>Get-TBORegAutoLogon -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
         <maml:remarks>
           <maml:para>Reads the Winlogon autologon settings from the remote registry.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBORegTCPIP</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBORegTCPIP</command:noun>
+      <maml:description>
+        <maml:para>Reads TCP/IP configuration from Tcpip/Tcpip6 registry keys and returns global settings plus per-interface details.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBORegTCPIP</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Protocol</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Protocol</maml:name>
+        <maml:description>
+          <maml:para>Protocol to query: IPv4, IPv6, or Both. Default is Both.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Returns TCP/IP configuration for IPv4 and IPv6.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol -Protocol IPv6</maml:code>
+        <maml:remarks>
+          <maml:para>Returns TCP/IP configuration for IPv6 only.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol | Select-Object -Expand Interfaces</maml:code>
+        <maml:remarks>
+          <maml:para>Expands interface-level configuration entries.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

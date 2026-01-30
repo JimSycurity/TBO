@@ -3,12 +3,15 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Globalization;
+using System.IO;
 using System.Management.Automation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Threading;
 using Titanis;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Msrpc.Msrrp.Cli;
+using Titanis.Winterop;
 using Titanis.Winterop.Sam;
 
 namespace Titanis.Tbo.Smb2.PowerShell
@@ -32,6 +35,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string SamUsersPath = @"SAM\SAM\Domains\Account\Users";
 		private const ulong BootKeyByteSwap = 0xEC6B4D50F91273A8;
 		private static readonly string[] BootKeySubkeys = { "JD", "Skew1", "GBG", "Data" };
+		private const int SamUserAttrCount = 17;
+		private const int SamUserAttrInfoSize = 12;
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
@@ -43,6 +48,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				{
 					syskey = ExtractSyskey(session.Client, cancellationToken);
 					store = ExtractSamStore(smb, session.Client, syskey, cancellationToken);
+				}
+				catch (Exception ex) when (IsRetryableInitException(ex))
+				{
+					throw;
 				}
 				catch (Exception ex)
 				{
@@ -93,6 +102,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						if (bytes == null || bytes.Length == 0)
 						{
 							this.WriteWarning($"Get-TBORegSamHashes failed to read SAM user {keyName}: value is empty.");
+							continue;
+						}
+
+						if (!TryValidateSamUserRecord(bytes, out var reason))
+						{
+							this.WriteWarning($"Get-TBORegSamHashes skipped SAM user {keyName}: {reason ?? "record is invalid"}.");
 							continue;
 						}
 
@@ -225,6 +240,50 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrEmpty(childName))
 				return basePath;
 			return $"{basePath}\\{childName}";
+		}
+
+		private static bool IsRetryableInitException(Exception ex)
+		{
+			if (ex is NtstatusException nt && nt.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+				return true;
+			if (ex is IOException or SocketException)
+				return true;
+			return ex.InnerException != null && IsRetryableInitException(ex.InnerException);
+		}
+
+		private static bool TryValidateSamUserRecord(byte[] bytes, out string? reason)
+		{
+			reason = null;
+			int attrTableSize = SamUserAttrCount * SamUserAttrInfoSize;
+			if (bytes.Length < attrTableSize)
+			{
+				reason = "value is too short for the attribute table";
+				return false;
+			}
+
+			for (int i = 0; i < SamUserAttrCount; i++)
+			{
+				int offset = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(i * SamUserAttrInfoSize, 4));
+				int length = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(i * SamUserAttrInfoSize + 4, 4));
+
+				if (offset < 0 || length < 0)
+				{
+					reason = $"attribute {i} has a negative offset or length";
+					return false;
+				}
+
+				if (offset == 0 && length == 0)
+					continue;
+
+				long end = (long)attrTableSize + offset + length;
+				if (end > bytes.Length)
+				{
+					reason = $"attribute {i} is out of range";
+					return false;
+				}
+			}
+
+			return true;
 		}
 	}
 }

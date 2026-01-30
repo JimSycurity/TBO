@@ -237,6 +237,35 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
+		protected static string? FormatSecretText(string? name, byte[] payload, string? decoded)
+		{
+			if (payload.Length == 0)
+				return decoded;
+
+			if (ShouldHexEncodeSecret(name))
+				return payload.ToHexString();
+
+			return decoded;
+		}
+
+		protected static bool TrySplitDpapiSecret(string? name, byte[] payload, out string? machineKey, out string? userKey)
+		{
+			machineKey = null;
+			userKey = null;
+
+			if (string.IsNullOrWhiteSpace(name))
+				return false;
+			if (!name.Equals("DPAPI_SYSTEM", StringComparison.OrdinalIgnoreCase))
+				return false;
+			if (payload.Length == 0 || payload.Length % 2 != 0)
+				return false;
+
+			int half = payload.Length / 2;
+			machineKey = payload.AsSpan(0, half).ToHexString();
+			userKey = payload.AsSpan(half, half).ToHexString();
+			return true;
+		}
+
 		protected static byte[]? ExtractValueBytes(RegistryValueInfo info)
 		{
 			if (info.Bytes != null && info.Bytes.Length > 0)
@@ -537,6 +566,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (length == data.Length)
 				return data;
 			return data.AsSpan(0, length).ToArray();
+		}
+
+		private static bool ShouldHexEncodeSecret(string? name)
+		{
+			if (string.IsNullOrWhiteSpace(name))
+				return false;
+
+			if (name.Equals("DPAPI_SYSTEM", StringComparison.OrdinalIgnoreCase))
+				return true;
+			if (name.Equals("NL$KM", StringComparison.OrdinalIgnoreCase))
+				return true;
+			if (name.Equals("$MACHINE.ACC", StringComparison.OrdinalIgnoreCase))
+				return true;
+			if (name.StartsWith("DPAPI", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			return false;
 		}
 	}
 }

@@ -63,7 +63,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (TryExtractSecretPayload(decrypted, out var payloadBytes))
 				{
 					payload = payloadBytes;
-					password = TryDecodeSecretString(payloadBytes);
+					password = FormatSecretText(MachineSecretName, payloadBytes, TryDecodeSecretString(payloadBytes));
 				}
 
 				byte[]? ntlmHash = null;
