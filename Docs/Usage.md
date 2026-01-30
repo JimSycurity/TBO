@@ -322,6 +322,16 @@ Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name '
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv' | Select-Object -Expand TriggerInfo
 ```
 
+#### Get-TBOScheduledTasks
+
+Enumerates scheduled task definitions from the Tasks folder and maps them to TaskCache registry entries for task IDs and registry timestamps.
+
+```powershell
+Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'OneDrive*'
+Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\Microsoft\Windows\*'
+```
+
 #### Get-TBORegLsaKeys
 
 Derives the boot key (syskey) and LSA encryption key from the remote registry.
