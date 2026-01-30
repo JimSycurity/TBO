@@ -117,31 +117,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			out string? lsaKeySource)
 		{
 			lsaKeySource = null;
-			var policySpec = new RegistryPathSpec(
-				RegistryRootKey.LocalMachine,
-				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
-				PolicyPath);
-
 			byte[]? polEkList = null;
 			byte[]? legacy = null;
 			try
 			{
-				using var policyKey = OpenRegistryKey(client, policySpec, RegistryAccessRights.QueryValue, cancellationToken);
-				polEkList = TryReadValueBytes(policyKey, "PolEKList", cancellationToken);
-				legacy = TryReadValueBytes(policyKey, "PolSecretEncryptionKey", cancellationToken);
+				polEkList = TryReadPolicySecretValue(client, "PolEKList", cancellationToken);
+				legacy = TryReadPolicySecretValue(client, "PolSecretEncryptionKey", cancellationToken);
 			}
 			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 			{
 				polEkList = ExecuteRegistryOperationWithResult(smb, cancellationToken, session =>
 				{
-					using var policyKey = OpenRegistryKey(session.Client, policySpec, RegistryAccessRights.QueryValue, cancellationToken);
-					return TryReadValueBytes(policyKey, "PolEKList", cancellationToken);
+					return TryReadPolicySecretValue(session.Client, "PolEKList", cancellationToken);
 				});
 
 				legacy = ExecuteRegistryOperationWithResult(smb, cancellationToken, session =>
 				{
-					using var policyKey = OpenRegistryKey(session.Client, policySpec, RegistryAccessRights.QueryValue, cancellationToken);
-					return TryReadValueBytes(policyKey, "PolSecretEncryptionKey", cancellationToken);
+					return TryReadPolicySecretValue(session.Client, "PolSecretEncryptionKey", cancellationToken);
 				});
 			}
 
@@ -150,7 +142,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var decrypted = DecryptLsaData(polEkList, bootKey);
 				if (decrypted.Length >= 100)
 				{
-					lsaKeySource = "PolEKList";
+					lsaKeySource = "Policy\\PolEKList";
 					return decrypted.AsSpan(68, 32).ToArray();
 				}
 			}
@@ -160,12 +152,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var lsaKey = DecryptLegacyLsaKey(legacy, bootKey);
 				if (lsaKey != null)
 				{
-					lsaKeySource = "PolSecretEncryptionKey";
+					lsaKeySource = "Policy\\PolSecretEncryptionKey";
 					return lsaKey;
 				}
 			}
 
 			return null;
+		}
+
+		private byte[]? TryReadPolicySecretValue(RemoteRegistryClient client, string name, CancellationToken cancellationToken)
+		{
+			var keyPath = CombineSubkeyPath(PolicyPath, name);
+			var spec = new RegistryPathSpec(
+				RegistryRootKey.LocalMachine,
+				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
+				keyPath);
+
+			try
+			{
+				using var key = OpenRegistryKey(client, spec, RegistryAccessRights.QueryValue, cancellationToken);
+				var valueInfo = key.GetValue(null, cancellationToken).GetAwaiter().GetResult();
+				return ExtractValueBytes(valueInfo);
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex))
+			{
+				return null;
+			}
 		}
 
 		private T ExecuteRegistryOperationWithResult<T>(
@@ -181,15 +193,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			try
 			{
 				var valueInfo = key.GetValue(name, cancellationToken).GetAwaiter().GetResult();
-				if (valueInfo.Bytes != null && valueInfo.Bytes.Length > 0)
-					return valueInfo.Bytes;
-				if (valueInfo.TypedValue is byte[] typedBytes && typedBytes.Length > 0)
-					return typedBytes;
+				return ExtractValueBytes(valueInfo);
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
 			}
 
+			return null;
+		}
+
+		private static byte[]? ExtractValueBytes(RegistryValueInfo info)
+		{
+			if (info.Bytes != null && info.Bytes.Length > 0)
+				return info.Bytes;
+			if (info.TypedValue is byte[] typedBytes && typedBytes.Length > 0)
+				return typedBytes;
 			return null;
 		}
 
