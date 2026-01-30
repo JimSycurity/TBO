@@ -131,6 +131,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var share = client.GetShare(uncPath, cancellationToken).Result;
 				try
 				{
+					this.smb.EnsureBackupIntentAccessAsync(uncPath, share, cancellationToken).GetAwaiter().GetResult();
 					var conn_ = share;
 					share = null;
 
