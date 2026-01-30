@@ -346,6 +346,18 @@ Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'Tes
 Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\Microsoft\Windows\Defrag\*' -AsSddl
 ```
 
+#### Get-TBORegTCPIP
+
+Reads TCP/IP configuration from `Tcpip` and `Tcpip6` registry keys, including DNS/search list, routing, and interface-level settings. Interface GUIDs are mapped to friendly names when available.
+
+```powershell
+Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol -Protocol IPv6
+Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Select-Object -Expand Interfaces |
+  Where-Object { $_.DhcpEnabled -eq $false }
+```
+
 #### Get-TBORegLsaKeys
 
 Derives the boot key (syskey) and LSA encryption key from the remote registry.
