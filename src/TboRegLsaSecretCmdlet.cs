@@ -216,7 +216,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				try
 				{
 					var str = Encoding.Unicode.GetString(payload).TrimEnd('\0');
-					if (!string.IsNullOrEmpty(str))
+					if (IsLikelySecretText(str))
 						return str;
 				}
 				catch
@@ -227,7 +227,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			try
 			{
 				var str = Encoding.UTF8.GetString(payload).TrimEnd('\0');
-				if (!string.IsNullOrEmpty(str))
+				if (IsLikelySecretText(str))
 					return str;
 			}
 			catch
@@ -501,6 +501,33 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (printable > 0 && control == 0)
 				score += 4;
 			return score;
+		}
+
+		private static bool IsLikelySecretText(string? text)
+		{
+			if (string.IsNullOrWhiteSpace(text))
+				return false;
+
+			int asciiPrintable = 0;
+			int controlCount = 0;
+			int length = text.Length;
+
+			for (int i = 0; i < length; i++)
+			{
+				char c = text[i];
+				if (c == '\uFFFD')
+					return false;
+				if (char.IsControl(c) && c != '\r' && c != '\n' && c != '\t')
+					controlCount++;
+				if (c >= ' ' && c <= '~')
+					asciiPrintable++;
+			}
+
+			if (controlCount > 0 || asciiPrintable == 0)
+				return false;
+
+			double asciiRatio = (double)asciiPrintable / length;
+			return asciiRatio >= 0.6;
 		}
 		protected static byte[] TrimTrailingNulls(byte[] data)
 		{
