@@ -47,10 +47,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
-			var taskCache = ExecuteRegistryOperation(smb, cancellationToken, session =>
+			Dictionary<string, TaskCacheEntry> taskCache;
+			try
 			{
-				return CollectTaskCacheEntries(session.Client, cancellationToken);
-			});
+				taskCache = ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					return CollectTaskCacheEntries(session.Client, cancellationToken);
+				});
+			}
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+			{
+				smb.LogException($"Get-TBOScheduledTasks failed to read TaskCache registry for {this.ServerName}", ex);
+				this.WriteWarning("Get-TBOScheduledTasks could not read TaskCache registry data (STATUS_PIPE_BUSY). TaskId and RegistryLastWriteTime will be blank.");
+				taskCache = new Dictionary<string, TaskCacheEntry>(StringComparer.OrdinalIgnoreCase);
+			}
 
 			List<TaskFileEntry> taskFiles;
 			try
