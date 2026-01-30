@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text;
@@ -173,18 +174,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (decrypted.Length == 0)
 				return false;
 
-			if (decrypted.Length >= 8)
+			if (decrypted.Length < 8)
+				return false;
+
+			var candidates = CollectPayloadCandidates(decrypted);
+			if (candidates.Count > 0)
 			{
-				int declared = BitConverter.ToInt32(decrypted, 0);
-				if (declared > 0)
+				var best = candidates[0];
+				for (int i = 1; i < candidates.Count; i++)
 				{
-					if (TrySlice(decrypted, 8, declared, out payload))
-						return true;
-					if (TrySlice(decrypted, 12, declared, out payload))
-						return true;
-					if (TrySlice(decrypted, 16, declared, out payload))
-						return true;
+					if (candidates[i].Score > best.Score)
+						best = candidates[i];
 				}
+
+				if (TrySlice(decrypted, best.Offset, best.Length, out payload))
+					return true;
 			}
 
 			payload = TrimTrailingNulls(decrypted);
@@ -367,7 +371,92 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return true;
 		}
 
-		private static byte[] TrimTrailingNulls(byte[] data)
+		private readonly struct PayloadCandidate
+		{
+			public PayloadCandidate(int offset, int length, int score)
+			{
+				Offset = offset;
+				Length = length;
+				Score = score;
+			}
+
+			public int Offset { get; }
+			public int Length { get; }
+			public int Score { get; }
+		}
+
+		private static List<PayloadCandidate> CollectPayloadCandidates(byte[] decrypted)
+		{
+			var candidates = new List<PayloadCandidate>();
+			int[] lengthOffsets = { 0, 4, 8 };
+			int[] payloadOffsets = { 8, 12, 16 };
+
+			foreach (var lengthOffset in lengthOffsets)
+			{
+				if (!TryReadLength(decrypted, lengthOffset, out var declared))
+					continue;
+
+				foreach (var payloadOffset in payloadOffsets)
+				{
+					if (payloadOffset <= lengthOffset)
+						continue;
+
+					AddCandidate(candidates, decrypted, payloadOffset, declared);
+
+					if (declared > 0 && declared <= (decrypted.Length - payloadOffset) / 2)
+						AddCandidate(candidates, decrypted, payloadOffset, declared * 2);
+				}
+			}
+
+			return candidates;
+		}
+
+		private static bool TryReadLength(byte[] data, int offset, out int length)
+		{
+			length = 0;
+			if (offset < 0 || offset + 4 > data.Length)
+				return false;
+
+			uint value = BitConverter.ToUInt32(data, offset);
+			if (value == 0 || value > int.MaxValue)
+				return false;
+
+			length = (int)value;
+			return true;
+		}
+
+		private static void AddCandidate(List<PayloadCandidate> candidates, byte[] data, int offset, int length)
+		{
+			if (length <= 0 || offset < 0 || offset > data.Length)
+				return;
+			if (offset + length > data.Length)
+				return;
+
+			int score = ScoreCandidate(data, offset + length);
+			candidates.Add(new PayloadCandidate(offset, length, score));
+		}
+
+		private static int ScoreCandidate(byte[] data, int payloadEnd)
+		{
+			if (payloadEnd < 0 || payloadEnd > data.Length)
+				return int.MinValue;
+
+			int trailingTotal = data.Length - payloadEnd;
+			int trailingZero = 0;
+			for (int i = payloadEnd; i < data.Length; i++)
+			{
+				if (data[i] == 0)
+					trailingZero++;
+			}
+
+			int trailingNonZero = trailingTotal - trailingZero;
+			int score = (trailingZero * 2) - trailingNonZero;
+			if (payloadEnd % 2 == 0)
+				score += 1;
+			return score;
+		}
+
+		protected static byte[] TrimTrailingNulls(byte[] data)
 		{
 			int length = data.Length;
 			while (length > 0 && data[length - 1] == 0)

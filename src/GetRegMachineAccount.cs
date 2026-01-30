@@ -67,7 +67,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 
 				byte[]? ntlmHash = null;
-				if (!string.IsNullOrEmpty(password))
+				if (payload != null && payload.Length > 0)
+				{
+					var hashInput = TrimTrailingNulls(payload);
+					if (hashInput.Length > 0 && hashInput.Length % 2 == 0)
+						ntlmHash = SlimHashAlgorithm.ComputeHash<Md4Context>(hashInput);
+				}
+
+				if (ntlmHash == null && !string.IsNullOrEmpty(password))
 				{
 					var passwordBytes = Encoding.Unicode.GetBytes(password);
 					ntlmHash = SlimHashAlgorithm.ComputeHash<Md4Context>(passwordBytes);
