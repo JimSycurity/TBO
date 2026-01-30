@@ -29,6 +29,7 @@ DYNAMIC PARAMETERS
       - Dialects, Capabilities, SecurityMode, RequireSecureNegotiate
       - ClientGuid, PreauthSaltLength, Ciphers, SigningAlgorithms
       - CompressionCapabilities, CompressionAlgorithms
+      - IncludeRootReparseInfo (RootReparseInfo)
       - UserName, UserDomain, Password, NtlmHash, Workstation
       - AesKey, DesKey
       - Tgt, Tickets, TicketCache
@@ -82,5 +83,6 @@ NOTES
     - Use Copy-TBOSmbItem for file copies between local and SMB paths.
     - Use provider-qualified paths to target UNC paths without a drive:
         TBO.Smb2::\\server\share\path
+    - Root listings skip reparse metadata by default. Use -IncludeRootReparseInfo to enable it.
     - Get-Acl/Set-Acl are Windows-only. Snapshot paths are read-only.
     - Set TITANIS_TBO_LOG=1 to enable diagnostic logging.

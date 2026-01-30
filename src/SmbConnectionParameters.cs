@@ -31,6 +31,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				CompressionAlgorithms = Smb2ConnectionOptions.DefaultCompressionAlgorithms,
 				KdcPort = 88,
 				TicketCache = Environment.GetEnvironmentVariable(KerberosClient.Krb5CacheVariableName),
+				IncludeRootReparseInfo = false,
 				RegistryRetryPolicy = RegistryRetryPolicyType.Practical,
 				RegistryRetryCount = 6,
 				RegistryRetryDelayMs = 200,
@@ -69,6 +70,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public CompressionCaps? CompressionCapabilities { get; set; }
 		[Parameter]
 		public CompressionAlgorithm[]? CompressionAlgorithms { get; set; }
+		[Parameter]
+		[Alias("RootReparseInfo")]
+		public bool? IncludeRootReparseInfo { get; set; }
 
 		[Parameter]
 		[Alias("RetryPolicy", "RegRetryPolicy")]
@@ -106,6 +110,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				SigningAlgorithms = this.SigningAlgorithms ?? baseParams.SigningAlgorithms,
 				CompressionCapabilities = this.CompressionCapabilities ?? baseParams.CompressionCapabilities,
 				CompressionAlgorithms = this.CompressionAlgorithms ?? baseParams.CompressionAlgorithms,
+				IncludeRootReparseInfo = this.IncludeRootReparseInfo ?? baseParams.IncludeRootReparseInfo,
 				RegistryRetryPolicy = this.RegistryRetryPolicy ?? baseParams.RegistryRetryPolicy,
 				RegistryRetryCount = this.RegistryRetryCount ?? baseParams.RegistryRetryCount,
 				RegistryRetryDelayMs = this.RegistryRetryDelayMs ?? baseParams.RegistryRetryDelayMs,

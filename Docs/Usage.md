@@ -48,6 +48,8 @@ Get-Content tbo:\Temp\test.txt
 
 Use `Get-Help about_TBO_Smb2_Provider` for supported item types, dynamic parameters, and limitations.
 
+Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadata by default to avoid per-entry opens on large roots. Use `-IncludeRootReparseInfo` (alias `-RootReparseInfo`) on `New-PSDrive` or `Set-TBOSmbConnectOptions` to enable it.
+
 On Windows, `Get-Acl` and `Set-Acl` work with `tbo:\` and provider-qualified UNC paths. Snapshot paths are read-only.
 
 ## Provider (TBO.Reg) (Preview)
@@ -110,6 +112,7 @@ Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -HostNa
 Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
 Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -TicketCache C:\temp\krb5cc
 Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -AesKey 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef -Kdc corp1-dc01.corp1.lab.home-labs.lol
+Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeRootReparseInfo
 ```
 
 ### Set-TBORegConnectOptions

@@ -251,7 +251,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					OplockLevel = Smb2OplockLevel.None
 				}, FileAccess.Read, cancellationToken).Result)
 				{
-					foreach (var entry in dir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).Result)
+					bool includeRootReparseInfo = false;
+					var connectParams = this.smb.GetConnectParametersFor(uncPath.ServerName, true) as SmbConnectionParameters;
+					if (connectParams?.IncludeRootReparseInfo != null)
+						includeRootReparseInfo = connectParams.IncludeRootReparseInfo.Value;
+
+					var queryOptions = string.IsNullOrEmpty(uncPath.ShareRelativePath) && !includeRootReparseInfo
+						? Smb2Directory.Smb2DirQueryOptions.None
+						: Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo;
+
+					if (queryOptions == Smb2Directory.Smb2DirQueryOptions.None)
+						this.smb.LogDiagnostic($"Skipping reparse info for root enumeration on '{snapshotPath.OriginalPath}'.");
+
+					var entries = dir.QueryDirAsync("*", queryOptions, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult();
+
+					foreach (var entry in entries)
 					{
 						if (string.IsNullOrEmpty(entry.FileName))
 							continue;
@@ -325,6 +339,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw new NotSupportedException("Snapshot paths are read-only.");
 
 			UncPath uncPath = snapshotPath.ResolvedPath;
+			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
+				throw new NotSupportedException("Get-Content and Set-Content require a file path, not a share root.");
 
 			this.BeginOperation(cancellationToken =>
 			{
@@ -355,6 +371,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			var snapshotPath = ResolveSnapshotPath(path);
 			UncPath uncPath = snapshotPath.ResolvedPath;
+			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
+				throw new NotSupportedException("Get-Content requires a file path, not a share root.");
 
 			return this.BeginOperation(cancellationToken =>
 			{
@@ -389,6 +407,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw new NotSupportedException("Snapshot paths are read-only.");
 
 			UncPath uncPath = snapshotPath.ResolvedPath;
+			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
+				throw new NotSupportedException("Set-Content and Add-Content require a file path, not a share root.");
 
 			return this.BeginOperation(cancellationToken =>
 			{

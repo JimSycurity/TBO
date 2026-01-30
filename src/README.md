@@ -19,6 +19,8 @@ Set-Location tbo:\
 Get-ChildItem
 ```
 
+Note: Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadata by default. Use `-IncludeRootReparseInfo` (alias `-RootReparseInfo`) on `New-PSDrive` or `Set-TBOSmbConnectOptions` to enable it.
+
 ## Local Logging
 
 Set `TITANIS_TBO_LOG` to `1` or to a file path. When set to `1`, logs go to
