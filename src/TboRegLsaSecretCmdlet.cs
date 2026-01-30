@@ -177,6 +177,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (decrypted.Length < 8)
 				return false;
 
+			if (TryReadLength(decrypted, 0, out var declared))
+			{
+				if (TrySlice(decrypted, 16, declared, out payload))
+					return true;
+				if (declared > 0 && declared <= (decrypted.Length - 16) / 2)
+				{
+					if (TrySlice(decrypted, 16, declared * 2, out payload))
+						return true;
+				}
+			}
+
 			var candidates = CollectPayloadCandidates(decrypted);
 			if (candidates.Count > 0)
 			{
@@ -432,15 +443,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (offset + length > data.Length)
 				return;
 
-			int score = ScoreCandidate(data, offset + length);
+			int score = ScoreCandidate(data, offset, length);
 			candidates.Add(new PayloadCandidate(offset, length, score));
 		}
 
-		private static int ScoreCandidate(byte[] data, int payloadEnd)
+		private static int ScoreCandidate(byte[] data, int offset, int length)
 		{
-			if (payloadEnd < 0 || payloadEnd > data.Length)
+			if (offset < 0 || length <= 0 || offset + length > data.Length)
 				return int.MinValue;
 
+			int payloadEnd = offset + length;
 			int trailingTotal = data.Length - payloadEnd;
 			int trailingZero = 0;
 			for (int i = payloadEnd; i < data.Length; i++)
@@ -451,11 +463,45 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			int trailingNonZero = trailingTotal - trailingZero;
 			int score = (trailingZero * 2) - trailingNonZero;
-			if (payloadEnd % 2 == 0)
+			if (length % 2 == 0)
 				score += 1;
+			score += ScoreUtf16Payload(data, offset, length);
 			return score;
 		}
 
+		private static int ScoreUtf16Payload(byte[] data, int offset, int length)
+		{
+			if (length < 2 || length % 2 != 0)
+				return 0;
+
+			int printable = 0;
+			int control = 0;
+			int nulls = 0;
+			int charCount = length / 2;
+			for (int i = 0; i < charCount; i++)
+			{
+				int index = offset + (i * 2);
+				var value = (ushort)(data[index] | (data[index + 1] << 8));
+				if (value == 0)
+				{
+					nulls++;
+					continue;
+				}
+
+				char c = (char)value;
+				if (char.IsControl(c))
+					control++;
+				else if (char.IsLetterOrDigit(c) || char.IsPunctuation(c) || char.IsSymbol(c) || char.IsWhiteSpace(c))
+					printable++;
+				else
+					control++;
+			}
+
+			int score = (printable * 3) - (control * 3) - nulls;
+			if (printable > 0 && control == 0)
+				score += 4;
+			return score;
+		}
 		protected static byte[] TrimTrailingNulls(byte[] data)
 		{
 			int length = data.Length;
