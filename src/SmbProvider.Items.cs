@@ -92,6 +92,62 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
+		protected override bool HasChildItems(string path)
+		{
+			if (string.IsNullOrWhiteSpace(path))
+				throw new ArgumentException("Path must be provided.", nameof(path));
+
+			var snapshotPath = ResolveSnapshotPath(path);
+			UncPath uncPath = snapshotPath.ResolvedPath;
+
+			return this.BeginOperation(cancellationToken =>
+			{
+				Smb2OpenFileObjectBase? file = null;
+				try
+				{
+					file = this.smb.SmbClient.CreateFileAsync(uncPath, new Smb2CreateInfo
+					{
+						CreateDisposition = Smb2CreateDisposition.Open,
+						Priority = Smb2Priority.OpenDir,
+						DesiredAccess = (uint)Smb2AccessRights.DefaultOpenDirAccess,
+						ShareAccess = Smb2ShareAccess.DefaultDirShare,
+						FileAttributes = Winterop.FileAttributes.None,
+						CreateOptions = Smb2FileCreateOptions.Directory
+							| Smb2FileCreateOptions.SynchronousIoNonalert
+							| Smb2FileCreateOptions.OpenForBackupIntent,
+						ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
+						RequestMaximalAccess = true,
+						QueryOnDiskId = true,
+						TimeWarpToken = snapshotPath.TimeWarpToken,
+						OplockLevel = Smb2OplockLevel.None
+					}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
+
+					if (!file.IsDirectory)
+						return false;
+
+					var dir = (Smb2Directory)file;
+					foreach (var entry in dir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult())
+					{
+						if (string.IsNullOrEmpty(entry.FileName))
+							continue;
+						if (entry.FileName is "." or "..")
+							continue;
+						return true;
+					}
+					return false;
+				}
+				catch (Winterop.NtstatusException ex) when (ex.StatusCode == Winterop.Ntstatus.STATUS_NOT_A_DIRECTORY)
+				{
+					return false;
+				}
+				finally
+				{
+					if (file != null)
+						file.CloseAsync(cancellationToken).GetAwaiter().GetResult();
+				}
+			});
+		}
+
 		private void RemoveItemCore(UncPath uncPath, bool recurse, System.Threading.CancellationToken cancellationToken)
 		{
 			Smb2OpenFileObjectBase? file = null;
