@@ -47,12 +47,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var pipeBusyCount = 0;
 			Dictionary<string, TaskCacheEntry> taskCache;
 			try
 			{
 				taskCache = ExecuteRegistryOperation(smb, cancellationToken, session =>
 				{
-					return CollectTaskCacheEntries(session.Client, cancellationToken);
+					return CollectTaskCacheEntries(session.Client, cancellationToken, ref pipeBusyCount);
 				});
 			}
 			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
@@ -60,6 +61,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				smb.LogException($"Get-TBOScheduledTasks failed to read TaskCache registry for {this.ServerName}", ex);
 				this.WriteWarning("Get-TBOScheduledTasks could not read TaskCache registry data (STATUS_PIPE_BUSY). TaskId and RegistryLastWriteTime will be blank.");
 				taskCache = new Dictionary<string, TaskCacheEntry>(StringComparer.OrdinalIgnoreCase);
+			}
+			if (pipeBusyCount > 0)
+			{
+				this.WriteWarning($"Get-TBOScheduledTasks skipped {pipeBusyCount} TaskCache subkey(s) due to STATUS_PIPE_BUSY. TaskId/RegistryLastWriteTime may be missing for some tasks.");
 			}
 
 			List<TaskFileEntry> taskFiles;
@@ -192,7 +197,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
 		}
 
-		private Dictionary<string, TaskCacheEntry> CollectTaskCacheEntries(RemoteRegistryClient client, CancellationToken cancellationToken)
+		private Dictionary<string, TaskCacheEntry> CollectTaskCacheEntries(RemoteRegistryClient client, CancellationToken cancellationToken, ref int pipeBusyCount)
 		{
 			var spec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
@@ -201,7 +206,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			using var treeKey = OpenRegistryKey(client, spec, RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue, cancellationToken);
 			var entries = new Dictionary<string, TaskCacheEntry>(StringComparer.OrdinalIgnoreCase);
-			CollectTaskCacheEntries(treeKey, string.Empty, entries, cancellationToken);
+			CollectTaskCacheEntries(treeKey, string.Empty, entries, cancellationToken, ref pipeBusyCount);
 			return entries;
 		}
 
@@ -209,7 +214,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			RegistryKey parentKey,
 			string relativePath,
 			Dictionary<string, TaskCacheEntry> entries,
-			CancellationToken cancellationToken)
+			CancellationToken cancellationToken,
+			ref int pipeBusyCount)
 		{
 			var subkeys = CollectSubkeys(parentKey, cancellationToken);
 			foreach (var subkeyInfo in subkeys)
@@ -227,6 +233,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
 						BackupOptions,
 						cancellationToken).GetAwaiter().GetResult();
+				}
+				catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+				{
+					pipeBusyCount++;
+					continue;
 				}
 				catch (Win32Exception ex) when (IsMissingKey(ex) || ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
 				{
@@ -255,7 +266,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						};
 					}
 
-					CollectTaskCacheEntries(subkey, childRelative, entries, cancellationToken);
+					CollectTaskCacheEntries(subkey, childRelative, entries, cancellationToken, ref pipeBusyCount);
 				}
 			}
 		}
