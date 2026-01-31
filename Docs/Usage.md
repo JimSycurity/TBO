@@ -377,6 +377,15 @@ Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol
 Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$KM'
 ```
 
+#### Get-TBORegCachedCredentials
+
+Decrypts cached domain credentials stored under `HKLM\SECURITY\Cache` and returns DCC1/DCC2 hashes with usernames.
+
+```powershell
+Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$1'
+```
+
 #### Get-TBORegMachineAccount
 
 Decrypts the $MACHINE.ACC secret and returns the machine account password and NT hash.
