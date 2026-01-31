@@ -579,6 +579,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return true;
 			if (name.Equals("$MACHINE.ACC", StringComparison.OrdinalIgnoreCase))
 				return true;
+			if (name.StartsWith("Kerberos", StringComparison.OrdinalIgnoreCase))
+				return true;
 			if (name.StartsWith("DPAPI", StringComparison.OrdinalIgnoreCase))
 				return true;
 

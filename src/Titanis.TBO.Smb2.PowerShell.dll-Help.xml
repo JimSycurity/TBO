@@ -2063,7 +2063,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:noun>TBORegLsaSecrets</command:noun>
       <maml:description>
         <maml:para>Decrypts LSA secrets from the remote registry using the derived LSA key.</maml:para>
-        <maml:para>Binary secrets such as DPAPI_SYSTEM, NL$KM, and $MACHINE.ACC are returned as hex strings in Secret.</maml:para>
+        <maml:para>Binary secrets such as DPAPI_SYSTEM, NL$KM, $MACHINE.ACC, and Kerberos* are returned as hex strings in Secret.</maml:para>
         <maml:para>For DPAPI_SYSTEM, the machine/user halves are split into DpapiMachineKey and DpapiUserKey.</maml:para>
       </maml:description>
     </command:details>

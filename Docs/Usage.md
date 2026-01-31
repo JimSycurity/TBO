@@ -380,7 +380,7 @@ Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol
 #### Get-TBORegLsaSecrets
 
 Decrypts LSA secrets from the remote registry using the derived LSA key.
-Binary secrets like `DPAPI_SYSTEM`, `NL$KM`, and `$MACHINE.ACC` are returned as hex strings in `Secret`.
+Binary secrets like `DPAPI_SYSTEM`, `NL$KM`, `$MACHINE.ACC`, and `Kerberos*` are returned as hex strings in `Secret`.
 `DPAPI_SYSTEM` is also split into machine/user halves (`DpapiMachineKey` and `DpapiUserKey`).
 
 ```powershell
