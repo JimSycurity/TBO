@@ -449,6 +449,16 @@ Get-TBORegMachineAccount -ServerName corp1-web01.corp1.lab.home-labs.lol
 Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol | Get-TBORegMachineAccount
 ```
 
+#### Get-TBORegSecretLocations
+
+Enumerates well-known registry locations that may hold secrets (LSA secrets, cached credentials, autologon, and user hive locations like PuTTY or VNC).
+
+```powershell
+Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeSystemHives
+Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeMissing
+```
+
 #### Get-TBORegAutoLogon
 
 Reads autologon configuration values from the Winlogon registry key.

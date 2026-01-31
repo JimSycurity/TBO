@@ -2305,6 +2305,73 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
 
   <command:command>
     <command:details>
+      <command:name>Get-TBORegSecretLocations</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBORegSecretLocations</command:noun>
+      <maml:description>
+        <maml:para>Enumerates well-known registry locations that may hold secret material (LSA secrets, cached credentials, autologon, and user hive locations such as PuTTY or VNC).</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBORegSecretLocations</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeMissing</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeSystemHives</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeMissing</maml:name>
+        <maml:description>
+          <maml:para>Include entries even when the registry key is missing.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeSystemHives</maml:name>
+        <maml:description>
+          <maml:para>Include non-user hives under HKEY_USERS (e.g., system and .DEFAULT).</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Lists present secret locations on the remote host.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeSystemHives -IncludeMissing</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates all known locations, including system hives and missing keys.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBORegAutoLogon</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBORegAutoLogon</command:noun>
