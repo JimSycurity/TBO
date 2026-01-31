@@ -126,11 +126,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	public sealed class TboRegServiceTriggerInfo
 	{
 		public string KeyName { get; init; } = string.Empty;
+		public string? KeyPath { get; init; }
 		public string? TriggerType { get; init; }
 		public string? Action { get; init; }
 		public Guid? Subtype { get; init; }
 		public string? SubtypeName { get; init; }
 		public IReadOnlyList<TboRegServiceTriggerDataItem>? DataItems { get; init; }
+		public IReadOnlyList<TboRegServiceTriggerValueInfo>? Values { get; init; }
 	}
 
 	public sealed class TboRegServiceTriggerDataItem
@@ -139,6 +141,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string? DataType { get; init; }
 		public object? Data { get; init; }
 		public byte[]? DataBytes { get; init; }
+	}
+
+	public sealed class TboRegServiceTriggerValueInfo
+	{
+		public string Name { get; init; } = string.Empty;
+		public RegistryValueType ValueType { get; init; }
+		public byte[]? Bytes { get; init; }
+		public object? Value { get; init; }
 	}
 
 	[Cmdlet(VerbsCommon.Get, "TBORegServiceDetails")]
@@ -743,15 +753,26 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						subtypeName = subtypeInfo;
 
 					var dataItems = TryParseTriggerDataItems(values);
+					var valueInfos = values.Count == 0
+						? null
+						: values.Select(entry => new TboRegServiceTriggerValueInfo
+						{
+							Name = entry.Key,
+							ValueType = entry.Value.ValueType,
+							Bytes = entry.Value.Bytes,
+							Value = entry.Value.TypedValue
+						}).ToList();
 
 					results.Add(new TboRegServiceTriggerInfo
 					{
 						KeyName = keyName,
+						KeyPath = subkeySpec.KeyPath,
 						TriggerType = triggerType,
 						Action = action,
 						Subtype = subtype,
 						SubtypeName = subtypeName,
-						DataItems = dataItems
+						DataItems = dataItems,
+						Values = valueInfos
 					});
 				}
 

@@ -325,6 +325,17 @@ Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name '
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv' | Select-Object -Expand TriggerInfo
 ```
 
+TriggerInfo entries now include the registry key path and raw value data for round-trip edits.
+
+```powershell
+$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'
+$trigger = $svc.TriggerInfo | Select-Object -First 1
+$trigger.Values | Format-Table Name, ValueType, Value
+
+# Example: toggle the trigger action using the raw value data.
+Set-TBORegValue -ServerName $svc.ServerName -Path $trigger.KeyPath -Name 'Action' -Type DwordLE -Value 1
+```
+
 #### Get-TBOScheduledTasks
 
 Enumerates scheduled task definitions from the Tasks folder and maps them to TaskCache registry entries for task IDs and registry timestamps.
