@@ -364,6 +364,20 @@ foreach ($value in $values) {
 }
 ```
 
+FailureActionsInfo can be written, but use this for research only: bad values can prevent services from starting.
+The helper class `TboRegServiceFailureActionScenarios` generates valid FailureActions binary data and related values.
+
+```powershell
+$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService2'
+$servicePath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)"
+$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceFailureActionScenarios]::RunCommandFirst(
+  "C:\Windows\System32\notepad.exe")
+
+foreach ($value in $values) {
+  Set-TBORegValue -ServerName $svc.ServerName -Path $servicePath -Name $value.Name -Type $value.ValueType -Value $value.Value
+}
+```
+
 #### Get-TBOScheduledTasks
 
 Enumerates scheduled task definitions from the Tasks folder and maps them to TaskCache registry entries for task IDs and registry timestamps.

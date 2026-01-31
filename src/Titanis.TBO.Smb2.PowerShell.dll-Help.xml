@@ -1752,6 +1752,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <maml:description>
         <maml:para>Reads extended registry-backed service details including core configuration, dependencies, security descriptor, Parameters subkey values, and whether an _SC_ service credential exists.</maml:para>
         <maml:para>TriggerInfo entries include the TriggerInfo subkey path plus raw registry values for round-trip edits.</maml:para>
+        <maml:para>FailureActions registry values can be modified, but malformed data can break service startup.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -1828,6 +1829,16 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
         <maml:code>$values | ForEach-Object { Set-TBORegValue -ServerName $svc.ServerName -Path $triggerPath -Name $_.Name -Type $_.ValueType -Value $_.Value }</maml:code>
         <maml:remarks>
           <maml:para>Creates a network-available trigger using the scenario helpers.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 5 --------------------------</command:title>
+        <maml:code>$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService2'</maml:code>
+        <maml:code>$servicePath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)"</maml:code>
+        <maml:code>$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceFailureActionScenarios]::RunCommandFirst("C:\Windows\System32\notepad.exe")</maml:code>
+        <maml:code>$values | ForEach-Object { Set-TBORegValue -ServerName $svc.ServerName -Path $servicePath -Name $_.Name -Type $_.ValueType -Value $_.Value }</maml:code>
+        <maml:remarks>
+          <maml:para>Sets FailureActions to run a command on first failure. Use for research only.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
