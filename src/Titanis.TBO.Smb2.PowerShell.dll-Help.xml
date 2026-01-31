@@ -1819,6 +1819,17 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
           <maml:para>Uses trigger metadata and raw values to update trigger settings.</maml:para>
         </maml:remarks>
       </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'</maml:code>
+        <maml:code>$triggerPath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)\TriggerInfo\1"</maml:code>
+        <maml:code>New-TBORegKey -ServerName $svc.ServerName -Path $triggerPath</maml:code>
+        <maml:code>$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceTriggerScenarios]::StartOnNetworkOn()</maml:code>
+        <maml:code>$values | ForEach-Object { Set-TBORegValue -ServerName $svc.ServerName -Path $triggerPath -Name $_.Name -Type $_.ValueType -Value $_.Value }</maml:code>
+        <maml:remarks>
+          <maml:para>Creates a network-available trigger using the scenario helpers.</maml:para>
+        </maml:remarks>
+      </command:example>
     </command:examples>
   </command:command>
 

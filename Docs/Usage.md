@@ -336,6 +336,34 @@ $trigger.Values | Format-Table Name, ValueType, Value
 Set-TBORegValue -ServerName $svc.ServerName -Path $trigger.KeyPath -Name 'Action' -Type DwordLE -Value 1
 ```
 
+The helper class `TboRegServiceTriggerScenarios` provides common trigger setups equivalent to `sc.exe triggerinfo`.
+
+```powershell
+$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'
+$triggerPath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)\TriggerInfo\1"
+New-TBORegKey -ServerName $svc.ServerName -Path $triggerPath
+
+$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceTriggerScenarios]::StartOnNetworkOn()
+foreach ($value in $values) {
+  Set-TBORegValue -ServerName $svc.ServerName -Path $triggerPath -Name $value.Name -Type $value.ValueType -Value $value.Value
+}
+```
+
+```powershell
+# Firewall port open trigger (port/protocol/image/service are encoded as a STRING trigger data item)
+$triggerPath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)\TriggerInfo\2"
+New-TBORegKey -ServerName $svc.ServerName -Path $triggerPath
+
+$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceTriggerScenarios]::StartOnFirewallPortOpen(
+  "445",
+  "TCP",
+  "C:\Windows\System32\svchost.exe",
+  "LanmanServer")
+foreach ($value in $values) {
+  Set-TBORegValue -ServerName $svc.ServerName -Path $triggerPath -Name $value.Name -Type $value.ValueType -Value $value.Value
+}
+```
+
 #### Get-TBOScheduledTasks
 
 Enumerates scheduled task definitions from the Tasks folder and maps them to TaskCache registry entries for task IDs and registry timestamps.
