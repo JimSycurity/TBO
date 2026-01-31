@@ -2434,7 +2434,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
         <command:verb>Find</command:verb>
         <command:noun>TBORegWeakServices</command:noun>
         <maml:description>
-        <maml:para>Scans service registry keys and reports AccessAllowed entries that grant service configuration rights to non-system trustees. The default access mask is ChangeConfig + WriteDac (0x00040002).</maml:para>
+        <maml:para>Scans service registry keys and reports AccessAllowed entries that grant service configuration rights to non-system trustees. The default access mask includes SERVICE_ALL_ACCESS, SERVICE_CHANGE_CONFIG, WRITE_DAC, WRITE_OWNER, and GENERIC_WRITE.</maml:para>
         </maml:description>
       </command:details>
     <command:syntax>
@@ -2458,6 +2458,10 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
         </command:parameter>
         <command:parameter required="false">
           <maml:name>IncludeUninteresting</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IgnoreServiceSids</maml:name>
           <command:parameterValue>Switch</command:parameterValue>
         </command:parameter>
       </command:syntaxItem>
@@ -2487,7 +2491,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:parameter>
         <maml:name>AccessMask</maml:name>
         <maml:description>
-          <maml:para>Access mask to treat as weak. Defaults to ChangeConfig plus WriteDac (0x00040002).</maml:para>
+          <maml:para>Access mask to treat as weak. Defaults to SERVICE_ALL_ACCESS, SERVICE_CHANGE_CONFIG, WRITE_DAC, WRITE_OWNER, and GENERIC_WRITE.</maml:para>
         </maml:description>
         <command:parameterValue>UInt32</command:parameterValue>
       </command:parameter>
@@ -2495,6 +2499,13 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
         <maml:name>IncludeUninteresting</maml:name>
         <maml:description>
           <maml:para>Include entries for built-in administrator and system accounts that are normally filtered.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IgnoreServiceSids</maml:name>
+        <maml:description>
+          <maml:para>Ignore service SID trustees (S-1-5-80-*) when scanning for weak permissions.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
@@ -2516,13 +2527,20 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       </command:example>
       <command:example>
         <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -IgnoreServiceSids</maml:code>
+        <maml:remarks>
+          <maml:para>Skips service SID entries when reporting weak access.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
         <maml:code>Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00040002 -IncludeUninteresting</maml:code>
         <maml:remarks>
           <maml:para>Overrides the default access mask and includes built-in administrator/system trustees.</maml:para>
         </maml:remarks>
       </command:example>
       <command:example>
-        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <command:title>-------------------------- EXAMPLE 5 --------------------------</command:title>
         <maml:code>Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00000002</maml:code>
         <maml:remarks>
           <maml:para>Filters to services that grant ChangeConfig access.</maml:para>

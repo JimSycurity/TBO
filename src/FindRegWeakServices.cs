@@ -20,6 +20,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			WellKnownSid trusteeWellKnownSid,
 			AccessControlEntryType aceType,
 			uint accessMask,
+			IReadOnlyList<string> accessRights,
 			ServiceAccess serviceAccess,
 			StandardAccessRights standardAccessRights)
 		{
@@ -30,6 +31,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this.TrusteeWellKnownSid = trusteeWellKnownSid;
 			this.AceType = aceType;
 			this.AccessMask = accessMask;
+			this.AccessRights = accessRights;
 			this.ServiceAccess = serviceAccess;
 			this.StandardAccessRights = standardAccessRights;
 		}
@@ -41,6 +43,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public WellKnownSid TrusteeWellKnownSid { get; }
 		public AccessControlEntryType AceType { get; }
 		public uint AccessMask { get; }
+		public IReadOnlyList<string> AccessRights { get; }
 		public ServiceAccess ServiceAccess { get; }
 		public StandardAccessRights StandardAccessRights { get; }
 	}
@@ -52,7 +55,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string DefaultServicesPath = @"HKLM\SYSTEM\CurrentControlSet\Services";
 		private const string SecuritySubkeyName = "Security";
 		private const string SecurityValueName = "Security";
-		private const uint DefaultInterestingAccessMask = (uint)ServiceAccess.ChangeConfig | (uint)StandardAccessRights.WriteDac;
+		private const uint GenericWriteMask = 0x40000000;
+		private const uint DefaultInterestingAccessMask =
+			(uint)ServiceAccess.AllRights |
+			(uint)ServiceAccess.ChangeConfig |
+			(uint)StandardAccessRights.WriteDac |
+			(uint)StandardAccessRights.WriteOwner |
+			GenericWriteMask;
 
 		private static readonly HashSet<WellKnownSid> UninterestingSids = new()
 		{
@@ -73,6 +82,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		[Parameter]
 		public SwitchParameter IncludeUninteresting { get; set; }
+
+		[Parameter]
+		public SwitchParameter IgnoreServiceSids { get; set; }
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
@@ -308,7 +320,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var wellKnownSid = trustee.AsWellKnownSid();
 				if (!this.IncludeUninteresting.IsPresent && UninterestingSids.Contains(wellKnownSid))
 					continue;
+				if (this.IgnoreServiceSids.IsPresent && IsServiceSid(trustee))
+					continue;
 
+				var accessRights = BuildAccessRights(accessMask);
 				this.WriteObject(new TboRegWeakServiceInfo(
 					this.ServerName,
 					serviceName,
@@ -317,6 +332,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					wellKnownSid,
 					ace.AceType,
 					accessMask,
+					accessRights,
 					(ServiceAccess)accessMask,
 					(StandardAccessRights)accessMask));
 			}
@@ -431,6 +447,33 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private uint ResolveAccessMask()
 		{
 			return this.AccessMask ?? DefaultInterestingAccessMask;
+		}
+
+		private static bool IsServiceSid(SecurityIdentifier trustee)
+		{
+			if (trustee.IdentifierAuthority != SecurityIdentifierAuthority.NtAuthority)
+				return false;
+			if (trustee.SubauthorityCount == 0)
+				return false;
+			return trustee.GetSubauthority(0) == 80;
+		}
+
+		private static IReadOnlyList<string> BuildAccessRights(uint accessMask)
+		{
+			var rights = new List<string>();
+
+			if ((accessMask & (uint)ServiceAccess.AllRights) == (uint)ServiceAccess.AllRights)
+				rights.Add("SERVICE_ALL_ACCESS");
+			if ((accessMask & (uint)ServiceAccess.ChangeConfig) != 0)
+				rights.Add("SERVICE_CHANGE_CONFIG");
+			if ((accessMask & (uint)StandardAccessRights.WriteDac) != 0)
+				rights.Add("WRITE_DAC");
+			if ((accessMask & (uint)StandardAccessRights.WriteOwner) != 0)
+				rights.Add("WRITE_OWNER");
+			if ((accessMask & GenericWriteMask) != 0)
+				rights.Add("GENERIC_WRITE");
+
+			return rights;
 		}
 	}
 }
