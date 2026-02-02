@@ -422,8 +422,27 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var text = TryDecodeGuidString(bytes, Encoding.Unicode)
 				?? TryDecodeGuidString(bytes, Encoding.ASCII);
-			if (!string.IsNullOrWhiteSpace(text) && Guid.TryParse(text, out var parsed))
-				return parsed;
+			if (!string.IsNullOrWhiteSpace(text))
+			{
+				var match = GuidPattern.Match(text);
+				if (match.Success && Guid.TryParse(match.Value, out var parsedText))
+					return parsedText;
+			}
+
+			if (bytes.Length >= 20)
+			{
+				var declaredLength = BitConverter.ToInt32(bytes, 0);
+				if (declaredLength == 16)
+				{
+					try
+					{
+						return new Guid(bytes.AsSpan(4, 16));
+					}
+					catch
+					{
+					}
+				}
+			}
 
 			if (bytes.Length == 16)
 			{
@@ -490,5 +509,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private static readonly Regex SidPattern = new(
 			@"^S-1-\d+(-\d+)+$",
 			RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+		private static readonly Regex GuidPattern = new(
+			@"\b[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+			RegexOptions.Compiled);
 	}
 }
