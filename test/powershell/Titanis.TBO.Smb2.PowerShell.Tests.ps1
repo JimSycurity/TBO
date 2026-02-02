@@ -148,6 +148,26 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
 
         (Get-PSProvider | Where-Object { $_.Name -eq 'TBO.Smb2' }).Count | Should -Be 1
     }
+
+    It 'validates Set-TBORegSecurityDescriptor inputs when using -WhatIf' {
+        if (-not $script:loadedModule) {
+            Set-ItResult -Skipped -Because 'Module binary not found or failed to import.'
+            return
+        }
+
+        $sddl = 'O:BAG:BAD:(A;;KR;;;SY)'
+        $raw = New-Object System.Security.AccessControl.RawSecurityDescriptor $sddl
+        $bytes = New-Object byte[] $raw.BinaryLength
+        $raw.GetBinaryForm($bytes, 0)
+
+        { Set-TBORegSecurityDescriptor -ServerName testhost -Path HKLM\SOFTWARE -SecurityDescriptor $bytes -WhatIf } | Should -Not -Throw
+        if ($IsWindows) {
+            { Set-TBORegSecurityDescriptor -ServerName testhost -Path HKLM\SOFTWARE -SecurityDescriptor $sddl -WhatIf } | Should -Not -Throw
+        }
+
+        { Set-TBORegSecurityDescriptor -ServerName testhost -Path HKLM\SOFTWARE -SecurityDescriptor $bytes -Sections None -WhatIf } | Should -Throw
+        { Set-TBORegSecurityDescriptor -ServerName testhost -Path HKLM\SOFTWARE -SecurityDescriptor 123 -WhatIf } | Should -Throw
+    }
 }
 
 Describe 'Titanis.TBO.Smb2 cmdlet help' {
