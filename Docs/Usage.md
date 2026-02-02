@@ -293,6 +293,15 @@ Get-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWAR
 Get-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -IncludeClass
 ```
 
+#### Get-TBORegSecurityDescriptor
+
+Reads a security descriptor for a remote registry key. Use `-AsSddl`, `-AsBytes`, or `-AsWindows` (Windows only) to change output format.
+
+```powershell
+Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
+Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -AsSddl
+```
+
 #### Get-TBORegSessions
 
 Enumerates user session SIDs from HKEY_USERS on the remote host. SYSTEM SIDs are excluded by default.
