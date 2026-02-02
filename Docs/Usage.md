@@ -302,6 +302,18 @@ Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
 Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -AsSddl
 ```
 
+#### Set-TBORegSecurityDescriptor
+
+Writes a security descriptor to a remote registry key. Input can be a portable `SecurityDescriptor`, SDDL string, raw bytes, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only. Use `-Sections` to limit which parts are applied.
+
+```powershell
+$sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd
+
+$sddl = "O:BAG:BAD:(A;;KR;;;SY)"
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sddl -Sections Dacl
+```
+
 #### Get-TBORegSessions
 
 Enumerates user session SIDs from HKEY_USERS on the remote host. SYSTEM SIDs are excluded by default.

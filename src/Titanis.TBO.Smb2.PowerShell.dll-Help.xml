@@ -2157,6 +2157,87 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
 
   <command:command>
     <command:details>
+      <command:name>Set-TBORegSecurityDescriptor</command:name>
+      <command:verb>Set</command:verb>
+      <command:noun>TBORegSecurityDescriptor</command:noun>
+      <maml:description>
+        <maml:para>Writes a security descriptor to a remote registry key.</maml:para>
+        <maml:para>Accepts portable SecurityDescriptor instances, SDDL strings, raw byte arrays, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Set-TBORegSecurityDescriptor</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="2">
+          <maml:name>SecurityDescriptor</maml:name>
+          <command:parameterValue>Object</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Sections</maml:name>
+          <command:parameterValue>SecurityInfo</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Registry key path starting with a root key (for example, HKLM\SOFTWARE).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="2">
+        <maml:name>SecurityDescriptor</maml:name>
+        <maml:description>
+          <maml:para>Security descriptor to write. Accepts portable SecurityDescriptor instances, SDDL strings, raw byte arrays, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only.</maml:para>
+        </maml:description>
+        <command:parameterValue>Object</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Sections</maml:name>
+        <maml:description>
+          <maml:para>Security descriptor sections to apply (default: Owner, Group, DACL).</maml:para>
+        </maml:description>
+        <command:parameterValue>SecurityInfo</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd</maml:code>
+        <maml:remarks>
+          <maml:para>Reads and then writes a security descriptor.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>$sddl = "O:BAG:BAD:(A;;KR;;;SY)"
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sddl -Sections Dacl</maml:code>
+        <maml:remarks>
+          <maml:para>Applies a DACL from an SDDL string.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBORegSessions</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBORegSessions</command:noun>

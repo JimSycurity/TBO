@@ -134,6 +134,7 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
         $cmdlets | Should -Contain 'Get-TBOSmbSnapshots'
         $cmdlets | Should -Contain 'Get-TBORegKey'
         $cmdlets | Should -Contain 'Get-TBORegSecurityDescriptor'
+        $cmdlets | Should -Contain 'Set-TBORegSecurityDescriptor'
         $cmdlets | Should -Contain 'Find-TBODpapiBlobs'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeyLocations'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeys'
