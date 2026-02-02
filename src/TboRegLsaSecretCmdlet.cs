@@ -257,12 +257,42 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return false;
 			if (!name.Equals("DPAPI_SYSTEM", StringComparison.OrdinalIgnoreCase))
 				return false;
-			if (payload.Length == 0 || payload.Length % 2 != 0)
+			if (payload.Length == 0)
 				return false;
 
-			int half = payload.Length / 2;
-			machineKey = payload.AsSpan(0, half).ToHexString();
-			userKey = payload.AsSpan(half, half).ToHexString();
+			byte[] keyPayload = payload;
+
+			if (payload.Length == 44 && BitConverter.ToUInt32(payload, 0) == 1)
+			{
+				if (TrySlice(payload, 4, 40, out var slice))
+					keyPayload = slice;
+			}
+			else if (payload.Length > 64)
+			{
+				if (TryReadLength(payload, 0, out var declared) && declared == 64 && TrySlice(payload, 16, declared, out var slice))
+				{
+					keyPayload = slice;
+				}
+				else if (TryReadLength(payload, 4, out declared) && declared == 64 && TrySlice(payload, 12, declared, out slice))
+				{
+					keyPayload = slice;
+				}
+				else
+				{
+					keyPayload = payload.AsSpan(payload.Length - 64, 64).ToArray();
+				}
+			}
+			else if (payload.Length > 40 && payload.Length != 64)
+			{
+				keyPayload = payload.AsSpan(payload.Length - 40, 40).ToArray();
+			}
+
+			if (keyPayload.Length != 40 && keyPayload.Length != 64)
+				return false;
+
+			int half = keyPayload.Length / 2;
+			machineKey = keyPayload.AsSpan(0, half).ToHexString();
+			userKey = keyPayload.AsSpan(half, half).ToHexString();
 			return true;
 		}
 

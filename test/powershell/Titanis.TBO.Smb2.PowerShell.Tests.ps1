@@ -133,6 +133,8 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
         $cmdlets | Should -Contain 'Set-TBOSmbConnectOptions'
         $cmdlets | Should -Contain 'Get-TBOSmbSnapshots'
         $cmdlets | Should -Contain 'Get-TBORegKey'
+        $cmdlets | Should -Contain 'Get-TBODpapiMasterKeyLocations'
+        $cmdlets | Should -Contain 'Get-TBODpapiMasterKeys'
     }
 
     It 'registers the TBO.Smb2 provider' {

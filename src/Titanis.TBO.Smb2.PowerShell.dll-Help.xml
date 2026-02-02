@@ -62,6 +62,206 @@
 
   <command:command>
     <command:details>
+      <command:name>Get-TBODpapiMasterKeyLocations</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBODpapiMasterKeyLocations</command:noun>
+      <maml:description>
+        <maml:para>Enumerates DPAPI master key files for machine and user scopes over SMB and marks preferred keys when possible.</maml:para>
+        <maml:para>Writes progress to the console showing which paths are being scanned.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiMasterKeyLocations</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>DpapiMasterKeyScope</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Limit enumeration to machine, user, or both scopes (default: All).</maml:para>
+        </maml:description>
+        <command:parameterValue>DpapiMasterKeyScope</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Lists master key file locations for both machine and user scopes.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates only machine master key locations.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates user profile master key locations.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -ShareName C$</maml:code>
+        <maml:remarks>
+          <maml:para>Uses an explicit share name when enumerating master key files.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBODpapiMasterKeys</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBODpapiMasterKeys</command:noun>
+      <maml:description>
+        <maml:para>Decrypts DPAPI master keys using DPAPI_SYSTEM from LSA secrets.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiMasterKeys</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>DpapiMasterKeyScope</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>DpapiMachineKey</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>DpapiUserKey</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>DpapiMachineKeyBytes</maml:name>
+          <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>DpapiUserKeyBytes</maml:name>
+          <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Limit enumeration to machine, user, or both scopes (default: All).</maml:para>
+        </maml:description>
+        <command:parameterValue>DpapiMasterKeyScope</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>DpapiMachineKey</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded DPAPI_SYSTEM machine key.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>DpapiUserKey</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded DPAPI_SYSTEM user key.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>DpapiMachineKeyBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw DPAPI_SYSTEM machine key bytes.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>DpapiUserKeyBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw DPAPI_SYSTEM user key bytes.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM | Get-TBODpapiMasterKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Uses DPAPI_SYSTEM from LSA secrets to decrypt master keys.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -DpapiMachineKey &lt;hex&gt; -DpapiUserKey &lt;hex&gt;</maml:code>
+        <maml:remarks>
+          <maml:para>Supplies DPAPI_SYSTEM keys directly.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine -ShareName C$</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts only machine master keys from the specified share.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Out-TBOSmbFile</command:name>
       <command:verb>Out</command:verb>
       <command:noun>TBOSmbFile</command:noun>
