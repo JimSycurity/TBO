@@ -136,9 +136,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private void ProcessRequestedNames(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec servicesPath,
-			RegistryKey servicesKey,
+			IRegistryKey servicesKey,
 			RegistryKeyInfo servicesInfo,
 			List<string> requestedNames,
 			uint interestingAccessMask,
@@ -193,7 +193,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private List<RegistrySubkeyInfo> CollectServiceSubkeys(
 			ISmbProviderInfo smb,
-			RegistryKey servicesKey,
+			IRegistryKey servicesKey,
 			RegistryKeyInfo servicesInfo,
 			RegistryPathSpec servicesPath,
 			CancellationToken cancellationToken)
@@ -235,7 +235,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private bool TryScanService(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec basePath,
 			string serviceName,
 			uint interestingAccessMask,
@@ -286,7 +286,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private void ScanService(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec basePath,
 			string serviceName,
 			uint interestingAccessMask,
@@ -379,7 +379,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private bool TryReadSecurityDescriptor(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec serviceSpec,
 			CancellationToken cancellationToken,
 			out SecurityDescriptor? descriptor)

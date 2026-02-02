@@ -71,7 +71,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private byte[] ExtractBootKey(RemoteRegistryClient client, CancellationToken cancellationToken)
+		private byte[] ExtractBootKey(IRegistryClient client, CancellationToken cancellationToken)
 		{
 			var lsaSpec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
@@ -111,7 +111,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private byte[]? ExtractLsaKey(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			byte[] bootKey,
 			CancellationToken cancellationToken,
 			out string? lsaKeySource)
@@ -160,7 +160,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		private byte[]? TryReadPolicySecretValue(RemoteRegistryClient client, string name, CancellationToken cancellationToken)
+		private byte[]? TryReadPolicySecretValue(IRegistryClient client, string name, CancellationToken cancellationToken)
 		{
 			var keyPath = CombineSubkeyPath(PolicyPath, name);
 			var spec = new RegistryPathSpec(
@@ -183,12 +183,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private T ExecuteRegistryOperationWithResult<T>(
 			ISmbProviderInfo smb,
 			CancellationToken cancellationToken,
-			Func<RemoteRegistrySession, T> func)
+			Func<IRegistrySession, T> func)
 		{
 			return RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, func);
 		}
 
-		private static byte[]? TryReadValueBytes(RegistryKey key, string name, CancellationToken cancellationToken)
+		private static byte[]? TryReadValueBytes(IRegistryKey key, string name, CancellationToken cancellationToken)
 		{
 			try
 			{

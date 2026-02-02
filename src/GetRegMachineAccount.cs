@@ -96,7 +96,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private byte[]? ResolveLsaKey(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			CancellationToken cancellationToken,
 			out string? lsaKeySource)
 		{

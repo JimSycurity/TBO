@@ -106,13 +106,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private void ExecuteRegistryOperation(string serverName, CancellationToken token, Action<RemoteRegistrySession> action)
+		private void ExecuteRegistryOperation(string serverName, CancellationToken token, Action<IRegistrySession> action)
 		{
 			var smb = GetSmbProviderInfo();
 			RegistryRetryHelper.Execute(smb, serverName, token, action);
 		}
 
-		private TResult ExecuteRegistryOperation<TResult>(string serverName, CancellationToken token, Func<RemoteRegistrySession, TResult> func)
+		private TResult ExecuteRegistryOperation<TResult>(string serverName, CancellationToken token, Func<IRegistrySession, TResult> func)
 		{
 			var smb = GetSmbProviderInfo();
 			return RegistryRetryHelper.Execute(smb, serverName, token, func);
@@ -661,8 +661,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private SmbProviderInfo GetSmbProviderInfo()
 			=> (SmbProviderInfo)this.SessionState.Provider.GetOne(SmbProvider.ProviderName);
 
-		private static RegistryKey OpenRegistryKey(
-			RemoteRegistryClient client,
+		private static IRegistryKey OpenRegistryKey(
+			IRegistryClient client,
 			RegistryPathSpec path,
 			RegistryAccessRights access,
 			RegistryAccessRights? rootAccess,
@@ -687,15 +687,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static RegistryKey OpenRegistryKey(
-			RemoteRegistryClient client,
+		private static IRegistryKey OpenRegistryKey(
+			IRegistryClient client,
 			RegistryPathSpec path,
 			RegistryAccessRights access,
 			CancellationToken cancellationToken)
 			=> OpenRegistryKey(client, path, access, null, cancellationToken);
 
-		private static RegistryKey? TryOpenKey(
-			RemoteRegistryClient client,
+		private static IRegistryKey? TryOpenKey(
+			IRegistryClient client,
 			RegistryPathSpec path,
 			RegistryAccessRights access,
 			CancellationToken cancellationToken)
@@ -712,7 +712,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static IEnumerable<RegistrySubkeyInfo> EnumerateSubkeys(RegistryKey key, CancellationToken cancellationToken)
+		private static IEnumerable<RegistrySubkeyInfo> EnumerateSubkeys(IRegistryKey key, CancellationToken cancellationToken)
 		{
 			var enumerator = key.GetSubkeyNames(cancellationToken).GetAsyncEnumerator();
 			try
@@ -732,7 +732,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static IEnumerable<RegistryValueInfo> EnumerateValues(RegistryKey key, bool includeData, CancellationToken cancellationToken)
+		private static IEnumerable<RegistryValueInfo> EnumerateValues(IRegistryKey key, bool includeData, CancellationToken cancellationToken)
 		{
 			if (!includeData)
 				return CollectValues(key, includeData: false, cancellationToken);
@@ -751,7 +751,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static List<RegistryValueInfo> CollectValues(RegistryKey key, bool includeData, CancellationToken cancellationToken)
+		private static List<RegistryValueInfo> CollectValues(IRegistryKey key, bool includeData, CancellationToken cancellationToken)
 		{
 			var values = new List<RegistryValueInfo>();
 			var enumerator = key.GetValues(includeData, cancellationToken).GetAsyncEnumerator();
@@ -774,7 +774,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return values;
 		}
 
-		private static string[] CollectValueNames(RegistryKey key, CancellationToken cancellationToken)
+		private static string[] CollectValueNames(IRegistryKey key, CancellationToken cancellationToken)
 		{
 			var values = CollectValues(key, includeData: false, cancellationToken);
 			if (values.Count == 0)
@@ -786,7 +786,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return names;
 		}
 
-		private static bool TryValueExists(RemoteRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken)
+		private static bool TryValueExists(IRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken)
 		{
 			if (string.IsNullOrEmpty(path.SubkeyPath))
 				return false;
@@ -809,7 +809,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static bool TryGetValue(RemoteRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken, out RegistryValueInfo info, out string keyPath)
+		private static bool TryGetValue(IRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken, out RegistryValueInfo info, out string keyPath)
 		{
 			info = null!;
 			keyPath = string.Empty;
@@ -835,7 +835,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static void RemoveRegistryKey(RemoteRegistryClient client, RegistryPathSpec path, bool recurse, CancellationToken cancellationToken)
+		private static void RemoveRegistryKey(IRegistryClient client, RegistryPathSpec path, bool recurse, CancellationToken cancellationToken)
 		{
 			if (path.IsRoot)
 				throw new InvalidOperationException("Cannot remove a root registry key.");
@@ -861,7 +861,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			parentKey.DeleteSubkey(subkeyName, cancellationToken).GetAwaiter().GetResult();
 		}
 
-		private static void RemoveSubkeyRecursive(RegistryKey parentKey, string subkeyName, CancellationToken cancellationToken)
+		private static void RemoveSubkeyRecursive(IRegistryKey parentKey, string subkeyName, CancellationToken cancellationToken)
 		{
 			using var subkey = parentKey.OpenSubkey(
 				subkeyName,
@@ -877,7 +877,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			parentKey.DeleteSubkey(subkeyName, cancellationToken).GetAwaiter().GetResult();
 		}
 
-		private static void RemoveRegistryValue(RemoteRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken)
+		private static void RemoveRegistryValue(IRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken)
 		{
 			if (string.IsNullOrEmpty(path.SubkeyPath))
 				throw new InvalidOperationException("Path must specify a registry value.");

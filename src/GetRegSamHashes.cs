@@ -138,7 +138,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private byte[] ExtractSyskey(RemoteRegistryClient client, CancellationToken cancellationToken)
+		private byte[] ExtractSyskey(IRegistryClient client, CancellationToken cancellationToken)
 		{
 			var lsaSpec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
@@ -178,7 +178,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private SamStore? ExtractSamStore(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			byte[] syskey,
 			CancellationToken cancellationToken)
 		{
@@ -231,7 +231,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private Dictionary<uint, string> TryReadSamUserNames(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			CancellationToken cancellationToken)
 		{
 			var results = new Dictionary<uint, string>();

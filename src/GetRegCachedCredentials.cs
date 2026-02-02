@@ -119,7 +119,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private byte[]? ResolveLsaKey(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			CancellationToken cancellationToken,
 			out string? lsaKeySource)
 		{
@@ -152,7 +152,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return nlkm.Length >= 32;
 		}
 
-		private byte[]? ResolveNlkmSecret(RemoteRegistryClient client, byte[] lsaKey, CancellationToken cancellationToken)
+		private byte[]? ResolveNlkmSecret(IRegistryClient client, byte[] lsaKey, CancellationToken cancellationToken)
 		{
 			DateTime? lastWriteTime;
 			var encrypted = TryReadSecretValue(client, "NL$KM", "CurrVal", cancellationToken, out lastWriteTime);

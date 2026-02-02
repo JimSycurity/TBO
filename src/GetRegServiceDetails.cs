@@ -209,9 +209,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private void ProcessRequestedNames(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec servicesPath,
-			RegistryKey servicesKey,
+			IRegistryKey servicesKey,
 			RegistryKeyInfo servicesInfo,
 			List<string> requestedNames,
 			CancellationToken cancellationToken)
@@ -265,7 +265,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private List<RegistrySubkeyInfo> CollectServiceSubkeys(
 			ISmbProviderInfo smb,
-			RegistryKey servicesKey,
+			IRegistryKey servicesKey,
 			RegistryKeyInfo servicesInfo,
 			RegistryPathSpec servicesPath,
 			CancellationToken cancellationToken)
@@ -307,7 +307,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private bool TryWriteServiceDetails(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec basePath,
 			string serviceName,
 			CancellationToken cancellationToken,
@@ -357,7 +357,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private void WriteServiceDetails(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec basePath,
 			string serviceName,
 			CancellationToken cancellationToken)
@@ -565,7 +565,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private bool? TryGetServiceCredential(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			string serviceName,
 			CancellationToken cancellationToken,
 			out string? secretKeyPath)
@@ -599,7 +599,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private void TryReadSecurityDescriptor(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec serviceSpec,
 			CancellationToken cancellationToken,
 			out byte[]? sdBytes,
@@ -659,7 +659,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static IReadOnlyList<string>? TryCollectSubkeyNames(
 			ISmbProviderInfo smb,
-			RegistryKey key,
+			IRegistryKey key,
 			CancellationToken cancellationToken)
 		{
 			try
@@ -678,7 +678,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private Dictionary<string, RegistryValueInfo>? TryLoadSubkeyValues(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec serviceSpec,
 			string subkeyName,
 			CancellationToken cancellationToken)
@@ -707,7 +707,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private IReadOnlyList<TboRegServiceTriggerInfo>? TryReadTriggerInfo(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			RegistryPathSpec serviceSpec,
 			CancellationToken cancellationToken)
 		{
@@ -885,7 +885,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				or (int)Win32ErrorCode.ERROR_BAD_PATHNAME;
 		}
 
-		private static Dictionary<string, RegistryValueInfo> LoadValues(RegistryKey key, CancellationToken cancellationToken)
+		private static Dictionary<string, RegistryValueInfo> LoadValues(IRegistryKey key, CancellationToken cancellationToken)
 		{
 			try
 			{
@@ -901,7 +901,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static void PopulateMissingValues(
 			Dictionary<string, RegistryValueInfo> values,
-			RegistryKey key,
+			IRegistryKey key,
 			CancellationToken cancellationToken)
 		{
 			foreach (var name in new[]

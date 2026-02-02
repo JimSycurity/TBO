@@ -166,7 +166,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		private void ProcessDefinition(
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			SecretLocationDefinition definition,
 			string? userSid,
 			CancellationToken cancellationToken)
@@ -202,7 +202,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private List<string> CollectUserHives(RemoteRegistryClient client, CancellationToken cancellationToken)
+		private List<string> CollectUserHives(IRegistryClient client, CancellationToken cancellationToken)
 		{
 			var userSpec = new RegistryPathSpec(
 				RegistryRootKey.Users,
@@ -233,7 +233,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return UserSidPattern.IsMatch(name);
 		}
 
-		private static bool TryKeyExists(RemoteRegistryClient client, RegistryPathSpec spec, CancellationToken cancellationToken)
+		private static bool TryKeyExists(IRegistryClient client, RegistryPathSpec spec, CancellationToken cancellationToken)
 		{
 			try
 			{

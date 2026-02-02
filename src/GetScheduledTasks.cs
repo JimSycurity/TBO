@@ -197,7 +197,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
 		}
 
-		private Dictionary<string, TaskCacheEntry> CollectTaskCacheEntries(RemoteRegistryClient client, CancellationToken cancellationToken, ref int pipeBusyCount)
+		private Dictionary<string, TaskCacheEntry> CollectTaskCacheEntries(IRegistryClient client, CancellationToken cancellationToken, ref int pipeBusyCount)
 		{
 			var spec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
@@ -211,7 +211,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		private void CollectTaskCacheEntries(
-			RegistryKey parentKey,
+			IRegistryKey parentKey,
 			string relativePath,
 			Dictionary<string, TaskCacheEntry> entries,
 			CancellationToken cancellationToken,
@@ -225,7 +225,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					continue;
 
 				var childRelative = CombineRelativePath(relativePath, name);
-				RegistryKey? subkey = null;
+				IRegistryKey? subkey = null;
 				try
 				{
 					subkey = parentKey.OpenSubkey(
@@ -271,7 +271,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static string? TryReadTaskId(RegistryKey key, CancellationToken cancellationToken)
+		private static string? TryReadTaskId(IRegistryKey key, CancellationToken cancellationToken)
 		{
 			try
 			{

@@ -82,8 +82,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
 						paths.InterfacesPath);
 
-					RegistryKey? parametersKey = null;
-					RegistryKey? interfacesKey = null;
+					IRegistryKey? parametersKey = null;
+					IRegistryKey? interfacesKey = null;
 					try
 					{
 						parametersKey = OpenRegistryKey(session.Client, parametersSpec, RegistryAccessRights.QueryValue, cancellationToken);
@@ -126,7 +126,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private IReadOnlyList<TboRegTcpIpInterfaceInfo> CollectInterfaces(
 			ISmbProviderInfo smb,
-			RegistryKey interfacesKey,
+			IRegistryKey interfacesKey,
 			string protocol,
 			IReadOnlyDictionary<string, string> interfaceNameMap,
 			CancellationToken cancellationToken)
@@ -139,7 +139,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (string.IsNullOrWhiteSpace(name))
 					continue;
 
-				RegistryKey? ifaceKey = null;
+				IRegistryKey? ifaceKey = null;
 				try
 				{
 					ifaceKey = interfacesKey.OpenSubkey(
@@ -200,7 +200,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		private IReadOnlyDictionary<string, string> BuildInterfaceNameMap(
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			ISmbProviderInfo smb,
 			CancellationToken cancellationToken)
 		{
@@ -210,7 +210,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
 				NetworkConnectionsPath);
 
-			RegistryKey? connectionsKey = null;
+			IRegistryKey? connectionsKey = null;
 			try
 			{
 				connectionsKey = OpenRegistryKey(client, spec, RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue, cancellationToken);
@@ -229,7 +229,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (string.IsNullOrWhiteSpace(guid))
 						continue;
 
-					RegistryKey? connectionKey = null;
+					IRegistryKey? connectionKey = null;
 					try
 					{
 						connectionKey = connectionsKey.OpenSubkey(
@@ -275,7 +275,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static string? TryReadString(RegistryKey key, CancellationToken cancellationToken, params string[] names)
+		private static string? TryReadString(IRegistryKey key, CancellationToken cancellationToken, params string[] names)
 		{
 			foreach (var name in names)
 			{
@@ -300,7 +300,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		private static string[]? TryReadStringList(RegistryKey key, CancellationToken cancellationToken, params string[] names)
+		private static string[]? TryReadStringList(IRegistryKey key, CancellationToken cancellationToken, params string[] names)
 		{
 			foreach (var name in names)
 			{
@@ -331,7 +331,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		private static bool? TryReadBool(RegistryKey key, CancellationToken cancellationToken, params string[] names)
+		private static bool? TryReadBool(IRegistryKey key, CancellationToken cancellationToken, params string[] names)
 		{
 			foreach (var name in names)
 			{
@@ -351,7 +351,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		private static RegistryValueInfo? TryReadValue(RegistryKey key, string name, CancellationToken cancellationToken)
+		private static RegistryValueInfo? TryReadValue(IRegistryKey key, string name, CancellationToken cancellationToken)
 		{
 			try
 			{

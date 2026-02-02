@@ -59,7 +59,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private static string? TryReadValueString(RegistryKey key, string name, CancellationToken cancellationToken)
+		private static string? TryReadValueString(IRegistryKey key, string name, CancellationToken cancellationToken)
 		{
 			try
 			{

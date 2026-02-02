@@ -5,7 +5,7 @@ using Titanis.Smb2;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
-	public sealed class MockSmbProviderInfo : ISmbProviderInfo, ISmbFileSystemProvider
+	public sealed class MockSmbProviderInfo : ISmbProviderInfo, ISmbFileSystemProvider, IRegistrySessionProvider
 	{
 		public Smb2Client? SmbClient { get; set; }
 		public ISmbFileSystem? FileSystem { get; set; }
@@ -27,6 +27,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public Action<string, object>? SetConnectParametersAction { get; set; }
 		public Func<string, CancellationToken, Task<ServerServiceSession>>? OpenServerServiceSessionAsyncFunc { get; set; }
 		public Func<string, CancellationToken, Task<RemoteRegistrySession>>? OpenRemoteRegistrySessionAsyncFunc { get; set; }
+		public Func<string, CancellationToken, IRegistrySession?>? OpenRegistrySessionFunc { get; set; }
 		public Func<string, int?, bool, Task>? DisconnectServerAsyncFunc { get; set; }
 		public Func<bool, Task>? DisconnectAllAsyncFunc { get; set; }
 		public Action<string, Exception>? LogExceptionAction { get; set; }
@@ -74,6 +75,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw new InvalidOperationException("OpenRemoteRegistrySessionAsyncFunc is not configured.");
 			return this.OpenRemoteRegistrySessionAsyncFunc(serverName, cancellationToken);
 		}
+
+		IRegistrySession? IRegistrySessionProvider.OpenRegistrySession(string serverName, CancellationToken cancellationToken)
+			=> this.OpenRegistrySessionFunc?.Invoke(serverName, cancellationToken);
 
 		Task ISmbProviderInfo.DisconnectServerAsync(string serverName, int? port, bool force)
 			=> this.DisconnectServerAsyncFunc?.Invoke(serverName, port, force) ?? Task.CompletedTask;

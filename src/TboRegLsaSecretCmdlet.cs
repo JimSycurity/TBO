@@ -18,7 +18,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected const ulong BootKeyByteSwap = 0xEC6B4D50F91273A8;
 		protected static readonly string[] BootKeySubkeys = { "JD", "Skew1", "GBG", "Data" };
 
-		protected byte[] ExtractBootKey(RemoteRegistryClient client, CancellationToken cancellationToken)
+		protected byte[] ExtractBootKey(IRegistryClient client, CancellationToken cancellationToken)
 		{
 			var lsaSpec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
@@ -58,7 +58,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		protected byte[]? ExtractLsaKey(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			byte[] bootKey,
 			CancellationToken cancellationToken,
 			out string? lsaKeySource)
@@ -107,7 +107,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		protected byte[]? TryReadPolicySecretValue(RemoteRegistryClient client, string name, CancellationToken cancellationToken)
+		protected byte[]? TryReadPolicySecretValue(IRegistryClient client, string name, CancellationToken cancellationToken)
 		{
 			var keyPath = CombineSubkeyPath(PolicyPath, name);
 			var spec = new RegistryPathSpec(
@@ -128,7 +128,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		protected byte[]? TryReadSecretValue(
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			string secretName,
 			string valueName,
 			CancellationToken cancellationToken,
@@ -305,7 +305,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		protected static byte[]? TryReadValueBytes(RegistryKey key, string name, CancellationToken cancellationToken)
+		protected static byte[]? TryReadValueBytes(IRegistryKey key, string name, CancellationToken cancellationToken)
 		{
 			try
 			{

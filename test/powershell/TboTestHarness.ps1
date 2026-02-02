@@ -61,6 +61,7 @@ function New-TboMockProviderInfo {
 		[scriptblock]$SetConnectParameters,
 		[scriptblock]$OpenServerServiceSessionAsync,
 		[scriptblock]$OpenRemoteRegistrySessionAsync,
+		[scriptblock]$OpenRegistrySession,
 		[scriptblock]$DisconnectServerAsync,
 		[scriptblock]$DisconnectAllAsync,
 		[scriptblock]$LogException
@@ -73,6 +74,7 @@ function New-TboMockProviderInfo {
 	if ($SetConnectParameters) { $mock.SetConnectParametersAction = [Action[string, object]]$SetConnectParameters }
 	if ($OpenServerServiceSessionAsync) { $mock.OpenServerServiceSessionAsyncFunc = [Func[string, System.Threading.CancellationToken, System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]]]$OpenServerServiceSessionAsync }
 	if ($OpenRemoteRegistrySessionAsync) { $mock.OpenRemoteRegistrySessionAsyncFunc = [Func[string, System.Threading.CancellationToken, System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]]]$OpenRemoteRegistrySessionAsync }
+	if ($OpenRegistrySession) { $mock.OpenRegistrySessionFunc = [Func[string, System.Threading.CancellationToken, Titanis.Tbo.Smb2.PowerShell.IRegistrySession]]$OpenRegistrySession }
 	if ($DisconnectServerAsync) { $mock.DisconnectServerAsyncFunc = [Func[string, Nullable[int], bool, System.Threading.Tasks.Task]]$DisconnectServerAsync }
 	if ($DisconnectAllAsync) { $mock.DisconnectAllAsyncFunc = [Func[bool, System.Threading.Tasks.Task]]$DisconnectAllAsync }
 	if ($LogException) { $mock.LogExceptionAction = [Action[string, System.Exception]]$LogException }

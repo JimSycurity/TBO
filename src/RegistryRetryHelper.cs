@@ -60,7 +60,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			ISmbProviderInfo smb,
 			string serverName,
 			CancellationToken cancellationToken,
-			Action<RemoteRegistrySession> action)
+			Action<IRegistrySession> action)
 		{
 			Execute(smb, serverName, cancellationToken, session =>
 			{
@@ -73,7 +73,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			ISmbProviderInfo smb,
 			string serverName,
 			CancellationToken cancellationToken,
-			Func<RemoteRegistrySession, T> operation)
+			Func<IRegistrySession, T> operation)
 		{
 			if (smb == null)
 				throw new ArgumentNullException(nameof(smb));
@@ -87,7 +87,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			int attempt = 0;
 			bool reconnectFallbackUsed = false;
 			double currentDelayMs = options.DelayMs;
-			RemoteRegistrySession? session = null;
+			IRegistrySession? session = null;
 
 			try
 			{
@@ -97,7 +97,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 					try
 					{
-						session ??= smb.OpenRemoteRegistrySessionAsync(serverName, cancellationToken).GetAwaiter().GetResult();
+						session ??= OpenRegistrySession(smb, serverName, cancellationToken);
 						return operation(session);
 					}
 					catch (NtstatusException ex) when (IsPipeBusy(ex))
@@ -158,6 +158,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
+		private static IRegistrySession OpenRegistrySession(ISmbProviderInfo smb, string serverName, CancellationToken cancellationToken)
+		{
+			if (smb is IRegistrySessionProvider provider)
+			{
+				var session = provider.OpenRegistrySession(serverName, cancellationToken);
+				if (session != null)
+					return session;
+			}
+
+			var remoteSession = smb.OpenRemoteRegistrySessionAsync(serverName, cancellationToken).GetAwaiter().GetResult();
+			return new RegistrySessionAdapter(remoteSession);
+		}
+
 		private static void ApplyDelay(RegistryRetryOptions options, ref double currentDelayMs, CancellationToken cancellationToken)
 		{
 			if (options.DelayMs <= 0)
@@ -183,7 +196,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return ex.InnerException != null && IsTransportException(ex.InnerException);
 		}
 
-		private static void DisposeSession(ref RemoteRegistrySession? session)
+		private static void DisposeSession(ref IRegistrySession? session)
 		{
 			if (session == null)
 				return;

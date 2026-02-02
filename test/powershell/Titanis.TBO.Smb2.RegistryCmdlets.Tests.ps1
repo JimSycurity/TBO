@@ -219,4 +219,47 @@ Describe 'TBO registry cmdlets (mocked)' {
 
 		$script:sessionCalled | Should -BeFalse
 	}
+
+	It 'Get-TBORegValue reads from fake registry store' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey('HKLM\Software\Titanis', 'TitanisClass') | Out-Null
+		$store.SetStringValue('HKLM\Software\Titanis', 'Path', 'C:\Temp') | Out-Null
+		$store.SetDwordValue('HKLM\Software\Titanis', 'Enabled', 1) | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			$keyInfo = Get-TBORegKey -ServerName 'server' -Path 'HKLM\Software\Titanis' -IncludeClass
+			$keyInfo.ClassName | Should -Be 'TitanisClass'
+			$keyInfo.ValueCount | Should -Be 2
+
+			$value = Get-TBORegValue -ServerName 'server' -Path 'HKLM\Software\Titanis' -Name 'Path'
+			$value.Value | Should -Be 'C:\Temp'
+		}
+	}
+
+	It 'Set-TBORegValue writes to fake registry store' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey('HKLM\Software\Titanis') | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Set-TBORegValue -ServerName 'server' -Path 'HKLM\Software\Titanis' -Name 'Answer' -Value 42
+			$value = Get-TBORegValue -ServerName 'server' -Path 'HKLM\Software\Titanis' -Name 'Answer'
+			$value.Value | Should -Be 42
+		}
+	}
 }

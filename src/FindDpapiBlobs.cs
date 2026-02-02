@@ -259,7 +259,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private void ScanRegistryKey(
 			ISmbProviderInfo smb,
 			string serverName,
-			RegistryKey key,
+			IRegistryKey key,
 			string keyPath,
 			int progressId,
 			string progressActivity,
@@ -324,7 +324,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				cancellationToken.ThrowIfCancellationRequested();
 
 				var childPath = string.IsNullOrEmpty(keyPath) ? subkey.KeyName : $"{keyPath}\\{subkey.KeyName}";
-				RegistryKey? childKey = null;
+				IRegistryKey? childKey = null;
 				try
 				{
 					childKey = key.OpenSubkey(

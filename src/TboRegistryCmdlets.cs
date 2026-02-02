@@ -153,7 +153,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected void ExecuteRegistryOperation(
 			ISmbProviderInfo smb,
 			CancellationToken cancellationToken,
-			Action<RemoteRegistrySession> action)
+			Action<IRegistrySession> action)
 		{
 			RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, action);
 		}
@@ -161,7 +161,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected TResult ExecuteRegistryOperation<TResult>(
 			ISmbProviderInfo smb,
 			CancellationToken cancellationToken,
-			Func<RemoteRegistrySession, TResult> func)
+			Func<IRegistrySession, TResult> func)
 		{
 			return RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, func);
 		}
@@ -171,8 +171,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return RegistryPathParser.Parse(path, paramName);
 		}
 
-		protected RegistryKey OpenRegistryKey(
-			RemoteRegistryClient client,
+		protected IRegistryKey OpenRegistryKey(
+			IRegistryClient client,
 			RegistryPathSpec path,
 			RegistryAccessRights access,
 			RegistryAccessRights? rootAccess,
@@ -197,14 +197,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		protected RegistryKey OpenRegistryKey(
-			RemoteRegistryClient client,
+		protected IRegistryKey OpenRegistryKey(
+			IRegistryClient client,
 			RegistryPathSpec path,
 			RegistryAccessRights access,
 			CancellationToken cancellationToken)
 			=> OpenRegistryKey(client, path, access, null, cancellationToken);
 
-		protected static List<RegistrySubkeyInfo> CollectSubkeys(RegistryKey key, CancellationToken cancellationToken)
+		protected static List<RegistrySubkeyInfo> CollectSubkeys(IRegistryKey key, CancellationToken cancellationToken)
 		{
 			var subkeys = new List<RegistrySubkeyInfo>();
 			var enumerator = key.GetSubkeyNames(cancellationToken).GetAsyncEnumerator();
@@ -230,7 +230,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return subkeys;
 		}
 
-		protected static List<RegistryValueInfo> CollectValues(RegistryKey key, bool includeData, CancellationToken cancellationToken)
+		protected static List<RegistryValueInfo> CollectValues(IRegistryKey key, bool includeData, CancellationToken cancellationToken)
 		{
 			var values = new List<RegistryValueInfo>();
 			var enumerator = key.GetValues(includeData, cancellationToken).GetAsyncEnumerator();

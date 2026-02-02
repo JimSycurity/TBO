@@ -106,7 +106,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private byte[]? ResolveLsaKey(
 			ISmbProviderInfo smb,
-			RemoteRegistryClient client,
+			IRegistryClient client,
 			CancellationToken cancellationToken,
 			out string? lsaKeySource)
 		{
@@ -130,7 +130,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return ExtractLsaKey(smb, client, bootKey, cancellationToken, out lsaKeySource);
 		}
 
-		private List<string> ResolveSecretNames(RemoteRegistryClient client, CancellationToken cancellationToken)
+		private List<string> ResolveSecretNames(IRegistryClient client, CancellationToken cancellationToken)
 		{
 			if (this.Name != null && this.Name.Length > 0 && this.Name.All(n => !string.IsNullOrWhiteSpace(n)) && !HasWildcardNames())
 				return this.Name.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
