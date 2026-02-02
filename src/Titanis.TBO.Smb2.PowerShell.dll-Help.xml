@@ -262,6 +262,108 @@
 
   <command:command>
     <command:details>
+      <command:name>Find-TBODpapiBlobs</command:name>
+      <command:verb>Find</command:verb>
+      <command:noun>TBODpapiBlobs</command:noun>
+      <maml:description>
+        <maml:para>Searches files or registry values for DPAPI blob headers.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Find-TBODpapiBlobs</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Find-TBODpapiBlobs</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>RegistryPath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Target server to scan.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>UNC path or TBO.Smb2 drive path to scan.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>RegistryPath</maml:name>
+        <maml:description>
+          <maml:para>Registry path to scan (for example HKLM\Software).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Recurse</maml:name>
+        <maml:description>
+          <maml:para>Recurse into child directories or subkeys.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>FollowReparse</maml:name>
+        <maml:description>
+          <maml:para>Follow reparse points when scanning the file system.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MaxBytes</maml:name>
+        <maml:description>
+          <maml:para>Maximum number of bytes to scan per file or value (default: 1024).</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Users -Recurse</maml:code>
+        <maml:remarks>
+          <maml:para>Searches a user profile tree for DPAPI blob headers.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse -MaxBytes 2048</maml:code>
+        <maml:remarks>
+          <maml:para>Scans a TBO.Smb2 drive path and increases the scan window.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Microsoft -Recurse</maml:code>
+        <maml:remarks>
+          <maml:para>Scans registry values under the specified key for DPAPI blob headers.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Out-TBOSmbFile</command:name>
       <command:verb>Out</command:verb>
       <command:noun>TBOSmbFile</command:noun>

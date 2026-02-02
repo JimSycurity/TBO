@@ -492,6 +492,17 @@ Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -DpapiMac
 Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine -ShareName C$
 ```
 
+#### Find-TBODpapiBlobs
+
+Searches file system and registry paths for DPAPI blobs by looking for the DPAPI magic header in the first 1024 bytes.
+Use `-Recurse` to walk child directories or registry keys.
+
+```powershell
+Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users' -Recurse
+Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse -MaxBytes 2048
+Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Microsoft -Recurse
+```
+
 #### Get-TBORegAutoLogon
 
 Reads autologon configuration values from the Winlogon registry key.
