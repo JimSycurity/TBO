@@ -364,6 +364,173 @@
 
   <command:command>
     <command:details>
+      <command:name>Get-TBODpapiBlob</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBODpapiBlob</command:noun>
+      <maml:description>
+        <maml:para>Decrypts a DPAPI blob using a DPAPI master key.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiBlob</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiBlob</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>RegistryPath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="2">
+          <maml:name>ValueName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiBlob</command:name>
+        <command:parameter required="true">
+          <maml:name>BlobBytes</maml:name>
+          <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Target server for file or registry access.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>InputObject</maml:name>
+        <maml:description>
+          <maml:para>DPAPI blob location from Find-TBODpapiBlobs.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiBlobInfo</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>UNC path or TBO.Smb2 drive path that contains the blob.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>RegistryPath</maml:name>
+        <maml:description>
+          <maml:para>Registry key path that contains the blob value.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="2">
+        <maml:name>ValueName</maml:name>
+        <maml:description>
+          <maml:para>Name of the registry value that holds the blob.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>BlobBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw DPAPI blob bytes to decrypt.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>BlobHex</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded DPAPI blob.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>BlobBase64</maml:name>
+        <maml:description>
+          <maml:para>Base64-encoded DPAPI blob.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Offset</maml:name>
+        <maml:description>
+          <maml:para>Byte offset where the blob starts within the input data.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MasterKey</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded DPAPI master key (64 bytes).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MasterKeyBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw DPAPI master key bytes.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Entropy</maml:name>
+        <maml:description>
+          <maml:para>Optional hex-encoded entropy supplied to CryptProtectData.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>EntropyBytes</maml:name>
+        <maml:description>
+          <maml:para>Optional raw entropy bytes supplied to CryptProtectData.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$mk = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine |
+  Where-Object IsPreferred
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Users\Public\blob.bin -MasterKey $mk.MasterKey</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts a DPAPI blob from a file using a recovered master key.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>$blob = Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse |
+  Select-Object -First 1
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Path -Offset $blob.MatchOffset -MasterKey $mk.MasterKey</maml:code>
+        <maml:remarks>
+          <maml:para>Uses a Find-TBODpapiBlobs hit and the reported offset to decrypt.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts a DPAPI blob stored in a registry value.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Out-TBOSmbFile</command:name>
       <command:verb>Out</command:verb>
       <command:noun>TBOSmbFile</command:noun>
