@@ -245,3 +245,88 @@ Describe 'TBO test harness' {
         $script:capturedServer | Should -Be 'fileserver'
     }
 }
+
+Describe 'DPAPI cmdlets with fake SMB file system' {
+    It 'scans for DPAPI blobs using a fake SMB file system' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $magic = 0x01,0x00,0x00,0x00,0xD0,0x8C,0x9D,0xDF,0x01,0x15,0xD1,0x11,0x8C,0x7A,0x00,0xC0,0x4F,0xC2,0x97,0xEB,0xFF
+        $fake.AddDirectory("\\server\C$\Temp") | Out-Null
+        $fake.AddFile("\\server\C$\Temp\blob.bin", [byte[]]$magic) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            $results = @(Find-TBODpapiBlobs -ServerName server -Path "\\server\C$\Temp" -Recurse)
+        } finally {
+            $scope.Dispose()
+        }
+
+        $results | Should -Not -BeNullOrEmpty
+        $match = $results | Where-Object { $_.Path -eq "\\\\server\\C$\\Temp\\blob.bin" } | Select-Object -First 1
+        $match | Should -Not -BeNullOrEmpty
+        $match.MatchOffset | Should -Be 0
+        $match.Source | Should -Be 'File'
+    }
+
+    It 'enumerates master key locations using a fake SMB file system' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $guid = [Guid]::Parse('1c39564b-6f6e-4ac0-9715-cda5503e6290')
+        $preferredBytes = [System.Text.Encoding]::Unicode.GetBytes($guid.ToString())
+        $root = "\\server\C$\Windows\System32\Microsoft\Protect\S-1-5-18"
+        $fake.AddDirectory($root) | Out-Null
+        $fake.AddFile("$root\Preferred", $preferredBytes) | Out-Null
+        $fake.AddFile("$root\$guid", [byte[]](0x01,0x02,0x03)) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            $results = @(Get-TBODpapiMasterKeyLocations -ServerName server -Scope Machine -ShareName C$)
+        } finally {
+            $scope.Dispose()
+        }
+
+        $results | Should -Not -BeNullOrEmpty
+        $match = $results | Where-Object { $_.MasterKeyGuid -eq $guid.ToString() } | Select-Object -First 1
+        $match | Should -Not -BeNullOrEmpty
+        $match.IsPreferred | Should -BeTrue
+        $match.Scope | Should -Be 'Machine'
+    }
+}

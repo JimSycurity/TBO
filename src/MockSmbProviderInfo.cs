@@ -5,9 +5,10 @@ using Titanis.Smb2;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
-	public sealed class MockSmbProviderInfo : ISmbProviderInfo
+	public sealed class MockSmbProviderInfo : ISmbProviderInfo, ISmbFileSystemProvider
 	{
 		public Smb2Client? SmbClient { get; set; }
+		public ISmbFileSystem? FileSystem { get; set; }
 		private SmbConnectionParameters? _defaultConnectParameters = SmbConnectionParameters.GetDefault();
 		public object? DefaultConnectParameters
 		{
@@ -82,5 +83,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		void ISmbProviderInfo.LogException(string context, Exception ex)
 			=> this.LogExceptionAction?.Invoke(context, ex);
+
+		ISmbFileSystem? ISmbFileSystemProvider.FileSystem => this.FileSystem;
 	}
 }

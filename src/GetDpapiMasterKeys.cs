@@ -4,9 +4,6 @@ using System.Management.Automation;
 using System.Threading;
 using Titanis;
 using Titanis.Net;
-using Titanis.Smb2;
-using Winterop = Titanis.Winterop;
-using Smb2AccessRights = Titanis.Smb2.Smb2FileAccessRights;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
@@ -210,27 +207,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static byte[] ReadFileBytes(ISmbProviderInfo smb, UncPath path, CancellationToken cancellationToken)
 		{
-			using var file = OpenFileRead(smb.SmbClient, path, cancellationToken);
-			using var stream = file.GetStream(false);
+			var fileSystem = ResolveFileSystem(smb);
+			using var file = fileSystem.OpenFileRead(path, cancellationToken);
+			using var stream = file.OpenRead();
 			using var memory = new MemoryStream();
 			stream.CopyTo(memory);
 			return memory.ToArray();
 		}
 
-		private static Smb2OpenFile OpenFileRead(Smb2Client client, UncPath path, CancellationToken cancellationToken)
+		private static ISmbFileSystem ResolveFileSystem(ISmbProviderInfo smb)
 		{
-			return (Smb2OpenFile)client.CreateFileAsync(path, new Smb2CreateInfo
-			{
-				CreateDisposition = Smb2CreateDisposition.Open,
-				DesiredAccess = (uint)Smb2AccessRights.DefaultOpenReadAccess,
-				ShareAccess = Smb2ShareAccess.Read,
-				ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-				CreateOptions = Smb2FileCreateOptions.NonDirectory
-					| Smb2FileCreateOptions.SynchronousIoNonalert
-					| Smb2FileCreateOptions.OpenForBackupIntent,
-				FileAttributes = Winterop.FileAttributes.Normal,
-				RequestMaximalAccess = true
-			}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
+			return SmbFileSystemResolver.Resolve(smb);
 		}
 
 		private static string NormalizeServerName(string? serverName)

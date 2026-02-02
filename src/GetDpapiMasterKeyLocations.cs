@@ -10,7 +10,6 @@ using Titanis.Net;
 using Titanis.Smb2;
 using Titanis.Winterop;
 using Titanis.Winterop.Security;
-using Smb2AccessRights = Titanis.Smb2.Smb2FileAccessRights;
 using Winterop = Titanis.Winterop;
 
 namespace Titanis.Tbo.Smb2.PowerShell
@@ -211,11 +210,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			Action<string> writeVerbose,
 			CancellationToken cancellationToken)
 		{
-			Smb2Directory? usersDir = null;
+			var fileSystem = ResolveFileSystem(smb);
+			ISmbDirectory? usersDir = null;
 			try
 			{
-				usersDir = OpenDirectory(smb.SmbClient, usersRoot, cancellationToken);
-				foreach (var entry in usersDir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult())
+				usersDir = fileSystem.OpenDirectory(usersRoot, cancellationToken);
+				foreach (var entry in usersDir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken))
 				{
 					if (string.IsNullOrEmpty(entry.FileName))
 						continue;
@@ -252,7 +252,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			finally
 			{
 				if (usersDir != null)
-					usersDir.CloseAsync(cancellationToken).GetAwaiter().GetResult();
+					usersDir.Dispose();
 			}
 		}
 
@@ -266,11 +266,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			Action<string> writeVerbose,
 			CancellationToken cancellationToken)
 		{
-			Smb2Directory? rootDir = null;
+			var fileSystem = ResolveFileSystem(smb);
+			ISmbDirectory? rootDir = null;
 			try
 			{
-				rootDir = OpenDirectory(smb.SmbClient, rootPath, cancellationToken);
-				foreach (var entry in rootDir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult())
+				rootDir = fileSystem.OpenDirectory(rootPath, cancellationToken);
+				foreach (var entry in rootDir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken))
 				{
 					if (string.IsNullOrEmpty(entry.FileName))
 						continue;
@@ -305,7 +306,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			finally
 			{
 				if (rootDir != null)
-					rootDir.CloseAsync(cancellationToken).GetAwaiter().GetResult();
+					rootDir.Dispose();
 			}
 		}
 
@@ -322,11 +323,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			Guid? preferredGuid = TryReadPreferredGuid(smb, directoryPath, cancellationToken);
 
-			Smb2Directory? dir = null;
+			var fileSystem = ResolveFileSystem(smb);
+			ISmbDirectory? dir = null;
 			try
 			{
-				dir = OpenDirectory(smb.SmbClient, directoryPath, cancellationToken);
-				foreach (var entry in dir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult())
+				dir = fileSystem.OpenDirectory(directoryPath, cancellationToken);
+				foreach (var entry in dir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken))
 				{
 					if (string.IsNullOrEmpty(entry.FileName))
 						continue;
@@ -370,53 +372,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			finally
 			{
 				if (dir != null)
-					dir.CloseAsync(cancellationToken).GetAwaiter().GetResult();
+					dir.Dispose();
 			}
-		}
-
-		private static Smb2Directory OpenDirectory(Smb2Client client, UncPath path, CancellationToken cancellationToken)
-		{
-			return (Smb2Directory)client.CreateFileAsync(path, new Smb2CreateInfo
-			{
-				CreateDisposition = Smb2CreateDisposition.Open,
-				Priority = Smb2Priority.OpenDir,
-				DesiredAccess = (uint)Smb2AccessRights.DefaultOpenDirAccess,
-				ShareAccess = Smb2ShareAccess.DefaultDirShare,
-				FileAttributes = Winterop.FileAttributes.None,
-				CreateOptions = Smb2FileCreateOptions.Directory
-					| Smb2FileCreateOptions.SynchronousIoNonalert
-					| Smb2FileCreateOptions.OpenForBackupIntent,
-				ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-				RequestMaximalAccess = true,
-				QueryOnDiskId = true,
-				OplockLevel = Smb2OplockLevel.None
-			}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
-		}
-
-		private static Smb2OpenFile OpenFileRead(Smb2Client client, UncPath path, CancellationToken cancellationToken)
-		{
-			return (Smb2OpenFile)client.CreateFileAsync(path, new Smb2CreateInfo
-			{
-				CreateDisposition = Smb2CreateDisposition.Open,
-				DesiredAccess = (uint)Smb2AccessRights.DefaultOpenReadAccess,
-				ShareAccess = Smb2ShareAccess.Read,
-				ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-				CreateOptions = Smb2FileCreateOptions.NonDirectory
-					| Smb2FileCreateOptions.SynchronousIoNonalert
-					| Smb2FileCreateOptions.OpenForBackupIntent,
-				FileAttributes = Winterop.FileAttributes.Normal,
-				RequestMaximalAccess = true
-			}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
 		}
 
 		private static Guid? TryReadPreferredGuid(ISmbProviderInfo smb, UncPath directoryPath, CancellationToken cancellationToken)
 		{
+			var fileSystem = ResolveFileSystem(smb);
 			var preferredPath = directoryPath.Append("Preferred");
 			byte[]? bytes = null;
 			try
 			{
-				using var file = OpenFileRead(smb.SmbClient, preferredPath, cancellationToken);
-				using var stream = file.GetStream(false);
+				using var file = fileSystem.OpenFileRead(preferredPath, cancellationToken);
+				using var stream = file.OpenRead();
 				using var memory = new MemoryStream();
 				stream.CopyTo(memory);
 				bytes = memory.ToArray();
@@ -440,6 +408,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return TryParseGuidFromBytes(bytes);
+		}
+
+		private static ISmbFileSystem ResolveFileSystem(ISmbProviderInfo smb)
+		{
+			return SmbFileSystemResolver.Resolve(smb);
 		}
 
 		private static Guid? TryParseGuidFromBytes(byte[]? bytes)

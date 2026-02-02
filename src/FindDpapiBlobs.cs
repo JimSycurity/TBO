@@ -9,7 +9,6 @@ using Titanis.Net;
 using Titanis.Smb2;
 using Titanis.Winterop;
 using Titanis.Winterop.Security;
-using Smb2AccessRights = Titanis.Smb2.Smb2FileAccessRights;
 using Winterop = Titanis.Winterop;
 
 namespace Titanis.Tbo.Smb2.PowerShell
@@ -91,7 +90,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var progressActivity = $"Scanning for DPAPI blobs on {serverName}";
 			this.WriteProgressUpdate(progressId, progressActivity, $"Scanning {uncPath}");
 
-			ScanFileSystemPath(smb, uncPath, progressId, progressActivity, cancellationToken);
+			var fileSystem = SmbFileSystemResolver.Resolve(smb);
+			ScanFileSystemPath(smb, fileSystem, uncPath, progressId, progressActivity, cancellationToken);
 
 			this.WriteProgress(new ProgressRecord(progressId, progressActivity, "Completed")
 			{
@@ -123,6 +123,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private void ScanFileSystemPath(
 			ISmbProviderInfo smb,
+			ISmbFileSystem fileSystem,
 			UncPath path,
 			int progressId,
 			string progressActivity,
@@ -130,11 +131,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
-			Smb2Directory? dir = null;
+			ISmbDirectory? dir = null;
 			try
 			{
-				dir = OpenDirectory(smb.SmbClient, path, cancellationToken);
-				ScanDirectoryEntries(smb, dir, path, progressId, progressActivity, cancellationToken);
+				dir = fileSystem.OpenDirectory(path, cancellationToken);
+				ScanDirectoryEntries(smb, fileSystem, dir, path, progressId, progressActivity, cancellationToken);
 				return;
 			}
 			catch (NtstatusException ex) when (IsNotDirectory(ex))
@@ -159,15 +160,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			finally
 			{
 				if (dir != null)
-					dir.CloseAsync(cancellationToken).GetAwaiter().GetResult();
+					dir.Dispose();
 			}
 
-			ScanFile(smb, path, null, progressId, progressActivity, cancellationToken);
+			ScanFile(smb, fileSystem, path, null, progressId, progressActivity, cancellationToken);
 		}
 
 		private void ScanDirectoryEntries(
 			ISmbProviderInfo smb,
-			Smb2Directory dir,
+			ISmbFileSystem fileSystem,
+			ISmbDirectory dir,
 			UncPath directoryPath,
 			int progressId,
 			string progressActivity,
@@ -175,7 +177,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			this.WriteProgressUpdate(progressId, progressActivity, $"Scanning {directoryPath}");
 
-			foreach (var entry in dir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult())
+			foreach (var entry in dir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
@@ -195,17 +197,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (!this.Recurse.IsPresent)
 						continue;
 
-					ScanFileSystemPath(smb, childPath, progressId, progressActivity, cancellationToken);
+					ScanFileSystemPath(smb, fileSystem, childPath, progressId, progressActivity, cancellationToken);
 				}
 				else
 				{
-					ScanFile(smb, childPath, entry.Size, progressId, progressActivity, cancellationToken);
+					ScanFile(smb, fileSystem, childPath, entry.Size, progressId, progressActivity, cancellationToken);
 				}
 			}
 		}
 
 		private void ScanFile(
 			ISmbProviderInfo smb,
+			ISmbFileSystem fileSystem,
 			UncPath filePath,
 			ulong? fileSize,
 			int progressId,
@@ -217,7 +220,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			byte[]? prefix = null;
 			try
 			{
-				prefix = ReadFilePrefix(smb, filePath, this.MaxBytes, cancellationToken);
+				prefix = ReadFilePrefix(fileSystem, filePath, this.MaxBytes, cancellationToken);
 			}
 			catch (NtstatusException ex) when (IsMissingPath(ex))
 			{
@@ -384,10 +387,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return buffer.IndexOf(DpapiMagic);
 		}
 
-		private static byte[] ReadFilePrefix(ISmbProviderInfo smb, UncPath path, int maxBytes, CancellationToken cancellationToken)
+		private static byte[] ReadFilePrefix(ISmbFileSystem fileSystem, UncPath path, int maxBytes, CancellationToken cancellationToken)
 		{
-			using var file = OpenFileRead(smb.SmbClient, path, cancellationToken);
-			using var stream = file.GetStream(false);
+			using var file = fileSystem.OpenFileRead(path, cancellationToken);
+			using var stream = file.OpenRead();
 			var buffer = new byte[maxBytes];
 			var read = 0;
 			while (read < buffer.Length)
@@ -406,41 +409,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			Array.Resize(ref buffer, read);
 			return buffer;
-		}
-
-		private static Smb2Directory OpenDirectory(Smb2Client client, UncPath path, CancellationToken cancellationToken)
-		{
-			return (Smb2Directory)client.CreateFileAsync(path, new Smb2CreateInfo
-			{
-				CreateDisposition = Smb2CreateDisposition.Open,
-				Priority = Smb2Priority.OpenDir,
-				DesiredAccess = (uint)Smb2AccessRights.DefaultOpenDirAccess,
-				ShareAccess = Smb2ShareAccess.DefaultDirShare,
-				FileAttributes = Winterop.FileAttributes.None,
-				CreateOptions = Smb2FileCreateOptions.Directory
-					| Smb2FileCreateOptions.SynchronousIoNonalert
-					| Smb2FileCreateOptions.OpenForBackupIntent,
-				ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-				RequestMaximalAccess = true,
-				QueryOnDiskId = true,
-				OplockLevel = Smb2OplockLevel.None
-			}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
-		}
-
-		private static Smb2OpenFile OpenFileRead(Smb2Client client, UncPath path, CancellationToken cancellationToken)
-		{
-			return (Smb2OpenFile)client.CreateFileAsync(path, new Smb2CreateInfo
-			{
-				CreateDisposition = Smb2CreateDisposition.Open,
-				DesiredAccess = (uint)Smb2AccessRights.DefaultOpenReadAccess,
-				ShareAccess = Smb2ShareAccess.Read,
-				ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-				CreateOptions = Smb2FileCreateOptions.NonDirectory
-					| Smb2FileCreateOptions.SynchronousIoNonalert
-					| Smb2FileCreateOptions.OpenForBackupIntent,
-				FileAttributes = Winterop.FileAttributes.Normal,
-				RequestMaximalAccess = true
-			}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
 		}
 
 		private void WriteProgressUpdate(int progressId, string activity, string status)
