@@ -52,14 +52,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					return;
 				}
 
-				var nlkm = ResolveNlkmSecret(session.Client, lsaKey, cancellationToken);
+				bool vistaOrLater = IsVistaOrLaterCache(lsaKeySource, null);
+				var nlkm = ResolveNlkmSecret(session.Client, lsaKey, vistaOrLater, cancellationToken);
 				if (nlkm == null || nlkm.Length == 0)
 				{
 					this.WriteWarning("Get-TBORegCachedCredentials failed to derive the NL$KM secret.");
 					return;
 				}
 
-				bool vistaOrLater = IsVistaOrLaterCache(lsaKeySource, nlkm);
+				vistaOrLater = IsVistaOrLaterCache(lsaKeySource, nlkm);
 
 				var cacheSpec = new RegistryPathSpec(
 					RegistryRootKey.LocalMachine,
@@ -143,16 +144,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return ExtractLsaKey(smb, client, bootKey, cancellationToken, out lsaKeySource);
 		}
 
-		private static bool IsVistaOrLaterCache(string? lsaKeySource, byte[] nlkm)
+		private static bool IsVistaOrLaterCache(string? lsaKeySource, byte[]? nlkm)
 		{
 			if (!string.IsNullOrWhiteSpace(lsaKeySource)
 				&& lsaKeySource.EndsWith("PolEKList", StringComparison.OrdinalIgnoreCase))
 				return true;
 
-			return nlkm.Length >= 32;
+			return nlkm != null && nlkm.Length >= 32;
 		}
 
-		private byte[]? ResolveNlkmSecret(IRegistryClient client, byte[] lsaKey, CancellationToken cancellationToken)
+		private byte[]? ResolveNlkmSecret(
+			IRegistryClient client,
+			byte[] lsaKey,
+			bool vistaOrLater,
+			CancellationToken cancellationToken)
 		{
 			DateTime? lastWriteTime;
 			var encrypted = TryReadSecretValue(client, "NL$KM", "CurrVal", cancellationToken, out lastWriteTime);
@@ -162,6 +167,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var decrypted = DecryptLsaSecret(encrypted, lsaKey);
 			if (decrypted == null || decrypted.Length == 0)
 				return null;
+
+			if (!vistaOrLater && decrypted.Length >= 64)
+				vistaOrLater = true;
+
+			if (vistaOrLater)
+				return decrypted;
 
 			return TryExtractSecretPayload(decrypted, out var payload) ? payload : decrypted;
 		}
