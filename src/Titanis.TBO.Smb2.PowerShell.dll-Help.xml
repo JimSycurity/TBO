@@ -3169,6 +3169,51 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
   </command:command>
 
   <command:command>
+    <command:details>
+      <command:name>Get-TBONtHash</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBONtHash</command:noun>
+      <maml:description>
+        <maml:para>Computes an NT hash (MD4 of UTF-16LE) for a password string.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBONtHash</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>Password</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>Password</maml:name>
+        <maml:description>
+          <maml:para>Password string to hash using the NTLM algorithm.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBONtHash -Password 'Passw0rd!'</maml:code>
+        <maml:remarks>
+          <maml:para>Returns the NT hash bytes and hex string for the password.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>'Passw0rd!' | Get-TBONtHash | Select-Object NtlmHashText</maml:code>
+        <maml:remarks>
+          <maml:para>Uses pipeline input and selects the hex hash text.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
       <command:details>
         <command:name>Find-TBORegWeakServices</command:name>
         <command:verb>Find</command:verb>

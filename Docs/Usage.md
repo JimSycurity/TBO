@@ -551,6 +551,15 @@ Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
   Select-Object AccountName, FullName, Rid, NtlmHashText
 ```
 
+#### Get-TBONtHash
+
+Computes an NT hash (MD4 of UTF-16LE) for a password string.
+
+```powershell
+Get-TBONtHash -Password 'Passw0rd!'
+'Passw0rd!' | Get-TBONtHash | Select-Object NtlmHashText
+```
+
 #### Find-TBORegWeakServices
 
 Scans service security descriptors and reports AccessAllowed entries that grant service configuration rights to non-system trustees.
