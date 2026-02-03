@@ -531,6 +531,203 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
 
   <command:command>
     <command:details>
+      <command:name>Get-TBOCredManFiles</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOCredManFiles</command:noun>
+      <maml:description>
+        <maml:para>Enumerates Credential Manager files (Credentials and Vaults) for user and system profiles.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOCredManFiles</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>CredManScope</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserName</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeSystemProfiles</maml:name>
+          <command:parameterValue>Boolean</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Limit enumeration to user profiles, system profiles, or both (default: All).</maml:para>
+        </maml:description>
+        <command:parameterValue>CredManScope</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserName</maml:name>
+        <maml:description>
+          <maml:para>Optional user profile filters (wildcards supported).</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeSystemProfiles</maml:name>
+        <maml:description>
+          <maml:para>Include system profiles when Scope includes Machine (default: true).</maml:para>
+        </maml:description>
+        <command:parameterValue>Boolean</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates Credential Manager files for user and system profiles.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith'</maml:code>
+        <maml:remarks>
+          <maml:para>Filters enumeration to a specific user profile.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine</maml:code>
+        <maml:remarks>
+          <maml:para>Lists Credential Manager files under system profiles.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOCredManEntry</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOCredManEntry</command:noun>
+      <maml:description>
+        <maml:para>Reads a Credential Manager file and reports DPAPI blob offsets and metadata.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOCredManEntry</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>MaxBytes</maml:name>
+          <command:parameterValue>Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeRawBytes</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Get-TBOCredManEntry</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>InputObject</maml:name>
+          <command:parameterValue>TboCredManFileInfo</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>MaxBytes</maml:name>
+          <command:parameterValue>Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeRawBytes</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>UNC path or TBO.Smb2 drive path to the credential file.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>InputObject</maml:name>
+        <maml:description>
+          <maml:para>Credential file metadata from Get-TBOCredManFiles.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboCredManFileInfo</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MaxBytes</maml:name>
+        <maml:description>
+          <maml:para>Maximum bytes to scan for DPAPI headers (default: 1048576).</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeRawBytes</maml:name>
+        <maml:description>
+          <maml:para>Include raw bytes read from the file in the output.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$files = Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith'
+$files | Get-TBOCredManEntry | Select-Object SourcePath, HasDpapiBlob, DpapiBlobOffset</maml:code>
+        <maml:remarks>
+          <maml:para>Scans Credential Manager files for DPAPI blob offsets.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOCredManEntry -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\jsmith\AppData\Local\Microsoft\Credentials\CRED_FILE'</maml:code>
+        <maml:remarks>
+          <maml:para>Reads a specific Credential Manager file and reports blob offsets.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Out-TBOSmbFile</command:name>
       <command:verb>Out</command:verb>
       <command:noun>TBOSmbFile</command:noun>

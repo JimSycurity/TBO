@@ -95,15 +95,33 @@ function Use-TboProviderInfoOverride {
 		throw 'Unable to locate ProviderInfoOverride on SmbCmdlet.'
 	}
 
+	if (-not (Test-Path -Path variable:script:providerInfoMutex)) {
+		# Use a named mutex so parallel Pester runs do not collide on ProviderInfoOverride.
+		$script:providerInfoMutex = [System.Threading.Mutex]::new($false, 'Global\TboProviderInfoOverride')
+	}
+
+	$mutex = $script:providerInfoMutex
+	$lockTaken = $false
+	try {
+		$lockTaken = $mutex.WaitOne()
+	} catch {
+		$lockTaken = $false
+	}
+
 	$previous = $property.GetValue($null, $null)
 	$property.SetValue($null, $ProviderInfo, $null)
 
 	$capturedProperty = $property
 	$capturedPrevious = $previous
+	$capturedMutex = $mutex
+	$capturedLockTaken = $lockTaken
 	$disposer = New-Object psobject
 	$disposer | Add-Member -MemberType ScriptMethod -Name Dispose -Value ({
 		param()
 		$capturedProperty.SetValue($null, $capturedPrevious, $null)
+		if ($capturedLockTaken -and $capturedMutex) {
+			$capturedMutex.ReleaseMutex() | Out-Null
+		}
 	}.GetNewClosure())
 	return $disposer
 }

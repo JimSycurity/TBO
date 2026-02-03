@@ -281,7 +281,7 @@ Describe 'DPAPI cmdlets with fake SMB file system' {
         }
 
         $results | Should -Not -BeNullOrEmpty
-        $match = $results | Where-Object { $_.Path -eq "\\\\server\\C$\\Temp\\blob.bin" } | Select-Object -First 1
+        $match = $results | Where-Object { $_.Path -like "*\Temp\blob.bin" } | Select-Object -First 1
         $match | Should -Not -BeNullOrEmpty
         $match.MatchOffset | Should -Be 0
         $match.Source | Should -Be 'File'

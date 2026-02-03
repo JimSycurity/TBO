@@ -533,6 +533,27 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
 Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey
 ```
 
+#### Get-TBOCredManFiles
+
+Enumerates Credential Manager files (Credentials and Vaults) for user and system profiles.
+
+```powershell
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith'
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine
+```
+
+#### Get-TBOCredManEntry
+
+Reads a Credential Manager file and reports metadata plus DPAPI blob offsets (no decryption in this phase).
+
+```powershell
+$files = Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith'
+$files | Get-TBOCredManEntry | Select-Object SourcePath, HasDpapiBlob, DpapiBlobOffset
+
+Get-TBOCredManEntry -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\jsmith\AppData\Local\Microsoft\Credentials\CRED_FILE'
+```
+
 #### Get-TBORegAutoLogon
 
 Reads autologon configuration values from the Winlogon registry key.
