@@ -431,31 +431,81 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			if (bytes.Length >= 20)
 			{
-				var declaredLength = BitConverter.ToInt32(bytes, 0);
-				if (declaredLength == 16)
+				var header = BitConverter.ToInt32(bytes, 0);
+				if (header == 16)
 				{
-					try
+					var guid = TryReadGuid(bytes, 4);
+					if (guid.HasValue)
+						return guid;
+				}
+				else if (header is 1 or 2 or 3)
+				{
+					if (bytes.Length >= 24)
 					{
-						return new Guid(bytes.AsSpan(4, 16));
+						var declaredLength = BitConverter.ToInt32(bytes, 4);
+						if (declaredLength == 16)
+						{
+							var guid = TryReadGuid(bytes, 8);
+							if (guid.HasValue)
+								return guid;
+						}
 					}
-					catch
+					else if (bytes.Length == 20)
 					{
+						var guid = TryReadGuid(bytes, 4);
+						if (guid.HasValue)
+							return guid;
 					}
 				}
 			}
 
-			if (bytes.Length == 16)
+			if (bytes.Length >= 24)
 			{
-				try
+				var declaredLength = BitConverter.ToInt32(bytes, 4);
+				if (declaredLength == 16)
 				{
-					return new Guid(bytes);
+					var guid = TryReadGuid(bytes, 8);
+					if (guid.HasValue)
+						return guid;
 				}
-				catch
-				{
-				}
+			}
+
+			if (bytes.Length >= 16)
+			{
+				var guid = TryReadGuid(bytes, 0);
+				if (guid.HasValue)
+					return guid;
 			}
 
 			return null;
+		}
+
+		private static Guid? TryReadGuid(byte[] bytes, int offset)
+		{
+			if (offset < 0 || offset + 16 > bytes.Length)
+				return null;
+
+			var span = bytes.AsSpan(offset, 16);
+			var allZero = true;
+			for (int i = 0; i < span.Length; i++)
+			{
+				if (span[i] != 0)
+				{
+					allZero = false;
+					break;
+				}
+			}
+			if (allZero)
+				return null;
+
+			try
+			{
+				return new Guid(span);
+			}
+			catch
+			{
+				return null;
+			}
 		}
 
 		private static string? TryDecodeGuidString(byte[] bytes, Encoding encoding)

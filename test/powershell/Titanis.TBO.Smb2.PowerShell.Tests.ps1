@@ -308,8 +308,9 @@ Describe 'DPAPI cmdlets with fake SMB file system' {
         $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
         $guid = [Guid]::Parse('1c39564b-6f6e-4ac0-9715-cda5503e6290')
         $guidBytes = $guid.ToByteArray()
+        $versionBytes = [System.BitConverter]::GetBytes(2)
         $lengthBytes = [System.BitConverter]::GetBytes(16)
-        $preferredBytes = $lengthBytes + $guidBytes
+        $preferredBytes = $versionBytes + $lengthBytes + $guidBytes
         $root = "\\server\C$\Windows\System32\Microsoft\Protect\S-1-5-18"
         $fake.AddDirectory($root) | Out-Null
         $fake.AddFile("$root\Preferred", $preferredBytes) | Out-Null
