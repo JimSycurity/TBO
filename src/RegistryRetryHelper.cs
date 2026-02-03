@@ -100,7 +100,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						session ??= OpenRegistrySession(smb, serverName, cancellationToken);
 						return operation(session);
 					}
-					catch (NtstatusException ex) when (IsPipeBusy(ex))
+					catch (Exception ex) when (IsPipeBusy(ex))
 					{
 						if (!options.RetryEnabled)
 							throw;
@@ -186,8 +186,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			Task.Delay(TimeSpan.FromMilliseconds(delayMs), cancellationToken).GetAwaiter().GetResult();
 		}
 
-		private static bool IsPipeBusy(NtstatusException ex)
-			=> ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY;
+		private static bool IsPipeBusy(Exception ex)
+		{
+			if (ex is NtstatusException nt && nt.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+				return true;
+
+			if (ex is AggregateException agg)
+			{
+				foreach (var inner in agg.InnerExceptions)
+				{
+					if (IsPipeBusy(inner))
+						return true;
+				}
+			}
+
+			return ex.InnerException != null && IsPipeBusy(ex.InnerException);
+		}
 
 		private static bool IsTransportException(Exception ex)
 		{
