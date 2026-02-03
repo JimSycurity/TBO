@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Management.Automation;
 using System.Threading;
+using Titanis;
 using Titanis.Net;
 using Titanis.Smb2;
 using Titanis.Winterop;
@@ -57,6 +58,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public int BytesScanned { get; init; }
 		public byte[]? RawBytes { get; init; }
 		public bool HasDpapiBlob => this.DpapiBlobOffset.HasValue;
+		public string? CredentialGuid { get; init; }
+		public string? MasterKeyGuid { get; init; }
+		public uint Flags { get; init; }
+		public string? Description { get; init; }
+		public uint CryptAlgorithmId { get; init; }
+		public string? CryptAlgorithm { get; init; }
+		public uint HashAlgorithmId { get; init; }
+		public string? HashAlgorithm { get; init; }
+		public string? Cleartext { get; init; }
+		public string? CleartextHex { get; init; }
+		public byte[]? CleartextBytes { get; init; }
+		public bool HmacValidated { get; init; }
+		public string? FailureReason { get; init; }
 	}
 
 	[Cmdlet(VerbsCommon.Get, "TBOCredManFiles")]
@@ -182,6 +196,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public SwitchParameter IncludeRawBytes { get; set; }
 
+		[Parameter]
+		public string? MasterKey { get; set; }
+
+		[Parameter]
+		public byte[]? MasterKeyBytes { get; set; }
+
+		[Parameter]
+		public string? Entropy { get; set; }
+
+		[Parameter]
+		public byte[]? EntropyBytes { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			var input = this.InputObject;
@@ -202,14 +228,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw new ArgumentException($"ServerName '{serverName}' does not match UNC host '{uncPath.ServerName}'.", nameof(this.ServerName));
 
 			var fileSystem = SmbFileSystemResolver.Resolve(smb);
-			ReadCredManFile(smb, fileSystem, uncPath, input);
+			var masterKey = ResolveMasterKey();
+			if ((this.MasterKeyBytes != null || !string.IsNullOrWhiteSpace(this.MasterKey)) && (masterKey == null || masterKey.Length == 0))
+				throw new ArgumentException("MasterKey must be provided (hex) or MasterKeyBytes must be set.", nameof(this.MasterKey));
+			var entropy = ResolveEntropy();
+			ReadCredManFile(smb, fileSystem, uncPath, input, masterKey, entropy);
 		}
 
 		private void ReadCredManFile(
 			ISmbProviderInfo smb,
 			ISmbFileSystem fileSystem,
 			UncPath path,
-			TboCredManFileInfo? input)
+			TboCredManFileInfo? input,
+			byte[]? masterKey,
+			byte[]? entropy)
 		{
 			byte[]? buffer = null;
 			int bytesRead = 0;
@@ -246,6 +278,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			int? offset = FindDpapiOffset(buffer.AsSpan(0, bytesRead));
+			var decryptResult = TryDecryptBlob(buffer.AsSpan(0, bytesRead), offset, masterKey, entropy);
+			var cleartextBytes = decryptResult.Cleartext;
+			var cleartextText = cleartextBytes != null ? TryDecodeCleartext(cleartextBytes) : null;
 			this.WriteObject(new TboCredManEntryInfo
 			{
 				ServerName = input?.ServerName ?? path.ServerName,
@@ -262,7 +297,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				FileLastChangeTime = input?.FileLastChangeTime,
 				DpapiBlobOffset = offset,
 				BytesScanned = bytesRead,
-				RawBytes = this.IncludeRawBytes.IsPresent ? buffer?.Take(bytesRead).ToArray() : null
+				RawBytes = this.IncludeRawBytes.IsPresent ? buffer?.Take(bytesRead).ToArray() : null,
+				CredentialGuid = decryptResult.CredentialGuid,
+				MasterKeyGuid = decryptResult.MasterKeyGuid,
+				Flags = decryptResult.Flags,
+				Description = decryptResult.Description,
+				CryptAlgorithmId = decryptResult.CryptAlgorithmId,
+				CryptAlgorithm = decryptResult.CryptAlgorithm,
+				HashAlgorithmId = decryptResult.HashAlgorithmId,
+				HashAlgorithm = decryptResult.HashAlgorithm,
+				Cleartext = cleartextText,
+				CleartextHex = cleartextBytes?.ToHexString(),
+				CleartextBytes = cleartextBytes,
+				HmacValidated = decryptResult.HmacValidated,
+				FailureReason = decryptResult.FailureReason
 			});
 		}
 
@@ -290,6 +338,53 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var offset = buffer.IndexOf(DpapiMagic);
 			return offset >= 0 ? offset : null;
+		}
+
+		private static CredManDecryptResult TryDecryptBlob(
+			ReadOnlySpan<byte> buffer,
+			int? offset,
+			byte[]? masterKey,
+			byte[]? entropy)
+		{
+			if (masterKey == null || masterKey.Length == 0)
+				return CredManDecryptResult.None;
+
+			if (!offset.HasValue || offset.Value < 0 || offset.Value >= buffer.Length)
+			{
+				return new CredManDecryptResult
+				{
+					FailureReason = "DPAPI blob not found."
+				};
+			}
+
+			DpapiBlob blob;
+			try
+			{
+				blob = DpapiBlob.Parse(buffer, offset.Value);
+			}
+			catch (Exception ex)
+			{
+				return new CredManDecryptResult
+				{
+					FailureReason = $"Failed to parse DPAPI blob: {ex.Message}"
+				};
+			}
+
+			var result = DpapiBlobCrypto.Decrypt(blob, masterKey, entropy);
+			return new CredManDecryptResult
+			{
+				CredentialGuid = blob.GuidCredential.ToString(),
+				MasterKeyGuid = blob.GuidMasterKey.ToString(),
+				Flags = blob.Flags,
+				Description = blob.Description,
+				CryptAlgorithmId = blob.CryptAlgorithm,
+				CryptAlgorithm = ResolveCryptAlgorithmName(blob.CryptAlgorithm, blob.CryptAlgorithmLength),
+				HashAlgorithmId = blob.HashAlgorithm,
+				HashAlgorithm = ResolveHashAlgorithmName(blob.HashAlgorithm, blob.HashAlgorithmLength),
+				Cleartext = result.Cleartext,
+				HmacValidated = result.HmacValidated,
+				FailureReason = result.FailureReason
+			};
 		}
 
 		private UncPath ResolveToUncPath(string path, string paramName)
@@ -339,6 +434,131 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			return ex.StatusCode is Ntstatus.STATUS_ACCESS_DENIED
 				or Ntstatus.STATUS_PRIVILEGE_NOT_HELD;
+		}
+
+		private static string ResolveCryptAlgorithmName(uint algoId, uint algoLen)
+		{
+			return algoId switch
+			{
+				0x6601 => "DES",
+				0x6603 => "DES3",
+				0x660e => "AES-128",
+				0x660f => "AES-192",
+				0x6610 => "AES-256",
+				0x6611 => algoLen switch
+				{
+					128 => "AES-128",
+					192 => "AES-192",
+					256 => "AES-256",
+					_ => "AES"
+				},
+				_ => $"0x{algoId:x}"
+			};
+		}
+
+		private static string ResolveHashAlgorithmName(uint algoId, uint algoLen)
+		{
+			if (algoId == 0x8009)
+			{
+				if (algoLen >= 512)
+					return "SHA512";
+				if (algoLen >= 384)
+					return "SHA384";
+				if (algoLen >= 256)
+					return "SHA256";
+				return "SHA1";
+			}
+
+			return algoId switch
+			{
+				0x8003 => "MD5",
+				0x8004 => "SHA1",
+				0x800c => "SHA256",
+				0x800d => "SHA384",
+				0x800e => "SHA512",
+				_ => $"0x{algoId:x}"
+			};
+		}
+
+		private byte[]? ResolveMasterKey()
+		{
+			if (this.MasterKeyBytes != null && this.MasterKeyBytes.Length > 0)
+				return this.MasterKeyBytes;
+			if (!string.IsNullOrWhiteSpace(this.MasterKey))
+				return BinaryHelper.ParseHexString(this.MasterKey.AsSpan());
+			return null;
+		}
+
+		private byte[]? ResolveEntropy()
+		{
+			if (this.EntropyBytes != null && this.EntropyBytes.Length > 0)
+				return this.EntropyBytes;
+			if (!string.IsNullOrWhiteSpace(this.Entropy))
+				return BinaryHelper.ParseHexString(this.Entropy.AsSpan());
+			return null;
+		}
+
+		private static string? TryDecodeCleartext(byte[] payload)
+		{
+			if (payload.Length == 0)
+				return null;
+
+			if (payload.Length % 2 == 0)
+			{
+				try
+				{
+					var str = System.Text.Encoding.Unicode.GetString(payload).TrimEnd('\0');
+					if (IsLikelyText(str))
+						return str;
+				}
+				catch
+				{
+				}
+			}
+
+			try
+			{
+				var str = System.Text.Encoding.UTF8.GetString(payload).TrimEnd('\0');
+				if (IsLikelyText(str))
+					return str;
+			}
+			catch
+			{
+			}
+
+			return null;
+		}
+
+		private static bool IsLikelyText(string? text)
+		{
+			if (string.IsNullOrWhiteSpace(text))
+				return false;
+
+			int printable = 0;
+			foreach (var ch in text)
+			{
+				if (!char.IsControl(ch) || ch == '\r' || ch == '\n' || ch == '\t')
+					printable++;
+			}
+
+			return printable >= text.Length * 0.8;
+		}
+
+		private sealed class CredManDecryptResult
+		{
+			public static CredManDecryptResult None { get; } = new();
+
+			public string? CredentialGuid { get; init; }
+			public string? MasterKeyGuid { get; init; }
+			public uint Flags { get; init; }
+			public string? Description { get; init; }
+			public uint CryptAlgorithmId { get; init; }
+			public string? CryptAlgorithm { get; init; }
+			public uint HashAlgorithmId { get; init; }
+			public string? HashAlgorithm { get; init; }
+			public byte[]? Cleartext { get; init; }
+			public bool HmacValidated { get; init; }
+			public string? FailureReason { get; init; }
 		}
 	}
 

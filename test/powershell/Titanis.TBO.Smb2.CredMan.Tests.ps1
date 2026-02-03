@@ -101,4 +101,41 @@ Describe 'CredMan cmdlets with fake SMB file system' {
         $entry.DpapiBlobOffset | Should -Be 4
         $entry.RawBytes.Length | Should -Be $entry.BytesScanned
     }
+
+    It 'reports parse failures when DPAPI blob data is truncated' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $magic = 0x01,0x00,0x00,0x00,0xD0,0x8C,0x9D,0xDF,0x01,0x15,0xD1,0x11,0x8C,0x7A,0x00,0xC0,0x4F,0xC2,0x97,0xEB
+        $fake.AddDirectory('\\server\C$\Users\jsmith\AppData\Local\Microsoft\Credentials') | Out-Null
+        $fake.AddFile('\\server\C$\Users\jsmith\AppData\Local\Microsoft\Credentials\cred2', [byte[]]$magic) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            $entry = Get-TBOCredManEntry -ServerName server -Path '\\server\C$\Users\jsmith\AppData\Local\Microsoft\Credentials\cred2' -MasterKeyBytes ([byte[]](0x01,0x02,0x03))
+        } finally {
+            $scope.Dispose()
+        }
+
+        $entry | Should -Not -BeNullOrEmpty
+        $entry.FailureReason | Should -Match 'Failed to parse DPAPI blob'
+    }
 }
