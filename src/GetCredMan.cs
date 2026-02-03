@@ -203,6 +203,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public byte[]? MasterKeyBytes { get; set; }
 
 		[Parameter]
+		public TboDpapiMasterKeyInfo[]? MasterKeys { get; set; }
+
+		[Parameter]
 		public string? Entropy { get; set; }
 
 		[Parameter]
@@ -229,10 +232,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var fileSystem = SmbFileSystemResolver.Resolve(smb);
 			var masterKey = ResolveMasterKey();
+			var masterKeySet = ResolveMasterKeySet();
 			if ((this.MasterKeyBytes != null || !string.IsNullOrWhiteSpace(this.MasterKey)) && (masterKey == null || masterKey.Length == 0))
 				throw new ArgumentException("MasterKey must be provided (hex) or MasterKeyBytes must be set.", nameof(this.MasterKey));
+			if (this.MasterKeys != null && this.MasterKeys.Length > 0 && masterKeySet.Count == 0)
+				this.WriteWarning("Get-TBOCredManEntry did not receive any usable master keys (missing MasterKeyGuid or MasterKey).");
 			var entropy = ResolveEntropy();
-			ReadCredManFile(smb, fileSystem, uncPath, input, masterKey, entropy);
+			ReadCredManFile(smb, fileSystem, uncPath, input, masterKey, masterKeySet, entropy);
 		}
 
 		private void ReadCredManFile(
@@ -241,6 +247,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			UncPath path,
 			TboCredManFileInfo? input,
 			byte[]? masterKey,
+			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
 			byte[]? entropy)
 		{
 			byte[]? buffer = null;
@@ -278,7 +285,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			int? offset = FindDpapiOffset(buffer.AsSpan(0, bytesRead));
-			var decryptResult = TryDecryptBlob(buffer.AsSpan(0, bytesRead), offset, masterKey, entropy);
+			var decryptResult = TryDecryptBlob(buffer.AsSpan(0, bytesRead), offset, masterKey, masterKeySet, entropy);
 			var cleartextBytes = decryptResult.Cleartext;
 			var cleartextText = cleartextBytes != null ? TryDecodeCleartext(cleartextBytes) : null;
 			this.WriteObject(new TboCredManEntryInfo
@@ -344,9 +351,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			ReadOnlySpan<byte> buffer,
 			int? offset,
 			byte[]? masterKey,
+			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
 			byte[]? entropy)
 		{
-			if (masterKey == null || masterKey.Length == 0)
+			if ((masterKey == null || masterKey.Length == 0) && (masterKeySet == null || masterKeySet.Count == 0))
 				return CredManDecryptResult.None;
 
 			if (!offset.HasValue || offset.Value < 0 || offset.Value >= buffer.Length)
@@ -370,17 +378,61 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				};
 			}
 
-			var result = DpapiBlobCrypto.Decrypt(blob, masterKey, entropy);
+			var credentialGuid = blob.GuidCredential.ToString();
+			var masterKeyGuid = blob.GuidMasterKey.ToString();
+			var flags = blob.Flags;
+			var description = blob.Description;
+			var cryptAlgorithmId = blob.CryptAlgorithm;
+			var cryptAlgorithm = ResolveCryptAlgorithmName(blob.CryptAlgorithm, blob.CryptAlgorithmLength);
+			var hashAlgorithmId = blob.HashAlgorithm;
+			var hashAlgorithm = ResolveHashAlgorithmName(blob.HashAlgorithm, blob.HashAlgorithmLength);
+
+			byte[]? selectedKey = masterKey;
+			if ((selectedKey == null || selectedKey.Length == 0) && masterKeySet != null && masterKeySet.Count > 0)
+			{
+				if (!masterKeySet.TryGetValue(blob.GuidMasterKey, out selectedKey) || selectedKey == null || selectedKey.Length == 0)
+				{
+					return new CredManDecryptResult
+					{
+						CredentialGuid = credentialGuid,
+						MasterKeyGuid = masterKeyGuid,
+						Flags = flags,
+						Description = description,
+						CryptAlgorithmId = cryptAlgorithmId,
+						CryptAlgorithm = cryptAlgorithm,
+						HashAlgorithmId = hashAlgorithmId,
+						HashAlgorithm = hashAlgorithm,
+						FailureReason = $"Master key {blob.GuidMasterKey} was not found in the supplied key set."
+					};
+				}
+			}
+
+			if (selectedKey == null || selectedKey.Length == 0)
+			{
+				return new CredManDecryptResult
+				{
+					CredentialGuid = credentialGuid,
+					MasterKeyGuid = masterKeyGuid,
+					Flags = flags,
+					Description = description,
+					CryptAlgorithmId = cryptAlgorithmId,
+					CryptAlgorithm = cryptAlgorithm,
+					HashAlgorithmId = hashAlgorithmId,
+					HashAlgorithm = hashAlgorithm
+				};
+			}
+
+			var result = DpapiBlobCrypto.Decrypt(blob, selectedKey, entropy);
 			return new CredManDecryptResult
 			{
-				CredentialGuid = blob.GuidCredential.ToString(),
-				MasterKeyGuid = blob.GuidMasterKey.ToString(),
-				Flags = blob.Flags,
-				Description = blob.Description,
-				CryptAlgorithmId = blob.CryptAlgorithm,
-				CryptAlgorithm = ResolveCryptAlgorithmName(blob.CryptAlgorithm, blob.CryptAlgorithmLength),
-				HashAlgorithmId = blob.HashAlgorithm,
-				HashAlgorithm = ResolveHashAlgorithmName(blob.HashAlgorithm, blob.HashAlgorithmLength),
+				CredentialGuid = credentialGuid,
+				MasterKeyGuid = masterKeyGuid,
+				Flags = flags,
+				Description = description,
+				CryptAlgorithmId = cryptAlgorithmId,
+				CryptAlgorithm = cryptAlgorithm,
+				HashAlgorithmId = hashAlgorithmId,
+				HashAlgorithm = hashAlgorithm,
 				Cleartext = result.Cleartext,
 				HmacValidated = result.HmacValidated,
 				FailureReason = result.FailureReason
@@ -487,6 +539,40 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (!string.IsNullOrWhiteSpace(this.MasterKey))
 				return BinaryHelper.ParseHexString(this.MasterKey.AsSpan());
 			return null;
+		}
+
+		private IReadOnlyDictionary<Guid, byte[]> ResolveMasterKeySet()
+		{
+			if (this.MasterKeys == null || this.MasterKeys.Length == 0)
+				return new Dictionary<Guid, byte[]>();
+
+			var results = new Dictionary<Guid, byte[]>();
+			foreach (var entry in this.MasterKeys)
+			{
+				if (entry == null)
+					continue;
+				if (string.IsNullOrWhiteSpace(entry.MasterKeyGuid) || string.IsNullOrWhiteSpace(entry.MasterKey))
+					continue;
+				if (!Guid.TryParse(entry.MasterKeyGuid, out var guid))
+					continue;
+
+				byte[] keyBytes;
+				try
+				{
+					keyBytes = BinaryHelper.ParseHexString(entry.MasterKey.AsSpan());
+				}
+				catch (Exception ex)
+				{
+					this.WriteWarning($"Get-TBOCredManEntry failed to parse master key {entry.MasterKeyGuid}: {ex.Message}");
+					continue;
+				}
+
+				if (keyBytes.Length == 0)
+					continue;
+				results[guid] = keyBytes;
+			}
+
+			return results;
 		}
 
 		private byte[]? ResolveEntropy()

@@ -662,6 +662,10 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
           <command:parameterValue>Byte[]</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
           <maml:name>Entropy</maml:name>
           <command:parameterValue>String</command:parameterValue>
         </command:parameter>
@@ -691,6 +695,10 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
         <command:parameter required="false">
           <maml:name>MasterKeyBytes</maml:name>
           <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
           <maml:name>Entropy</maml:name>
@@ -753,6 +761,13 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
         <command:parameterValue>Byte[]</command:parameterValue>
       </command:parameter>
       <command:parameter>
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>DPAPI master key objects (from Get-TBODpapiMasterKeys). Entries are matched by MasterKeyGuid.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
         <maml:name>Entropy</maml:name>
         <maml:description>
           <maml:para>Optional hex-encoded entropy supplied to CryptProtectData.</maml:para>
@@ -785,11 +800,10 @@ $files | Get-TBOCredManEntry | Select-Object SourcePath, HasDpapiBlob, DpapiBlob
       </command:example>
       <command:example>
         <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
-        <maml:code>$mk = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
-  Get-TBODpapiMasterKeys -Scope Machine |
-  Where-Object IsPreferred
+        <maml:code>$keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
 Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine |
-  Get-TBOCredManEntry -MasterKey $mk.MasterKey</maml:code>
+  Get-TBOCredManEntry -MasterKeys $keys</maml:code>
         <maml:remarks>
           <maml:para>Decrypts Credential Manager blobs using the recovered DPAPI master key.</maml:para>
         </maml:remarks>
