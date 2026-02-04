@@ -83,7 +83,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var spn = client.GetSpnFor(share.Session.Connection.ServerName);
 				this._log?.WriteDiagnostic($"TBO: Binding winreg RPC to {spn}.");
 				// Match Reg.dll behavior: rely on SMB session auth for named pipes.
-				await this._rpcClient.BindProxyToStream(client.Proxy, spn, RpcAuthLevel.None, stream, cancellationToken).ConfigureAwait(false);
+				const int MaxBindAttempts = 4;
+				var bindDelay = TimeSpan.FromMilliseconds(250);
+				for (int attempt = 1; attempt <= MaxBindAttempts; attempt++)
+				{
+					try
+					{
+						await this._rpcClient.BindProxyToStream(client.Proxy, spn, RpcAuthLevel.None, stream, cancellationToken).ConfigureAwait(false);
+						break;
+					}
+					catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY && attempt < MaxBindAttempts)
+					{
+						this._log?.WriteWarning($"TBO: Winreg RPC bind busy for {spn}: {ex.StatusCode} (attempt {attempt}/{MaxBindAttempts}).");
+						await Task.Delay(bindDelay, cancellationToken).ConfigureAwait(false);
+						bindDelay = TimeSpan.FromMilliseconds(Math.Min(bindDelay.TotalMilliseconds * 2, 2000));
+					}
+				}
 
 				return new RemoteRegistrySession(client, share, stream);
 			}
