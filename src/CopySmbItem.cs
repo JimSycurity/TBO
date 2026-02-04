@@ -52,44 +52,422 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			base.StopProcessing();
 		}
 
-		private async Task CopyAsync(ISmbProviderInfo smb, CancellationToken cancellationToken)
+	private async Task CopyAsync(ISmbProviderInfo smb, CancellationToken cancellationToken)
+	{
+		var source = ResolvePath(this.Source, nameof(Source));
+		var destination = ResolvePath(this.Destination, nameof(Destination));
+
+		if (source.Kind == PathKind.Local && destination.Kind == PathKind.Local)
+			throw new ArgumentException("At least one path must be a UNC path or a TBO.Smb2 PSDrive path.");
+		if (destination.Kind == PathKind.Smb && destination.HasTimeWarpToken)
+			throw new NotSupportedException("Snapshot paths are read-only.");
+		if (this.PreserveSecurityDescriptor.IsPresent && (source.Kind == PathKind.Local || destination.Kind == PathKind.Local))
+			throw new NotSupportedException("PreserveSecurityDescriptor is only supported for SMB-to-SMB copies.");
+
+		var smbClient = smb.SmbClient;
+		bool sourceIsDirectory = false;
+
+		if (source.Kind == PathKind.Smb)
 		{
-			var source = ResolvePath(this.Source, nameof(Source));
-			var destination = ResolvePath(this.Destination, nameof(Destination));
+			var info = await TryGetEntryInfoAsync(smbClient, source.SmbPath!, source.TimeWarpToken, cancellationToken).ConfigureAwait(false);
+			if (!info.Exists)
+				throw new FileNotFoundException($"Source path '{source.SmbPath}' does not exist.");
+			sourceIsDirectory = info.IsDir;
+		}
+		else
+		{
+			if (Directory.Exists(source.LocalPath!))
+			{
+				sourceIsDirectory = true;
+			}
+			else if (!File.Exists(source.LocalPath!))
+			{
+				throw new FileNotFoundException($"Source path '{source.LocalPath}' does not exist.", source.LocalPath);
+			}
+		}
 
-			if (source.Kind == PathKind.Local && destination.Kind == PathKind.Local)
-				throw new ArgumentException("At least one path must be a UNC path or a TBO.Smb2 PSDrive path.");
-			if (destination.Kind == PathKind.Smb && destination.HasTimeWarpToken)
-				throw new NotSupportedException("Snapshot paths are read-only.");
-			if (this.PreserveSecurityDescriptor.IsPresent && (source.Kind == PathKind.Local || destination.Kind == PathKind.Local))
-				throw new NotSupportedException("PreserveSecurityDescriptor is only supported for SMB-to-SMB copies.");
-
-			var smbClient = smb.SmbClient;
-
+		if (sourceIsDirectory)
+		{
 			if (source.Kind == PathKind.Smb && destination.Kind == PathKind.Smb)
 			{
-				await CopySmbToSmbAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+				await CopySmbDirectoryToSmbAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
 				return;
 			}
 
 			if (source.Kind == PathKind.Smb)
 			{
-				await CopySmbToLocalAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
+				await CopySmbDirectoryToLocalAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
 				return;
 			}
 
-			if (destination.HasTimeWarpToken)
-				throw new NotSupportedException("Snapshot paths are read-only.");
-
-			await CopyLocalToSmbAsync(smbClient, source.LocalPath!, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+			await CopyLocalDirectoryToSmbAsync(smbClient, source.LocalPath!, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+			return;
 		}
+
+		if (destination.HasTimeWarpToken)
+			throw new NotSupportedException("Snapshot paths are read-only.");
+
+		if (source.Kind == PathKind.Smb && destination.Kind == PathKind.Smb)
+		{
+			await CopySmbToSmbAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+			return;
+		}
+
+		if (source.Kind == PathKind.Smb)
+		{
+			await CopySmbToLocalAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
+			return;
+		}
+
+		await CopyLocalToSmbAsync(smbClient, source.LocalPath!, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task CopySmbDirectoryToSmbAsync(
+		Smb2Client smbClient,
+		UncPath sourcePath,
+		DateTime? sourceTimeWarpToken,
+		UncPath destinationPath,
+		CancellationToken cancellationToken)
+	{
+		var sourceDirectoryName = GetSmbDirectoryName(sourcePath);
+		var destinationRoot = await ResolveSmbDirectoryDestinationAsync(
+			smbClient,
+			sourceDirectoryName,
+			destinationPath,
+			cancellationToken).ConfigureAwait(false);
+
+		if (!ShouldProcessCopy(sourcePath.ToString(), destinationRoot.ToString()))
+			return;
+
+		await CopySmbDirectoryToSmbCoreAsync(
+			smbClient,
+			sourcePath,
+			sourceTimeWarpToken,
+			destinationRoot,
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task CopySmbDirectoryToLocalAsync(
+		Smb2Client smbClient,
+		UncPath sourcePath,
+		DateTime? sourceTimeWarpToken,
+		string destinationPath,
+		CancellationToken cancellationToken)
+	{
+		var sourceDirectoryName = GetSmbDirectoryName(sourcePath);
+		var destinationRoot = ResolveLocalDirectoryDestination(sourceDirectoryName, destinationPath);
+
+		if (!ShouldProcessCopy(sourcePath.ToString(), destinationRoot))
+			return;
+
+		await CopySmbDirectoryToLocalCoreAsync(
+			smbClient,
+			sourcePath,
+			sourceTimeWarpToken,
+			destinationRoot,
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task CopyLocalDirectoryToSmbAsync(
+		Smb2Client smbClient,
+		string sourcePath,
+		UncPath destinationPath,
+		CancellationToken cancellationToken)
+	{
+		var sourceDirectoryName = GetLocalDirectoryName(sourcePath);
+		var destinationRoot = await ResolveSmbDirectoryDestinationAsync(
+			smbClient,
+			sourceDirectoryName,
+			destinationPath,
+			cancellationToken).ConfigureAwait(false);
+
+		if (!ShouldProcessCopy(sourcePath, destinationRoot.ToString()))
+			return;
+
+		await CopyLocalDirectoryToSmbCoreAsync(
+			smbClient,
+			sourcePath,
+			destinationRoot,
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task CopySmbDirectoryToSmbCoreAsync(
+		Smb2Client smbClient,
+		UncPath sourcePath,
+		DateTime? sourceTimeWarpToken,
+		UncPath destinationPath,
+		CancellationToken cancellationToken)
+	{
+		await EnsureRemoteDirectoryExistsAsync(smbClient, destinationPath, cancellationToken).ConfigureAwait(false);
+
+		Smb2Directory? sourceDir = null;
+		Smb2FileBasicInfo? sourceBasicInfo = null;
+		SecurityDescriptor? sourceSecurityDescriptor = null;
+		try
+		{
+			sourceDir = await OpenDirectoryAsync(
+				smbClient,
+				sourcePath,
+				sourceTimeWarpToken,
+				GetDirectoryReadAccess(this.PreserveSecurityDescriptor.IsPresent),
+				cancellationToken).ConfigureAwait(false);
+
+			if (this.PreserveTimestamps.IsPresent)
+				sourceBasicInfo = await sourceDir.GetBasicInfoAsync(cancellationToken).ConfigureAwait(false);
+
+			if (this.PreserveSecurityDescriptor.IsPresent)
+			{
+				sourceSecurityDescriptor = await sourceDir.GetSecurityAsync(
+					SecurityInfo.Owner | SecurityInfo.Group | SecurityInfo.Dacl | SecurityInfo.Sacl,
+					8192,
+					cancellationToken).ConfigureAwait(false);
+			}
+
+			var entries = await sourceDir.QueryDirAsync(
+				"*",
+				Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo,
+				SecurityInfo.None,
+				Smb2Directory.DefaultQueryBufferSize,
+				cancellationToken).ConfigureAwait(false);
+
+			foreach (var entry in entries)
+			{
+				if (string.IsNullOrEmpty(entry.FileName))
+					continue;
+				if (entry.FileName is "." or "..")
+					continue;
+
+				bool isDirectory = (entry.FileAttributes & Winterop.FileAttributes.Directory) != 0;
+				bool isReparse = (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint) != 0;
+
+				if (isDirectory)
+				{
+					if (isReparse)
+					{
+						this.WriteVerbose($"Copy-TBOSmbItem skipped reparse directory '{sourcePath.Append(entry.FileName)}'.");
+						continue;
+					}
+
+					await CopySmbDirectoryToSmbCoreAsync(
+						smbClient,
+						sourcePath.Append(entry.FileName),
+						sourceTimeWarpToken,
+						destinationPath.Append(entry.FileName),
+						cancellationToken).ConfigureAwait(false);
+					continue;
+				}
+
+				await CopySmbToSmbAsync(
+					smbClient,
+					sourcePath.Append(entry.FileName),
+					sourceTimeWarpToken,
+					destinationPath.Append(entry.FileName),
+					cancellationToken,
+					shouldProcess: false).ConfigureAwait(false);
+			}
+		}
+		finally
+		{
+			if (sourceDir != null)
+				await sourceDir.CloseAsync(cancellationToken).ConfigureAwait(false);
+		}
+
+		if (sourceBasicInfo == null && sourceSecurityDescriptor == null)
+			return;
+
+		Smb2Directory? destDir = null;
+		try
+		{
+			destDir = await OpenDirectoryAsync(
+				smbClient,
+				destinationPath,
+				null,
+				GetDirectoryWriteAccess(this.PreserveSecurityDescriptor.IsPresent),
+				cancellationToken).ConfigureAwait(false);
+
+			if (sourceBasicInfo != null)
+			{
+				await destDir.SetBasicInfoAsync(
+					sourceBasicInfo.CreationTime,
+					sourceBasicInfo.LastAccessTime,
+					sourceBasicInfo.LastWriteTime,
+					sourceBasicInfo.ChangeTime,
+					sourceBasicInfo.Attributes,
+					cancellationToken).ConfigureAwait(false);
+			}
+
+			if (sourceSecurityDescriptor != null)
+			{
+				await destDir.SetSecurityAsync(
+					sourceSecurityDescriptor,
+					SecurityInfo.Owner | SecurityInfo.Group | SecurityInfo.Dacl | SecurityInfo.Sacl,
+					cancellationToken).ConfigureAwait(false);
+			}
+		}
+		finally
+		{
+			if (destDir != null)
+				await destDir.CloseAsync(cancellationToken).ConfigureAwait(false);
+		}
+	}
+
+	private async Task CopySmbDirectoryToLocalCoreAsync(
+		Smb2Client smbClient,
+		UncPath sourcePath,
+		DateTime? sourceTimeWarpToken,
+		string destinationPath,
+		CancellationToken cancellationToken)
+	{
+		EnsureLocalDirectoryExists(destinationPath);
+
+		Smb2Directory? sourceDir = null;
+		Smb2FileBasicInfo? sourceBasicInfo = null;
+		try
+		{
+			sourceDir = await OpenDirectoryAsync(
+				smbClient,
+				sourcePath,
+				sourceTimeWarpToken,
+				GetDirectoryReadAccess(false),
+				cancellationToken).ConfigureAwait(false);
+
+			if (this.PreserveTimestamps.IsPresent)
+				sourceBasicInfo = await sourceDir.GetBasicInfoAsync(cancellationToken).ConfigureAwait(false);
+
+			var entries = await sourceDir.QueryDirAsync(
+				"*",
+				Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo,
+				SecurityInfo.None,
+				Smb2Directory.DefaultQueryBufferSize,
+				cancellationToken).ConfigureAwait(false);
+
+			foreach (var entry in entries)
+			{
+				if (string.IsNullOrEmpty(entry.FileName))
+					continue;
+				if (entry.FileName is "." or "..")
+					continue;
+
+				bool isDirectory = (entry.FileAttributes & Winterop.FileAttributes.Directory) != 0;
+				bool isReparse = (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint) != 0;
+
+				if (isDirectory)
+				{
+					if (isReparse)
+					{
+						this.WriteVerbose($"Copy-TBOSmbItem skipped reparse directory '{sourcePath.Append(entry.FileName)}'.");
+						continue;
+					}
+
+					await CopySmbDirectoryToLocalCoreAsync(
+						smbClient,
+						sourcePath.Append(entry.FileName),
+						sourceTimeWarpToken,
+						Path.Combine(destinationPath, entry.FileName),
+						cancellationToken).ConfigureAwait(false);
+					continue;
+				}
+
+				await CopySmbToLocalAsync(
+					smbClient,
+					sourcePath.Append(entry.FileName),
+					sourceTimeWarpToken,
+					Path.Combine(destinationPath, entry.FileName),
+					cancellationToken,
+					shouldProcess: false).ConfigureAwait(false);
+			}
+		}
+		finally
+		{
+			if (sourceDir != null)
+				await sourceDir.CloseAsync(cancellationToken).ConfigureAwait(false);
+		}
+
+		if (sourceBasicInfo != null)
+			ApplyLocalBasicInfo(destinationPath, sourceBasicInfo);
+	}
+
+	private async Task CopyLocalDirectoryToSmbCoreAsync(
+		Smb2Client smbClient,
+		string sourcePath,
+		UncPath destinationPath,
+		CancellationToken cancellationToken)
+	{
+		var sourceInfo = new DirectoryInfo(sourcePath);
+		if (!sourceInfo.Exists)
+			throw new DirectoryNotFoundException($"Source path '{sourcePath}' does not exist.");
+
+		if ((sourceInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+		{
+			this.WriteVerbose($"Copy-TBOSmbItem skipped reparse directory '{sourcePath}'.");
+			return;
+		}
+
+		await EnsureRemoteDirectoryExistsAsync(smbClient, destinationPath, cancellationToken).ConfigureAwait(false);
+
+		foreach (var dir in sourceInfo.EnumerateDirectories())
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if ((dir.Attributes & FileAttributes.ReparsePoint) != 0)
+			{
+				this.WriteVerbose($"Copy-TBOSmbItem skipped reparse directory '{dir.FullName}'.");
+				continue;
+			}
+
+			await CopyLocalDirectoryToSmbCoreAsync(
+				smbClient,
+				dir.FullName,
+				destinationPath.Append(dir.Name),
+				cancellationToken).ConfigureAwait(false);
+		}
+
+		foreach (var file in sourceInfo.EnumerateFiles())
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			await CopyLocalToSmbAsync(
+				smbClient,
+				file.FullName,
+				destinationPath.Append(file.Name),
+				cancellationToken,
+				shouldProcess: false).ConfigureAwait(false);
+		}
+
+		if (this.PreserveTimestamps.IsPresent)
+		{
+			var sourceBasicInfo = GetLocalBasicInfo(sourceInfo);
+			Smb2Directory? destDir = null;
+			try
+			{
+				destDir = await OpenDirectoryAsync(
+					smbClient,
+					destinationPath,
+					null,
+					GetDirectoryWriteAccess(false),
+					cancellationToken).ConfigureAwait(false);
+
+				await destDir.SetBasicInfoAsync(
+					sourceBasicInfo.CreationTime,
+					sourceBasicInfo.LastAccessTime,
+					sourceBasicInfo.LastWriteTime,
+					sourceBasicInfo.ChangeTime,
+					sourceBasicInfo.Attributes,
+					cancellationToken).ConfigureAwait(false);
+			}
+			finally
+			{
+				if (destDir != null)
+					await destDir.CloseAsync(cancellationToken).ConfigureAwait(false);
+			}
+		}
+	}
 
 	private async Task CopySmbToSmbAsync(
 		Smb2Client smbClient,
 		UncPath sourcePath,
 		DateTime? sourceTimeWarpToken,
 		UncPath destinationPath,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool shouldProcess = true)
 	{
 			if (string.IsNullOrEmpty(sourcePath.ShareRelativePath))
 				throw new ArgumentException($"Source path must include a file name: {sourcePath}", nameof(Source));
@@ -108,7 +486,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 				if (resolvedDest.Exists && !this.Force.IsPresent)
 					throw new IOException($"The file '{destinationPath}' already exists.");
 
-				if (!ShouldProcessCopy(sourcePath.ToString(), destinationPath.ToString()))
+				if (shouldProcess && !ShouldProcessCopy(sourcePath.ToString(), destinationPath.ToString()))
 					return;
 
 				if (this.CreateDirectories.IsPresent)
@@ -180,7 +558,8 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			UncPath sourcePath,
 			DateTime? sourceTimeWarpToken,
 			string destinationPath,
-			CancellationToken cancellationToken)
+			CancellationToken cancellationToken,
+			bool shouldProcess = true)
 		{
 			if (string.IsNullOrEmpty(sourcePath.ShareRelativePath))
 				throw new ArgumentException($"Source path must include a file name: {sourcePath}", nameof(Source));
@@ -196,7 +575,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 				if (File.Exists(destinationPath) && !this.Force.IsPresent)
 					throw new IOException($"The file '{destinationPath}' already exists.");
 
-				if (!ShouldProcessCopy(sourcePath.ToString(), destinationPath))
+				if (shouldProcess && !ShouldProcessCopy(sourcePath.ToString(), destinationPath))
 					return;
 
 				if (this.CreateDirectories.IsPresent)
@@ -231,7 +610,8 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			Smb2Client smbClient,
 			string sourcePath,
 			UncPath destinationPath,
-			CancellationToken cancellationToken)
+			CancellationToken cancellationToken,
+			bool shouldProcess = true)
 		{
 			var sourceInfo = new FileInfo(sourcePath);
 			if (!sourceInfo.Exists)
@@ -252,7 +632,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 				if (resolvedDest.Exists && !this.Force.IsPresent)
 					throw new IOException($"The file '{destinationPath}' already exists.");
 
-				if (!ShouldProcessCopy(sourcePath, destinationPath.ToString()))
+				if (shouldProcess && !ShouldProcessCopy(sourcePath, destinationPath.ToString()))
 					return;
 
 				if (this.CreateDirectories.IsPresent)
@@ -312,6 +692,27 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 				: Smb2CreateDisposition.OverwriteIf;
 		}
 
+		private static uint GetDirectoryReadAccess(bool includeSecurity)
+		{
+			uint access = (uint)Smb2AccessRights.DefaultOpenDirAccess;
+			if (includeSecurity)
+				access |= (uint)(Smb2AccessRights.ReadControl | Smb2AccessRights.AccessSystemSecurity);
+			return access;
+		}
+
+		private static uint GetDirectoryWriteAccess(bool includeSecurity)
+		{
+			uint access = (uint)(Smb2AccessRights.DefaultOpenDirAccess | Smb2AccessRights.WriteAttributes);
+			if (includeSecurity)
+			{
+				access |= (uint)(Smb2AccessRights.ReadControl
+					| Smb2AccessRights.WriteDac
+					| Smb2AccessRights.WriteOwner
+					| Smb2AccessRights.AccessSystemSecurity);
+			}
+			return access;
+		}
+
 		private static Smb2CreateInfo CreateAttributeQuery()
 		{
 			return new Smb2CreateInfo
@@ -326,6 +727,71 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 				RequestMaximalAccess = true,
 				QueryOnDiskId = true
 			};
+		}
+
+		private static string GetSmbDirectoryName(UncPath sourcePath)
+		{
+			var relativePath = sourcePath.ShareRelativePath?.TrimEnd('\\', '/');
+			var name = Path.GetFileName(relativePath ?? string.Empty);
+			if (string.IsNullOrWhiteSpace(name))
+				throw new IOException($"Source path '{sourcePath}' does not specify a directory name.");
+			return name;
+		}
+
+		private static string GetLocalDirectoryName(string sourcePath)
+		{
+			var trimmed = sourcePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+			var name = Path.GetFileName(trimmed);
+			if (string.IsNullOrWhiteSpace(name))
+				throw new IOException($"Source path '{sourcePath}' does not specify a directory name.");
+			return name;
+		}
+
+		private async Task<UncPath> ResolveSmbDirectoryDestinationAsync(
+			Smb2Client smbClient,
+			string sourceDirectoryName,
+			UncPath destinationPath,
+			CancellationToken cancellationToken)
+		{
+			if (string.IsNullOrWhiteSpace(sourceDirectoryName))
+				throw new IOException("Source path does not specify a directory name.");
+
+			var destInfo = await TryGetEntryInfoAsync(smbClient, destinationPath, cancellationToken).ConfigureAwait(false);
+			if (destInfo.Exists && !destInfo.IsDir)
+				throw new IOException($"Destination path '{destinationPath}' is not a directory.");
+
+			if (destInfo.Exists)
+				return destinationPath.Append(sourceDirectoryName);
+
+			return destinationPath;
+		}
+
+		private static string ResolveLocalDirectoryDestination(string sourceDirectoryName, string destinationPath)
+		{
+			if (Directory.Exists(destinationPath))
+				return Path.Combine(destinationPath, sourceDirectoryName);
+			if (File.Exists(destinationPath))
+				throw new IOException($"Destination path '{destinationPath}' is not a directory.");
+			return destinationPath;
+		}
+
+		private async Task EnsureRemoteDirectoryExistsAsync(
+			Smb2Client smbClient,
+			UncPath directoryPath,
+			CancellationToken cancellationToken)
+		{
+			var info = await TryGetEntryInfoAsync(smbClient, directoryPath, cancellationToken).ConfigureAwait(false);
+			if (info.Exists)
+			{
+				if (!info.IsDir)
+					throw new IOException($"Destination path '{directoryPath}' is not a directory.");
+				return;
+			}
+
+			if (!this.CreateDirectories.IsPresent)
+				throw new IOException($"Destination directory '{directoryPath}' does not exist. Use -CreateDirectories to create it.");
+
+			await EnsureRemoteDirectoryAsync(smbClient, directoryPath, cancellationToken).ConfigureAwait(false);
 		}
 
 		private static async Task<(UncPath Path, bool Exists)> ResolveDestinationAsync(
@@ -374,10 +840,21 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			UncPath path,
 			CancellationToken cancellationToken)
 		{
+			return await TryGetEntryInfoAsync(client, path, null, cancellationToken).ConfigureAwait(false);
+		}
+
+		private static async Task<(bool Exists, bool IsDir)> TryGetEntryInfoAsync(
+			Smb2Client client,
+			UncPath path,
+			DateTime? timeWarpToken,
+			CancellationToken cancellationToken)
+		{
 			Smb2OpenFileObjectBase? file = null;
 			try
 			{
 				var openInfo = CreateAttributeQuery();
+				if (timeWarpToken.HasValue)
+					openInfo.TimeWarpToken = timeWarpToken;
 				file = await client.CreateFileAsync(path, openInfo, FileAccess.Read, cancellationToken).ConfigureAwait(false);
 				return (true, file.IsDirectory);
 			}
@@ -476,6 +953,18 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			Directory.CreateDirectory(dir);
 		}
 
+		private void EnsureLocalDirectoryExists(string destinationPath)
+		{
+			if (Directory.Exists(destinationPath))
+				return;
+			if (File.Exists(destinationPath))
+				throw new IOException($"Destination path '{destinationPath}' is not a directory.");
+			if (!this.CreateDirectories.IsPresent)
+				throw new IOException($"Destination directory '{destinationPath}' does not exist. Use -CreateDirectories to create it.");
+
+			Directory.CreateDirectory(destinationPath);
+		}
+
 		private static async Task EnsureRemoteDirectoryAsync(
 			Smb2Client smbClient,
 			UncPath directoryPath,
@@ -517,7 +1006,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			}
 		}
 
-		private static Smb2FileBasicInfoSnapshot GetLocalBasicInfo(FileInfo sourceInfo)
+		private static Smb2FileBasicInfoSnapshot GetLocalBasicInfo(FileSystemInfo sourceInfo)
 		{
 			return new Smb2FileBasicInfoSnapshot(
 				sourceInfo.CreationTimeUtc,
@@ -607,6 +1096,34 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 				? new UncPath(uncPath.ServerName, uncPath.Port, uncPath.ShareName, string.Empty)
 				: new UncPath(uncPath.ServerName, uncPath.Port, uncPath.ShareName, remainder);
 			return true;
+		}
+
+		private static async Task<Smb2Directory> OpenDirectoryAsync(
+			Smb2Client smbClient,
+			UncPath path,
+			DateTime? timeWarpToken,
+			uint desiredAccess,
+			CancellationToken cancellationToken)
+		{
+			var createInfo = new Smb2CreateInfo
+			{
+				CreateDisposition = Smb2CreateDisposition.Open,
+				DesiredAccess = desiredAccess,
+				ShareAccess = Smb2ShareAccess.DefaultDirShare,
+				ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
+				CreateOptions = Smb2FileCreateOptions.Directory
+					| Smb2FileCreateOptions.SynchronousIoNonalert
+					| Smb2FileCreateOptions.OpenForBackupIntent,
+				FileAttributes = Winterop.FileAttributes.None,
+				RequestMaximalAccess = true,
+				QueryOnDiskId = true,
+				OplockLevel = Smb2OplockLevel.None
+			};
+
+			if (timeWarpToken.HasValue)
+				createInfo.TimeWarpToken = timeWarpToken;
+
+			return (Smb2Directory)await smbClient.CreateFileAsync(path, createInfo, FileAccess.Read, cancellationToken).ConfigureAwait(false);
 		}
 
 		private static async Task<Smb2OpenFile> OpenFileReadAsync(

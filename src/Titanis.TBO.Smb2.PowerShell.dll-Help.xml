@@ -1458,7 +1458,7 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
       <command:verb>Copy</command:verb>
       <command:noun>TBOSmbItem</command:noun>
       <maml:description>
-        <maml:para>Copies files between local paths and SMB paths using backup intent.</maml:para>
+        <maml:para>Copies files or directories between local paths and SMB paths using backup intent.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -1499,7 +1499,7 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
       <command:parameter>
         <maml:name>CreateDirectories</maml:name>
         <maml:description>
-          <maml:para>Create destination directories when needed.</maml:para>
+          <maml:para>Create destination directories when needed (required when copying directories to a path that does not yet exist).</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
@@ -1531,6 +1531,13 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
         <maml:code>Copy-TBOSmbItem -Source tbo:\Windows\System32\config\SAM -Destination C:\Temp\SAM.bak</maml:code>
         <maml:remarks>
           <maml:para>Copies a remote file to the local machine.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Copy-TBOSmbItem -Source tbo:\Windows\System32\Microsoft\Protect\S-1-5-18 -Destination C:\Temp\MasterKeys -CreateDirectories</maml:code>
+        <maml:remarks>
+          <maml:para>Recursively copies a remote directory to the local machine.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
