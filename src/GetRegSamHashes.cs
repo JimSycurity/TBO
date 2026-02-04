@@ -326,6 +326,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			if (ex is NtstatusException nt && nt.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 				return true;
+			if (ex is AggregateException aggregate)
+			{
+				foreach (var inner in aggregate.InnerExceptions)
+				{
+					if (IsRetryableInitException(inner))
+						return true;
+				}
+			}
 			if (ex is IOException or SocketException)
 				return true;
 			return ex.InnerException != null && IsRetryableInitException(ex.InnerException);
