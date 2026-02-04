@@ -91,14 +91,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (!uint.TryParse(keyName, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rid))
 						continue;
 
-					var userSpec = new RegistryPathSpec(
-						usersSpec.RootKey,
-						usersSpec.RootName,
-						CombineSubkeyPath(usersSpec.SubkeyPath, keyName));
-
 					try
 					{
-						using var userKey = OpenRegistryKey(session.Client, userSpec, RegistryAccessRights.QueryValue, cancellationToken);
+						using var userKey = usersKey.OpenSubkey(keyName, RegistryAccessRights.QueryValue, RegistryKeyOptions.BackupRestore, cancellationToken).GetAwaiter().GetResult();
 						var valueInfo = userKey.GetValue("V", cancellationToken).GetAwaiter().GetResult();
 						var bytes = ExtractValueBytes(valueInfo);
 						if (bytes == null || bytes.Length == 0)
@@ -255,14 +250,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (string.IsNullOrWhiteSpace(name))
 						continue;
 
-					var userSpec = new RegistryPathSpec(
-						namesSpec.RootKey,
-						namesSpec.RootName,
-						CombineSubkeyPath(namesSpec.SubkeyPath, name));
-
 					try
 					{
-						using var userKey = OpenRegistryKey(client, userSpec, RegistryAccessRights.QueryValue, cancellationToken);
+						using var userKey = namesKey.OpenSubkey(name, RegistryAccessRights.QueryValue, RegistryKeyOptions.BackupRestore, cancellationToken).GetAwaiter().GetResult();
 						var valueInfo = userKey.GetValue(string.Empty, cancellationToken).GetAwaiter().GetResult();
 						if (TryReadRid(valueInfo, out var rid))
 							results[rid] = name;
