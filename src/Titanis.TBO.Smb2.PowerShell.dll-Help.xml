@@ -68,6 +68,7 @@
       <maml:description>
         <maml:para>Enumerates DPAPI master key files for machine and user scopes over SMB and marks preferred keys when possible.</maml:para>
         <maml:para>Writes progress to the console showing which paths are being scanned.</maml:para>
+        <maml:para>Machine scope includes keys under S-1-5-18\user when present.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>

@@ -288,6 +288,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					var sidPath = rootPath.Append(entry.FileName);
 					writeProgress($"Scanning {sidPath} for {scope} master keys.");
 					EnumerateMasterKeyDirectory(smb, sidPath, rootPath.ServerName, scope, entry.FileName, results, writeWarning, writeVerbose, cancellationToken);
+
+					if (scope.Equals("Machine", StringComparison.OrdinalIgnoreCase)
+						&& entry.FileName.Equals("S-1-5-18", StringComparison.OrdinalIgnoreCase))
+					{
+						var userPath = sidPath.Append("user");
+						writeProgress($"Scanning {userPath} for {scope} master keys.");
+						EnumerateMasterKeyDirectory(smb, userPath, rootPath.ServerName, scope, entry.FileName, results, writeWarning, writeVerbose, cancellationToken);
+					}
 				}
 			}
 			catch (NtstatusException ex) when (IsMissingPath(ex))

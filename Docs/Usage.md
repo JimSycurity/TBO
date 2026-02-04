@@ -484,6 +484,7 @@ Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Inclu
 
 Enumerates DPAPI master key files for machine and user scopes over SMB and marks preferred keys when possible.
 Writes progress to the console with the current path being scanned.
+Machine scope includes keys under `S-1-5-18\user` when present.
 
 ```powershell
 Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol
