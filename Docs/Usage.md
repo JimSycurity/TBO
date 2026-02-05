@@ -7,7 +7,7 @@ This module provides the TBO SMB2 PowerShell provider and cmdlets for backup-ope
 ```powershell
 Import-Module .\Titanis.TBO.Smb2.psd1 -Force
 
-Set-TBOSmbConnectOptions `
+Set-TBOConnectOptions `
   -ServerName corp1-web01.corp1.lab.home-labs.lol `
   -HostName corp1-web01.corp1.lab.home-labs.lol `
   -UserName psx_l_backupop `
@@ -48,7 +48,7 @@ Get-Content tbo:\Temp\test.txt
 
 Use `Get-Help about_TBO_Smb2_Provider` for supported item types, dynamic parameters, and limitations.
 
-Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadata by default to avoid per-entry opens on large roots. Use `-IncludeRootReparseInfo` (alias `-RootReparseInfo`) on `New-PSDrive` or `Set-TBOSmbConnectOptions` to enable it.
+Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadata by default to avoid per-entry opens on large roots. Use `-IncludeRootReparseInfo` (alias `-RootReparseInfo`) on `New-PSDrive` or `Set-TBOConnectOptions` to enable it.
 
 On Windows, `Get-Acl` and `Set-Acl` work with `tbo:\` and provider-qualified UNC paths. Snapshot paths are read-only.
 
@@ -104,27 +104,36 @@ Disconnect-TBOSmbServer -ServerName corp1-web01.corp1.lab.home-labs.lol -Force
 Disconnect-TBOSmbServer -All
 ```
 
-### Set-TBOSmbConnectOptions
+### Set-TBOConnectOptions
 
-Sets connection defaults used by TBO cmdlets and the TBO.Smb2 provider. Supports the same dynamic parameters as `New-PSDrive` (credentials, SMB dialects, ciphers, signing, name resolution, and more).
+Sets connection defaults used by TBO cmdlets, the TBO.Smb2 provider, and the TBO.Reg provider. Supports the same dynamic parameters as `New-PSDrive` (credentials, SMB dialects, ciphers, signing, name resolution, and registry retry policy).
+
+Per-server settings take precedence over global defaults, and `New-PSDrive` dynamic parameters override the resolved defaults for that specific connection. When `-ServerName` is provided, the supplied parameters merge onto the existing per-server settings (unspecified values are preserved). If no per-server settings exist, the merge uses the current global defaults. When `-ServerName` is omitted, the global defaults are updated by merging onto the existing defaults.
+
+Changing options that affect the winreg fingerprint invalidates cached registry sessions for the target server (or all servers when updating global defaults). See `Docs/WinregSessionCaching.md` for details.
 
 ```powershell
-Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -HostName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
-Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
-Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -TicketCache C:\temp\krb5cc
-Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -AesKey 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef -Kdc corp1-dc01.corp1.lab.home-labs.lol
-Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeRootReparseInfo
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -HostName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -TicketCache C:\temp\krb5cc
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -AesKey 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef -Kdc corp1-dc01.corp1.lab.home-labs.lol
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryPolicy Practical -RetryCount 3 -RetryDelayMs 100 -RetryMaxDelayMs 1000 -RetryJitterMs 100
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeRootReparseInfo
 ```
 
-### Set-TBORegConnectOptions
+### Set-TBOSmbConnectOptions (Deprecated)
 
-Sets connection defaults used by the TBO.Reg provider and remote registry cmdlets. Accepts the same dynamic parameters as `Set-TBOSmbConnectOptions`.
+Deprecated shim for `Set-TBOConnectOptions`. Uses the same dynamic parameters and behavior.
 
 ```powershell
-Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -HostName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
-Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
-Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -TicketCache C:\temp\krb5cc
-Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -AesKey 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef -Kdc corp1-dc01.corp1.lab.home-labs.lol
+Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
+```
+
+### Set-TBORegConnectOptions (Deprecated)
+
+Deprecated shim for `Set-TBOConnectOptions`. Use it when you need an older script name; behavior is identical.
+
+```powershell
 Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryPolicy Practical -RetryCount 3 -RetryDelayMs 100 -RetryMaxDelayMs 1000 -RetryJitterMs 100
 ```
 
@@ -243,7 +252,7 @@ Set-ItemProperty -Path tbo:\Temp\example.txt -Name Attributes -Value 'Hidden, Re
 ### Get-TBOSmbSecurityDescriptor
 
 Reads a security descriptor from a file or directory and returns a portable `Titanis.Winterop.Security.SecurityDescriptor` by default. Use `-AsSddl`, `-AsBytes`, or `-AsWindows` (Windows only) to change output format.
-When using UNC paths, the server name must match the name used in `Set-TBOSmbConnectOptions` (for example, FQDN vs short name). A mismatch can yield "context does not match any mechanisms supported by the server."
+When using UNC paths, the server name must match the name used in `Set-TBOConnectOptions` (for example, FQDN vs short name). A mismatch can yield "context does not match any mechanisms supported by the server."
 Use `-Sections` to control which components are retrieved (default: Owner, Group, DACL).
 
 ```powershell

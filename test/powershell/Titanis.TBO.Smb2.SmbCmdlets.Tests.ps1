@@ -40,7 +40,7 @@ Describe 'TBO SMB cmdlets (mocked)' {
 		}
 	}
 
-	It 'Set-TBOSmbConnectOptions sets server-specific parameters' {
+	It 'Set-TBOConnectOptions sets server-specific parameters' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
 			return
@@ -52,7 +52,7 @@ Describe 'TBO SMB cmdlets (mocked)' {
 			-SetConnectParameters { param($serverName, $parameters) $script:captured = @{ Server = $serverName; Parameters = $parameters } }
 
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			Set-TBOSmbConnectOptions -ServerName 'fileserver'
+			Set-TBOConnectOptions -ServerName 'fileserver'
 		}
 
 		$script:captured.Server | Should -Be 'fileserver'
@@ -60,20 +60,53 @@ Describe 'TBO SMB cmdlets (mocked)' {
 		$script:captured.Parameters.GetType().Name | Should -Be 'SmbConnectionParameters'
 	}
 
-	It 'Set-TBOSmbConnectOptions updates default parameters when no server is specified' {
+	It 'Set-TBOConnectOptions merges onto existing per-server parameters' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$script:captured = $null
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+		$existing = $mock.DefaultConnectParameters
+		$existing.IncludeRootReparseInfo = $true
+		$existing.UserName = 'existing'
+
+		$mock.GetConnectParametersForFunc = [Func[string, bool, object]]{
+			param($serverName, $defaultIfNone)
+			$existing
+		}
+		$mock.SetConnectParametersAction = [Action[string, object]]{
+			param($serverName, $parameters)
+			$script:captured = $parameters
+		}
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Set-TBOConnectOptions -ServerName 'fileserver' -UserName 'newuser'
+		}
+
+		$script:captured.UserName | Should -Be 'newuser'
+		$script:captured.IncludeRootReparseInfo | Should -BeTrue
+	}
+
+	It 'Set-TBOConnectOptions updates default parameters when no server is specified' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
 			return
 		}
 
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+		$existing = $mock.DefaultConnectParameters
+		$existing.IncludeRootReparseInfo = $true
 
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			Set-TBOSmbConnectOptions
+			Set-TBOConnectOptions -UserName 'defaultuser'
 		}
 
 		$mock.DefaultConnectParameters | Should -Not -BeNullOrEmpty
 		$mock.DefaultConnectParameters.GetType().Name | Should -Be 'SmbConnectionParameters'
+		$mock.DefaultConnectParameters.UserName | Should -Be 'defaultuser'
+		$mock.DefaultConnectParameters.IncludeRootReparseInfo | Should -BeTrue
 	}
 
 	It 'Disconnect-TBOSmbServer -All calls DisconnectAllAsync only' {

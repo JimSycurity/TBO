@@ -11,7 +11,7 @@ The builtin console apps in Titanis can do much of the functionality in this mod
 ```powershell
 Import-Module .\Titanis.TBO.Smb2.psd1 -Force
 
-Set-TBOSmbConnectOptions `
+Set-TBOConnectOptions `
   -ServerName corp1-web01.corp1.lab.home-labs.lol `
   -HostName corp1-web01.corp1.lab.home-labs.lol `
   -UserName psx_l_backupop `

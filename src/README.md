@@ -7,7 +7,7 @@ This module provides the TBO SMB2 PowerShell provider and cmdlets for backup-ope
 ```powershell
 Import-Module .\Titanis.TBO.Smb2.psd1 -Force
 
-Set-TBOSmbConnectOptions `
+Set-TBOConnectOptions `
   -ServerName corp1-web01.corp1.lab.home-labs.lol `
   -HostName corp1-web01.corp1.lab.home-labs.lol `
   -UserName psx_l_backupop `
@@ -19,7 +19,7 @@ Set-Location tbo:\
 Get-ChildItem
 ```
 
-Note: Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadata by default. Use `-IncludeRootReparseInfo` (alias `-RootReparseInfo`) on `New-PSDrive` or `Set-TBOSmbConnectOptions` to enable it.
+Note: Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadata by default. Use `-IncludeRootReparseInfo` (alias `-RootReparseInfo`) on `New-PSDrive` or `Set-TBOConnectOptions` to enable it.
 
 ## Local Logging
 

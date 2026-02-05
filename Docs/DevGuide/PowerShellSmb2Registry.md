@@ -48,7 +48,7 @@ The module must treat backup/restore semantics as non-optional:
 - **Advanced SMB2 cmdlets** for explicit operations:
   - `Copy-TBOSmbItem` (backup-aware read/write)
   - `Get-TBOSmbSecurityDescriptor`, `Set-TBOSmbSecurityDescriptor`
-  - `Connect-TBOSmbServer`, `Set-TBOSmbConnectOptions`
+  - `Connect-TBOSmbServer`, `Set-TBOConnectOptions`
 - **Remote Registry cmdlets** (MS-RRP over the winreg pipe):
   - `Get-TBORegKey`, `New-TBORegKey`, `Remove-TBORegKey`
   - `Get-TBORegValue`, `Set-TBORegValue`, `Remove-TBORegValue`

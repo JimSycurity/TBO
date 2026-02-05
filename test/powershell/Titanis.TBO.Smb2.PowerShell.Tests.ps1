@@ -130,6 +130,7 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
         }
 
         $cmdlets = Get-Command -Module $script:loadedModule.Name | Select-Object -ExpandProperty Name
+        $cmdlets | Should -Contain 'Set-TBOConnectOptions'
         $cmdlets | Should -Contain 'Set-TBOSmbConnectOptions'
         $cmdlets | Should -Contain 'Get-TBOSmbSnapshots'
         $cmdlets | Should -Contain 'Get-TBORegKey'
@@ -237,7 +238,7 @@ Describe 'TBO test harness' {
 
         $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
         try {
-            Set-TBOSmbConnectOptions -ServerName 'fileserver'
+            Set-TBOConnectOptions -ServerName 'fileserver'
         } finally {
             $scope.Dispose()
         }

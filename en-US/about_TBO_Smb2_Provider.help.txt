@@ -24,7 +24,7 @@ PROVIDER FEATURES
     - ACL: Get-Acl / Set-Acl are supported on Windows (security descriptors only).
 
 DYNAMIC PARAMETERS
-    New-PSDrive and Set-TBOSmbConnectOptions accept dynamic SMB options:
+    New-PSDrive and Set-TBOConnectOptions accept dynamic SMB options:
       - HostName, RemotePort, NameResolveOptions
       - Dialects, Capabilities, SecurityMode, RequireSecureNegotiate
       - ClientGuid, PreauthSaltLength, Ciphers, SigningAlgorithms
@@ -46,16 +46,16 @@ EXAMPLES
             -Password 'YourSecurePassword'
 
     Example 2: Set defaults for a server and then create a drive
-        Set-TBOSmbConnectOptions -ServerName corp1-web01 `
+        Set-TBOConnectOptions -ServerName corp1-web01 `
             -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
             -Password 'YourSecurePassword'
         New-PSDrive -Name tbo -PSProvider 'TBO.Smb2' -Root '\\corp1-web01\C$'
 
     Example 2b: Set defaults using alternate auth
-        Set-TBOSmbConnectOptions -ServerName corp1-web01 `
+        Set-TBOConnectOptions -ServerName corp1-web01 `
             -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
             -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
-        Set-TBOSmbConnectOptions -ServerName corp1-web01 -TicketCache C:\temp\krb5cc
+        Set-TBOConnectOptions -ServerName corp1-web01 -TicketCache C:\temp\krb5cc
 
     Example 3: Navigate and read content
         Set-Location tbo:\

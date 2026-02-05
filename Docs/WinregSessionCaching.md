@@ -9,7 +9,7 @@ This module caches a winreg RPC session per server to reduce STATUS_PIPE_BUSY ch
 
 ## Invalidation triggers
 - `Disconnect-TBOSmbServer` / `DisconnectAll` purges cached winreg sessions.
-- `Set-TBOSmbConnectOptions` / `Set-TBORegConnectOptions` changes that alter the fingerprint drop the cached session.
+- `Set-TBOConnectOptions` changes that alter the fingerprint drop the cached session. Per-server updates invalidate only that server; global default updates invalidate all servers. (`Set-TBOSmbConnectOptions` / `Set-TBORegConnectOptions` are deprecated shims with the same behavior.)
 - `RegistryRetryHelper` invalidates the cache on `STATUS_PIPE_BUSY` or transport exceptions before retrying.
 - Any RPC disposal/transport failure that bubbles out of a cached session will cause invalidation.
 

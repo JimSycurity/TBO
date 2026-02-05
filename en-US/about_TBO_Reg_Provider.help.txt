@@ -13,7 +13,7 @@ LONG DESCRIPTION
     shown as (Default).
 
     The provider uses the winreg named pipe over IPC$ and opens keys using
-    backup/restore semantics. Use Set-TBORegConnectOptions or New-PSDrive
+    backup/restore semantics. Use Set-TBOConnectOptions or New-PSDrive
     dynamic parameters to supply credentials.
 
 PROVIDER FEATURES
@@ -32,7 +32,7 @@ LIMITATIONS
       Move-ItemProperty are not supported.
 
 DYNAMIC PARAMETERS
-    New-PSDrive and Set-TBORegConnectOptions accept dynamic SMB options:
+    New-PSDrive and Set-TBOConnectOptions accept dynamic SMB options:
       - HostName, RemotePort, NameResolveOptions
       - Dialects, Capabilities, SecurityMode, RequireSecureNegotiate
       - ClientGuid, PreauthSaltLength, Ciphers, SigningAlgorithms
@@ -48,19 +48,19 @@ DYNAMIC PARAMETERS
 
 EXAMPLES
     Example 1: Create a registry drive and list hives
-        Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
+        Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
             -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
             -Password 'YourSecurePassword'
         New-PSDrive -Name tbo-reg -PSProvider 'TBO.Reg' -Root corp1-web01.corp1.lab.home-labs.lol
         Get-ChildItem tbo-reg:\
 
     Example 1b: Use an NTLM hash
-        Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
+        Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
             -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
             -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
 
     Example 1c: Use a ticket cache
-        Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
+        Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
             -TicketCache C:\temp\krb5cc
 
     Example 2: Enumerate keys and values

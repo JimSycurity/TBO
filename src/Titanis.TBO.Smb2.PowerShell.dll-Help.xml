@@ -1007,10 +1007,239 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
 
   <command:command>
     <command:details>
+      <command:name>Set-TBOConnectOptions</command:name>
+      <command:verb>Set</command:verb>
+      <command:noun>TBOConnectOptions</command:noun>
+      <maml:description>
+        <maml:para>Sets connection defaults used by the TBO.Smb2 and TBO.Reg providers and cmdlets. Supports dynamic parameters for SMB connection, credential, and registry retry options.</maml:para>
+        <maml:para>When ServerName is supplied, provided parameters merge onto existing per-server settings; unspecified values are preserved. When omitted, global defaults are updated by merging onto the existing defaults.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Set-TBOConnectOptions</command:name>
+        <command:parameter required="false" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Server name to scope the connection defaults. Omit to set global defaults.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>HostName</maml:name>
+        <maml:description>
+          <maml:para>Optional host name override used for SPN construction.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RemotePort</maml:name>
+        <maml:description>
+          <maml:para>Override the SMB port.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>NameResolveOptions</maml:name>
+        <maml:description>
+          <maml:para>Name resolution options for the SMB target.</maml:para>
+        </maml:description>
+        <command:parameterValue>NameResolverOptions</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Capabilities</maml:name>
+        <maml:description>
+          <maml:para>SMB capabilities to advertise during negotiation.</maml:para>
+        </maml:description>
+        <command:parameterValue>Smb2Capabilities</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>EnforceVersionCompliance</maml:name>
+        <maml:description>
+          <maml:para>Require the server to negotiate one of the requested dialects.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Dialects</maml:name>
+        <maml:description>
+          <maml:para>SMB dialects to offer during negotiation.</maml:para>
+        </maml:description>
+        <command:parameterValue>Smb2Dialect[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>SecurityMode</maml:name>
+        <maml:description>
+          <maml:para>SMB security mode to request.</maml:para>
+        </maml:description>
+        <command:parameterValue>Smb2SecurityMode</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RequireSecureNegotiate</maml:name>
+        <maml:description>
+          <maml:para>Require secure negotiate when supported by the server.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ClientGuid</maml:name>
+        <maml:description>
+          <maml:para>Override the SMB client GUID.</maml:para>
+        </maml:description>
+        <command:parameterValue>Guid</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>PreauthSaltLength</maml:name>
+        <maml:description>
+          <maml:para>Preauthentication salt length for SMB 3.1.1.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Ciphers</maml:name>
+        <maml:description>
+          <maml:para>Preferred SMB encryption ciphers.</maml:para>
+        </maml:description>
+        <command:parameterValue>Cipher[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>SigningAlgorithms</maml:name>
+        <maml:description>
+          <maml:para>Preferred SMB signing algorithms.</maml:para>
+        </maml:description>
+        <command:parameterValue>SigningAlgorithm[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CompressionCapabilities</maml:name>
+        <maml:description>
+          <maml:para>SMB compression capabilities to advertise.</maml:para>
+        </maml:description>
+        <command:parameterValue>CompressionCaps</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CompressionAlgorithms</maml:name>
+        <maml:description>
+          <maml:para>Preferred SMB compression algorithms.</maml:para>
+        </maml:description>
+        <command:parameterValue>CompressionAlgorithm[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserName</maml:name>
+        <maml:description>
+          <maml:para>User name for authentication.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserDomain</maml:name>
+        <maml:description>
+          <maml:para>Domain for authentication.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Password</maml:name>
+        <maml:description>
+          <maml:para>Password for authentication.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>NtlmHash</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded NTLM hash for authentication.</maml:para>
+        </maml:description>
+        <command:parameterValue>HexString</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Kdc</maml:name>
+        <maml:description>
+          <maml:para>Override the Kerberos KDC host.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>KdcPort</maml:name>
+        <maml:description>
+          <maml:para>Override the Kerberos KDC port.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Workstation</maml:name>
+        <maml:description>
+          <maml:para>Workstation name for NTLM authentication.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryPolicy</maml:name>
+        <maml:description>
+          <maml:para>Retry policy for remote registry operations when STATUS_PIPE_BUSY is encountered (Practical, Retry, Backoff, Reconnect, None).</maml:para>
+        </maml:description>
+        <command:parameterValue>RegistryRetryPolicy</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryCount</maml:name>
+        <maml:description>
+          <maml:para>Number of retry attempts for registry operations when the pipe is busy.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryDelayMs</maml:name>
+        <maml:description>
+          <maml:para>Initial delay in milliseconds between registry retries.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryMaxDelayMs</maml:name>
+        <maml:description>
+          <maml:para>Maximum delay in milliseconds between registry retries when using backoff.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RegistryRetryJitterMs</maml:name>
+        <maml:description>
+          <maml:para>Jitter in milliseconds added to registry retry delays.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'</maml:code>
+        <maml:remarks>
+          <maml:para>Sets connection defaults for a specific server.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryPolicy Practical -RetryCount 3 -RetryDelayMs 100 -RetryMaxDelayMs 1000 -RetryJitterMs 100</maml:code>
+        <maml:remarks>
+          <maml:para>Updates registry retry settings for the server while preserving other options.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Set-TBOSmbConnectOptions</command:name>
       <command:verb>Set</command:verb>
       <command:noun>TBOSmbConnectOptions</command:noun>
       <maml:description>
+        <maml:para>Deprecated. Use Set-TBOConnectOptions instead.</maml:para>
         <maml:para>Sets connection defaults used by the TBO.Smb2 provider and cmdlets. Supports dynamic parameters for SMB connection and credential options.</maml:para>
       </maml:description>
     </command:details>
@@ -1231,6 +1460,7 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
       <command:verb>Set</command:verb>
       <command:noun>TBORegConnectOptions</command:noun>
       <maml:description>
+        <maml:para>Deprecated. Use Set-TBOConnectOptions instead.</maml:para>
         <maml:para>Sets connection defaults used by the TBO.Reg provider and remote registry cmdlets.</maml:para>
       </maml:description>
     </command:details>
@@ -2061,7 +2291,7 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
       <command:noun>TBOSmbSecurityDescriptor</command:noun>
       <maml:description>
         <maml:para>Reads a security descriptor from a remote file or directory.</maml:para>
-        <maml:para>When using UNC paths, the server name must match the name used in Set-TBOSmbConnectOptions (for example, FQDN vs short name). A mismatch can yield "context does not match any mechanisms supported by the server."</maml:para>
+        <maml:para>When using UNC paths, the server name must match the name used in Set-TBOConnectOptions (for example, FQDN vs short name). A mismatch can yield "context does not match any mechanisms supported by the server."</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
