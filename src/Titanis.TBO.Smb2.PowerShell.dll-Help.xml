@@ -3631,6 +3631,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:noun>TBORegChildItem</command:noun>
       <maml:description>
         <maml:para>Lists subkeys and values beneath a remote registry key.</maml:para>
+        <maml:para>If neither -IncludeSubkeys nor -IncludeValues is specified, both are included. If either switch is specified, only the selected item types are returned.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -3676,21 +3677,21 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:parameter>
         <maml:name>IncludeSubkeys</maml:name>
         <maml:description>
-          <maml:para>Include subkeys. If neither IncludeSubkeys nor IncludeValues is specified, both are included.</maml:para>
+          <maml:para>Include subkeys. If neither IncludeSubkeys nor IncludeValues is specified, both are included. If either switch is specified, only the selected item types are returned.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>IncludeValues</maml:name>
         <maml:description>
-          <maml:para>Include values. If neither IncludeSubkeys nor IncludeValues is specified, both are included.</maml:para>
+          <maml:para>Include values. If neither IncludeSubkeys nor IncludeValues is specified, both are included. If either switch is specified, only the selected item types are returned.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>IncludeData</maml:name>
         <maml:description>
-          <maml:para>Include value data when enumerating values.</maml:para>
+          <maml:para>Include value data when enumerating values (only applies when values are included).</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
@@ -3705,9 +3706,16 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       </command:example>
       <command:example>
         <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
-        <maml:code>Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -IncludeValues -IncludeData</maml:code>
+        <maml:code>Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\System\CurrentControlSet\Services\TestService -IncludeValues -IncludeData</maml:code>
         <maml:remarks>
           <maml:para>Lists values and includes data payloads.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -IncludeSubkeys</maml:code>
+        <maml:remarks>
+          <maml:para>Lists only subkeys under the key.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

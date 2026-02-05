@@ -43,6 +43,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		IRegistrySession? OpenRegistrySession(string serverName, CancellationToken cancellationToken);
 	}
 
+	public enum RegistrySessionInvalidationReason
+	{
+		Unknown = 0,
+		Disconnect = 1,
+		OptionsChanged = 2,
+		PipeBusy = 3,
+		TransportError = 4
+	}
+
+	internal interface IRegistrySessionInvalidator
+	{
+		void InvalidateRegistrySession(string serverName, RegistrySessionInvalidationReason reason);
+		void InvalidateAllRegistrySessions(RegistrySessionInvalidationReason reason);
+	}
+
 	internal sealed class RegistrySessionAdapter : IRegistrySession
 	{
 		private readonly RemoteRegistrySession _session;

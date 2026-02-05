@@ -602,6 +602,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				if (value is null) throw new ArgumentNullException(nameof(value));
 				_defaultConnectParameters = value;
+				this.InvalidateRegistrySessions(null, RegistrySessionInvalidationReason.OptionsChanged);
 			}
 		}
 
@@ -626,10 +627,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrEmpty(serverName)) throw new ArgumentException($"'{nameof(serverName)}' cannot be null or empty.", nameof(serverName));
 			if (parameters is null) throw new ArgumentNullException(nameof(parameters));
 
+			var priorParms = this.GetConnectParametersFor(serverName, false) ?? this.DefaultConnectParameters;
+			var priorFingerprint = BuildRegistrySessionFingerprint(priorParms);
+			var newFingerprint = BuildRegistrySessionFingerprint(parameters);
+
 			lock (this._connectParams)
 			{
 				this._connectParams[serverName] = parameters;
 			}
+
+			if (!string.Equals(priorFingerprint, newFingerprint, StringComparison.Ordinal))
+				this.InvalidateRegistrySessions(serverName, RegistrySessionInvalidationReason.OptionsChanged);
 		}
 		#endregion
 

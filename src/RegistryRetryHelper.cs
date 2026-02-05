@@ -45,17 +45,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static RegistryRetryOptions From(SmbConnectionParameters? parms)
 		{
-			var policy = parms?.RegistryRetryPolicy ?? RegistryRetryPolicy.Practical;
-			var retryCount = parms?.RegistryRetryCount ?? 3;
-			var delayMs = parms?.RegistryRetryDelayMs ?? 100;
-			var maxDelayMs = parms?.RegistryRetryMaxDelayMs ?? 1000;
-			var jitterMs = parms?.RegistryRetryJitterMs ?? 100;
+			parms ??= SmbConnectionParameters.GetDefault();
+			var policy = parms.RegistryRetryPolicy ?? RegistryRetryPolicy.Practical;
+			var retryCount = parms.RegistryRetryCount ?? 3;
+			var delayMs = parms.RegistryRetryDelayMs ?? 100;
+			var maxDelayMs = parms.RegistryRetryMaxDelayMs ?? 1000;
+			var jitterMs = parms.RegistryRetryJitterMs ?? 100;
 			return new RegistryRetryOptions(policy, retryCount, delayMs, maxDelayMs, jitterMs);
 		}
 	}
 
 	internal static class RegistryRetryHelper
 	{
+		private static readonly AsyncLocal<int> s_registryOperationDepth = new();
+
+		internal static void Execute(
+			ISmbProviderInfo smb,
+			string serverName,
+			CancellationToken cancellationToken,
+			RegistryRetryOptions options,
+			Action<IRegistrySession> action)
+		{
+			Execute(smb, serverName, cancellationToken, options, session =>
+			{
+				action(session);
+				return true;
+			});
+		}
+
 		internal static void Execute(
 			ISmbProviderInfo smb,
 			string serverName,
@@ -73,6 +90,28 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			ISmbProviderInfo smb,
 			string serverName,
 			CancellationToken cancellationToken,
+			RegistryRetryOptions options,
+			Func<IRegistrySession, T> operation)
+		{
+			return ExecuteCore(smb, serverName, cancellationToken, options, operation);
+		}
+
+		internal static T Execute<T>(
+			ISmbProviderInfo smb,
+			string serverName,
+			CancellationToken cancellationToken,
+			Func<IRegistrySession, T> operation)
+		{
+			var parms = smb?.GetConnectParametersFor(serverName, true) as SmbConnectionParameters;
+			var options = RegistryRetryOptions.From(parms);
+			return ExecuteCore(smb, serverName, cancellationToken, options, operation);
+		}
+
+		private static T ExecuteCore<T>(
+			ISmbProviderInfo smb,
+			string serverName,
+			CancellationToken cancellationToken,
+			RegistryRetryOptions options,
 			Func<IRegistrySession, T> operation)
 		{
 			if (smb == null)
@@ -80,14 +119,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(serverName))
 				throw new ArgumentException("Server name must be provided.", nameof(serverName));
 
+			var depth = s_registryOperationDepth.Value;
+			bool isNested = depth > 0;
+			if (isNested && smb is SmbProviderInfo provider)
+			{
+				provider.LogDiagnostic(
+					$"TBO: Nested registry operation detected for {serverName}. Cached winreg sessions are single-lease; using an uncached session to avoid blocking.");
+			}
+
+			s_registryOperationDepth.Value = depth + 1;
 			var parms = smb.GetConnectParametersFor(serverName, true) as SmbConnectionParameters;
-			var options = RegistryRetryOptions.From(parms);
 			var port = parms?.RemotePort;
 
 			int attempt = 0;
 			bool reconnectFallbackUsed = false;
 			double currentDelayMs = options.DelayMs;
 			IRegistrySession? session = null;
+			bool sessionIsCached = false;
 
 			try
 			{
@@ -97,7 +145,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 					try
 					{
-						session ??= OpenRegistrySession(smb, serverName, cancellationToken);
+						if (session == null)
+						{
+							var opened = OpenRegistrySession(smb, serverName, cancellationToken, allowCache: !isNested);
+							session = opened.session;
+							sessionIsCached = opened.isCached;
+						}
 						return operation(session);
 					}
 					catch (Exception ex) when (IsPipeBusy(ex))
@@ -113,15 +166,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 								reconnectFallbackUsed = true;
 								attempt = options.RetryCount;
 								currentDelayMs = options.DelayMs;
+								if (sessionIsCached)
+									TryInvalidateRegistrySession(smb, serverName, RegistrySessionInvalidationReason.PipeBusy);
 								DisposeSession(ref session);
+								sessionIsCached = false;
+								TryForceDisconnect(smb, serverName, port);
 								continue;
 							}
 
 							throw;
 						}
-
-						if (options.ReconnectOnRetry)
-							DisposeSession(ref session);
 
 						ApplyDelay(options, ref currentDelayMs, cancellationToken);
 					}
@@ -138,7 +192,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 								reconnectFallbackUsed = true;
 								attempt = options.RetryCount;
 								currentDelayMs = options.DelayMs;
+								if (sessionIsCached)
+									TryInvalidateRegistrySession(smb, serverName, RegistrySessionInvalidationReason.TransportError);
 								DisposeSession(ref session);
+								sessionIsCached = false;
 								TryForceDisconnect(smb, serverName, port);
 								continue;
 							}
@@ -146,7 +203,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 							throw;
 						}
 
+						if (sessionIsCached)
+							TryInvalidateRegistrySession(smb, serverName, RegistrySessionInvalidationReason.TransportError);
 						DisposeSession(ref session);
+						sessionIsCached = false;
 						TryForceDisconnect(smb, serverName, port);
 						ApplyDelay(options, ref currentDelayMs, cancellationToken);
 					}
@@ -155,20 +215,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			finally
 			{
 				session?.Dispose();
+				s_registryOperationDepth.Value = depth;
 			}
 		}
 
-		private static IRegistrySession OpenRegistrySession(ISmbProviderInfo smb, string serverName, CancellationToken cancellationToken)
+		private static void TryInvalidateRegistrySession(
+			ISmbProviderInfo smb,
+			string serverName,
+			RegistrySessionInvalidationReason reason)
 		{
-			if (smb is IRegistrySessionProvider provider)
+			if (smb is IRegistrySessionInvalidator invalidator)
+				invalidator.InvalidateRegistrySession(serverName, reason);
+		}
+
+		private static (IRegistrySession session, bool isCached) OpenRegistrySession(
+			ISmbProviderInfo smb,
+			string serverName,
+			CancellationToken cancellationToken,
+			bool allowCache)
+		{
+			if (allowCache && smb is IRegistrySessionProvider provider)
 			{
 				var session = provider.OpenRegistrySession(serverName, cancellationToken);
 				if (session != null)
-					return session;
+					return (session, true);
 			}
 
 			var remoteSession = smb.OpenRemoteRegistrySessionAsync(serverName, cancellationToken).GetAwaiter().GetResult();
-			return new RegistrySessionAdapter(remoteSession);
+			return (new RegistrySessionAdapter(remoteSession), false);
 		}
 
 		private static void ApplyDelay(RegistryRetryOptions options, ref double currentDelayMs, CancellationToken cancellationToken)

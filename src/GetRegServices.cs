@@ -82,45 +82,31 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var basePath = string.IsNullOrWhiteSpace(this.Path) ? DefaultServicesPath : this.Path;
 			var parsedPath = ParseRegistryPath(basePath, nameof(this.Path));
 
-			ExecuteRegistryOperation(smb, cancellationToken, session =>
+			var requestedNames = FilterNames(this.Name);
+			if (requestedNames.Count > 0)
 			{
-				using var servicesKey = OpenRegistryKey(
-					session.Client,
+				ProcessRequestedNames(smb, parsedPath, requestedNames, cancellationToken);
+				return;
+			}
+
+			var subkeys = LoadServiceSubkeys(smb, parsedPath, cancellationToken, out _);
+			foreach (var subkey in subkeys)
+			{
+				if (string.IsNullOrWhiteSpace(subkey.KeyName))
+					continue;
+
+				TryWriteServiceInfo(
+					smb,
 					parsedPath,
-					RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
-					cancellationToken);
-
-				var keyInfo = servicesKey.QueryInfo(cancellationToken).GetAwaiter().GetResult();
-				var requestedNames = FilterNames(this.Name);
-				if (requestedNames.Count > 0)
-				{
-					ProcessRequestedNames(smb, session.Client, parsedPath, servicesKey, keyInfo, requestedNames, cancellationToken);
-					return;
-				}
-
-				var subkeys = CollectServiceSubkeys(smb, servicesKey, keyInfo, parsedPath, cancellationToken);
-				foreach (var subkey in subkeys)
-				{
-					if (string.IsNullOrWhiteSpace(subkey.KeyName))
-						continue;
-
-					TryWriteServiceInfo(
-						smb,
-						session.Client,
-						parsedPath,
-						subkey.KeyName,
-						cancellationToken,
-						warnOnMissing: false);
-				}
-			});
+					subkey.KeyName,
+					cancellationToken,
+					warnOnMissing: false);
+			}
 		}
 
 		private void ProcessRequestedNames(
 			ISmbProviderInfo smb,
-			IRegistryClient client,
 			RegistryPathSpec servicesPath,
-			IRegistryKey servicesKey,
-			RegistryKeyInfo servicesInfo,
 			List<string> requestedNames,
 			CancellationToken cancellationToken)
 		{
@@ -144,14 +130,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (string.IsNullOrWhiteSpace(name))
 					continue;
 
-				if (TryWriteServiceInfo(smb, client, servicesPath, name, cancellationToken, warnOnMissing: true))
+				if (TryWriteServiceInfo(smb, servicesPath, name, cancellationToken, warnOnMissing: true))
 					emitted.Add(name);
 			}
 
 			if (wildcardPatterns.Count == 0)
 				return;
 
-			var subkeys = CollectServiceSubkeys(smb, servicesKey, servicesInfo, servicesPath, cancellationToken);
+			var subkeys = LoadServiceSubkeys(smb, servicesPath, cancellationToken, out var servicesInfo);
 			var wildcardMatched = false;
 			foreach (var subkey in subkeys)
 			{
@@ -163,7 +149,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					continue;
 
 				wildcardMatched = true;
-				if (TryWriteServiceInfo(smb, client, servicesPath, keyName, cancellationToken, warnOnMissing: false))
+				if (TryWriteServiceInfo(smb, servicesPath, keyName, cancellationToken, warnOnMissing: false))
 					emitted.Add(keyName);
 			}
 
@@ -171,23 +157,40 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				this.WriteWarning($"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
 		}
 
-		private List<RegistrySubkeyInfo> CollectServiceSubkeys(
+		private List<RegistrySubkeyInfo> LoadServiceSubkeys(
 			ISmbProviderInfo smb,
-			IRegistryKey servicesKey,
-			RegistryKeyInfo servicesInfo,
 			RegistryPathSpec servicesPath,
-			CancellationToken cancellationToken)
+			CancellationToken cancellationToken,
+			out RegistryKeyInfo servicesInfo)
 		{
-			List<RegistrySubkeyInfo> subkeys;
-			try
-			{
-				subkeys = CollectSubkeys(servicesKey, cancellationToken);
-			}
-			catch (Exception ex)
-			{
-				smb.LogException("Get-TBORegServices failed to enumerate service keys", ex);
-				throw;
-			}
+			var result = ExecuteRegistryOperation(
+				smb,
+				cancellationToken,
+				session =>
+				{
+					using var servicesKey = OpenRegistryKey(
+						session.Client,
+						servicesPath,
+						RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
+						cancellationToken);
+
+					var keyInfo = servicesKey.QueryInfo(cancellationToken).GetAwaiter().GetResult();
+					List<RegistrySubkeyInfo> subkeys;
+					try
+					{
+						subkeys = CollectSubkeys(servicesKey, cancellationToken);
+					}
+					catch (Exception ex)
+					{
+						smb.LogException("Get-TBORegServices failed to enumerate service keys", ex);
+						throw;
+					}
+
+					return (keyInfo, subkeys);
+				});
+
+			servicesInfo = result.keyInfo;
+			var subkeys = result.subkeys;
 
 			if (servicesInfo.SubkeyCount > 0 && subkeys.Count != servicesInfo.SubkeyCount)
 			{
@@ -215,7 +218,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private bool TryWriteServiceInfo(
 			ISmbProviderInfo smb,
-			IRegistryClient client,
 			RegistryPathSpec basePath,
 			string serviceName,
 			CancellationToken cancellationToken,
@@ -223,32 +225,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			try
 			{
-				WriteServiceInfo(smb, client, basePath, serviceName, cancellationToken);
+				return ExecuteRegistryOperation(
+					smb,
+					cancellationToken,
+					session =>
+					{
+						WriteServiceInfo(smb, session.Client, basePath, serviceName, cancellationToken);
+						return true;
+					});
 
-				return true;
-			}
-			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
-			{
-				try
-				{
-					return ExecuteRegistryOperation(
-						smb,
-						cancellationToken,
-						session =>
-						{
-							WriteServiceInfo(smb, session.Client, basePath, serviceName, cancellationToken);
-							return true;
-						});
-				}
-				catch (NtstatusException retryEx) when (retryEx.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
-				{
-					this.WriteWarning($"Get-TBORegServices failed to read service '{serviceName}': {retryEx.Message}");
-				}
-				catch (Exception retryEx)
-				{
-					smb.LogException($"Get-TBORegServices failed to read service '{serviceName}'", retryEx);
-					this.WriteWarning($"Get-TBORegServices failed to read service '{serviceName}': {retryEx.Message}");
-				}
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{

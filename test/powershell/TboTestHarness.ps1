@@ -45,6 +45,16 @@ function Import-TboModuleForTests {
 		throw 'Unable to locate repo root to import module.'
 	}
 
+	$binaryCandidates = @(
+		(Join-Path $RepoRoot 'src\bin\Release\net8.0\Titanis.TBO.Smb2.PowerShell.dll'),
+		(Join-Path $RepoRoot 'src\bin\Debug\net8.0\Titanis.TBO.Smb2.PowerShell.dll')
+	)
+	$binaryPath = $binaryCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+	if ($binaryPath) {
+		Import-Module -Name $binaryPath -Force -ErrorAction Stop | Out-Null
+		return $RepoRoot
+	}
+
 	$manifest = Join-Path $RepoRoot 'Titanis.TBO.Smb2.psd1'
 	if (-not (Test-Path -LiteralPath $manifest)) {
 		throw "Module manifest not found at $manifest."
@@ -62,6 +72,8 @@ function New-TboMockProviderInfo {
 		[scriptblock]$OpenServerServiceSessionAsync,
 		[scriptblock]$OpenRemoteRegistrySessionAsync,
 		[scriptblock]$OpenRegistrySession,
+		[scriptblock]$InvalidateRegistrySession,
+		[scriptblock]$InvalidateAllRegistrySessions,
 		[scriptblock]$DisconnectServerAsync,
 		[scriptblock]$DisconnectAllAsync,
 		[scriptblock]$LogException
@@ -75,6 +87,8 @@ function New-TboMockProviderInfo {
 	if ($OpenServerServiceSessionAsync) { $mock.OpenServerServiceSessionAsyncFunc = [Func[string, System.Threading.CancellationToken, System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.ServerServiceSession]]]$OpenServerServiceSessionAsync }
 	if ($OpenRemoteRegistrySessionAsync) { $mock.OpenRemoteRegistrySessionAsyncFunc = [Func[string, System.Threading.CancellationToken, System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]]]$OpenRemoteRegistrySessionAsync }
 	if ($OpenRegistrySession) { $mock.OpenRegistrySessionFunc = [Func[string, System.Threading.CancellationToken, Titanis.Tbo.Smb2.PowerShell.IRegistrySession]]$OpenRegistrySession }
+	if ($InvalidateRegistrySession) { $mock.InvalidateRegistrySessionAction = [Action[string, Titanis.Tbo.Smb2.PowerShell.RegistrySessionInvalidationReason]]$InvalidateRegistrySession }
+	if ($InvalidateAllRegistrySessions) { $mock.InvalidateAllRegistrySessionsAction = [Action[Titanis.Tbo.Smb2.PowerShell.RegistrySessionInvalidationReason]]$InvalidateAllRegistrySessions }
 	if ($DisconnectServerAsync) { $mock.DisconnectServerAsyncFunc = [Func[string, Nullable[int], bool, System.Threading.Tasks.Task]]$DisconnectServerAsync }
 	if ($DisconnectAllAsync) { $mock.DisconnectAllAsyncFunc = [Func[bool, System.Threading.Tasks.Task]]$DisconnectAllAsync }
 	if ($LogException) { $mock.LogExceptionAction = [Action[string, System.Exception]]$LogException }

@@ -165,7 +165,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			return RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, func);
 		}
-
 		protected static RegistryPathSpec ParseRegistryPath(string path, string paramName)
 		{
 			return RegistryPathParser.Parse(path, paramName);

@@ -153,8 +153,8 @@ Get-Content tbo:\Temp\test.txt
 Lists available VSS snapshots for a file or directory.
 
 ```powershell
-Get-TBOSmbSnapshots -Path tbo:\Windows\System32\config\SAM
-Get-TBOSmbSnapshots -Path \\corp1-web01\C$\Windows\System32\config\SAM
+Get-TBOSmbSnapshots -Path tbo:\Windows\System32\config
+Get-TBOSmbSnapshots -Path \\corp1-web01\C$\Windows\System32\config
 Set-Location tbo:\@GMT-2026.01.25-20.47.30\Windows\System32\config
 ```
 
@@ -190,8 +190,8 @@ Get-TBOSmbOpenFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -BasePath tb
 Lists SMB shares on the server via srvsvc. Some detail levels may require administrative rights; use `-Level Level1` if higher levels return access denied.
 
 ```powershell
-Get-TBOSmbShares -ServerName corp1-web01.corp1.lab.home-labs.lol
-Get-TBOSmbShares -ServerName corp1-web01.corp1.lab.home-labs.lol -Level Level1
+Get-TBOSmbShares -ServerName corp1-web01.corp1.lab.home-labs.lol  # Requires Admin Privs
+Get-TBOSmbShares -ServerName corp1-web01.corp1.lab.home-labs.lol -Level Level1  # Non-Priv
 ```
 
 ### Get-TBOSmbNics
@@ -247,7 +247,7 @@ Use `-Sections` to control which components are retrieved (default: Owner, Group
 
 ```powershell
 $sd = Get-TBOSmbSecurityDescriptor -Path tbo:\Windows
-$sddl = Get-TBOSmbSecurityDescriptor -Path \\corp1-web01\C$\Windows -AsSddl
+$sddl = Get-TBOSmbSecurityDescriptor -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Windows -AsSddl
 $winSd = Get-TBOSmbSecurityDescriptor -Path tbo:\Windows -AsWindows
 $daclOnly = Get-TBOSmbSecurityDescriptor -Path tbo:\Windows -Sections Dacl
 ```
@@ -283,7 +283,7 @@ $raw = [Titanis.Tbo.Smb2.PowerShell.TBOSD]::FromRegistryBinaryAsWindows($sdBytes
 
 ### Remote Registry Cmdlets (MS-RRP)
 
-Remote registry cmdlets use the winreg pipe with backup/restore semantics on every open.
+Remote registry cmdlets use the winreg pipe with backup/restore semantics. Session caching behavior is documented in `Docs/WinregSessionCaching.md`.
 
 #### Get-TBORegKey
 
@@ -604,10 +604,12 @@ Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessM
 #### Get-TBORegChildItem
 
 Lists subkeys and values beneath a remote registry key.
+By default, both subkeys and values are returned. If you specify `-IncludeSubkeys` or `-IncludeValues`, the output is limited to only those sets.
+Use `-IncludeData` to include value payloads (only applies when values are included).
 
 ```powershell
 Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
-Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -IncludeValues -IncludeData
+Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\System\CurrentControlSet\Services\TestService -IncludeValues -IncludeData
 Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -IncludeSubkeys
 ```
 

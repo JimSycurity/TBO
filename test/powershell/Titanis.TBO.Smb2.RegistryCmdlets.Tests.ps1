@@ -263,3 +263,113 @@ Describe 'TBO registry cmdlets (mocked)' {
 		}
 	}
 }
+
+Describe 'Registry retry helper (mocked)' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		if (-not $script:repoRoot) {
+			$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		}
+
+		if (-not $script:moduleAvailable) {
+			$script:moduleAvailable = $false
+			if ($script:repoRoot) {
+				try {
+					Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+					$script:moduleAvailable = $true
+				} catch {
+					$script:moduleAvailable = $false
+				}
+			}
+		}
+	}
+	It 'uses OpenRegistrySession when provided' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey('HKLM\Software\Titanis') | Out-Null
+
+		$script:remoteCalled = $false
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() } `
+			-OpenRemoteRegistrySessionAsync { param($serverName, $token) $script:remoteCalled = $true; throw 'OpenRemoteRegistrySessionAsync should not be called.' }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Get-TBORegKey -ServerName 'server' -Path 'HKLM\Software\Titanis' | Out-Null
+		}
+
+		$script:remoteCalled | Should -BeFalse
+	}
+
+	It 'invalidates cached session on transport error' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$session = $store.CreateSession()
+		$script:invalidations = 0
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $session } `
+			-InvalidateRegistrySession { param($serverName, $reason) $script:invalidations++ }
+
+		$helperType = [Titanis.Tbo.Smb2.PowerShell.SmbCmdlet].Assembly.GetType('Titanis.Tbo.Smb2.PowerShell.RegistryRetryHelper')
+		$execute = $helperType.GetMethod('Execute', [System.Reflection.BindingFlags]::Static -bor [System.Reflection.BindingFlags]::NonPublic -bor [System.Reflection.BindingFlags]::Public, $null, @(
+			[Titanis.Tbo.Smb2.PowerShell.ISmbProviderInfo],
+			[string],
+			[System.Threading.CancellationToken],
+			[System.Action[Titanis.Tbo.Smb2.PowerShell.IRegistrySession]]
+		), $null)
+
+		$action = [System.Action[Titanis.Tbo.Smb2.PowerShell.IRegistrySession]]{
+			throw [System.IO.IOException]::new('transport error')
+		}
+
+		{ $execute.Invoke($null, @($mock, 'server', [System.Threading.CancellationToken]::None, $action)) } | Should -Throw
+		$script:invalidations | Should -BeGreaterThan 0
+	}
+
+	It 'recovers after a transport error and continues' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$session = $store.CreateSession()
+		$script:invalidations = 0
+		$script:attempt = 0
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $session } `
+			-InvalidateRegistrySession { param($serverName, $reason) $script:invalidations++ }
+
+		$helperType = [Titanis.Tbo.Smb2.PowerShell.SmbCmdlet].Assembly.GetType('Titanis.Tbo.Smb2.PowerShell.RegistryRetryHelper')
+		$execute = $helperType.GetMethod('Execute', [System.Reflection.BindingFlags]::Static -bor [System.Reflection.BindingFlags]::NonPublic -bor [System.Reflection.BindingFlags]::Public, $null, @(
+			[Titanis.Tbo.Smb2.PowerShell.ISmbProviderInfo],
+			[string],
+			[System.Threading.CancellationToken],
+			[System.Action[Titanis.Tbo.Smb2.PowerShell.IRegistrySession]]
+		), $null)
+
+		$action = [System.Action[Titanis.Tbo.Smb2.PowerShell.IRegistrySession]]{
+			$script:attempt++
+			if ($script:attempt -eq 1) {
+				throw [System.IO.IOException]::new('transport error')
+			}
+		}
+
+		{ $execute.Invoke($null, @($mock, 'server', [System.Threading.CancellationToken]::None, $action)) } | Should -Not -Throw
+		$script:invalidations | Should -BeGreaterThan 0
+		$script:attempt | Should -Be 2
+	}
+}

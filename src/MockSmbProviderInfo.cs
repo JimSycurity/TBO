@@ -5,7 +5,7 @@ using Titanis.Smb2;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
-	public sealed class MockSmbProviderInfo : ISmbProviderInfo, ISmbFileSystemProvider, IRegistrySessionProvider
+	public sealed class MockSmbProviderInfo : ISmbProviderInfo, ISmbFileSystemProvider, IRegistrySessionProvider, IRegistrySessionInvalidator
 	{
 		public Smb2Client? SmbClient { get; set; }
 		public ISmbFileSystem? FileSystem { get; set; }
@@ -28,6 +28,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public Func<string, CancellationToken, Task<ServerServiceSession>>? OpenServerServiceSessionAsyncFunc { get; set; }
 		public Func<string, CancellationToken, Task<RemoteRegistrySession>>? OpenRemoteRegistrySessionAsyncFunc { get; set; }
 		public Func<string, CancellationToken, IRegistrySession?>? OpenRegistrySessionFunc { get; set; }
+		public Action<string, RegistrySessionInvalidationReason>? InvalidateRegistrySessionAction { get; set; }
+		public Action<RegistrySessionInvalidationReason>? InvalidateAllRegistrySessionsAction { get; set; }
 		public Func<string, int?, bool, Task>? DisconnectServerAsyncFunc { get; set; }
 		public Func<bool, Task>? DisconnectAllAsyncFunc { get; set; }
 		public Action<string, Exception>? LogExceptionAction { get; set; }
@@ -78,6 +80,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		IRegistrySession? IRegistrySessionProvider.OpenRegistrySession(string serverName, CancellationToken cancellationToken)
 			=> this.OpenRegistrySessionFunc?.Invoke(serverName, cancellationToken);
+
+		void IRegistrySessionInvalidator.InvalidateRegistrySession(string serverName, RegistrySessionInvalidationReason reason)
+			=> this.InvalidateRegistrySessionAction?.Invoke(serverName, reason);
+
+		void IRegistrySessionInvalidator.InvalidateAllRegistrySessions(RegistrySessionInvalidationReason reason)
+			=> this.InvalidateAllRegistrySessionsAction?.Invoke(reason);
 
 		Task ISmbProviderInfo.DisconnectServerAsync(string serverName, int? port, bool force)
 			=> this.DisconnectServerAsyncFunc?.Invoke(serverName, port, force) ?? Task.CompletedTask;
