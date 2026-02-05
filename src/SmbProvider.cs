@@ -646,16 +646,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			writer = null;
 
 			var setting = Environment.GetEnvironmentVariable("TITANIS_TBO_LOG");
-			if (string.IsNullOrWhiteSpace(setting))
+			if (!TryParseLogSetting(setting, out var path, out var level))
 				return null;
-
-			string path = setting;
-			if (setting.Equals("1", StringComparison.OrdinalIgnoreCase)
-				|| setting.Equals("true", StringComparison.OrdinalIgnoreCase)
-				|| setting.Equals("yes", StringComparison.OrdinalIgnoreCase))
-			{
-				path = Path.Combine(Path.GetTempPath(), "Titanis.TBO.Smb2.log");
-			}
 
 			var dir = Path.GetDirectoryName(path);
 			if (!string.IsNullOrWhiteSpace(dir))
@@ -668,11 +660,73 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var log = new TextWriterLog(writer)
 			{
-				LogLevel = LogMessageSeverity.Diagnostic,
+				LogLevel = level,
 				Format = LogFormat.TextWithTimestamp
 			};
-			log.WriteInfo($"TBO logging enabled: {path}");
+			log.WriteInfo($"TBO logging enabled: {path} (level: {level})");
 			return log;
+		}
+
+		private static bool TryParseLogSetting(string? setting, out string path, out LogMessageSeverity level)
+		{
+			path = string.Empty;
+			level = LogMessageSeverity.Info;
+
+			if (string.IsNullOrWhiteSpace(setting))
+				return false;
+
+			var trimmed = setting.Trim();
+			if (IsEnabledLogToken(trimmed))
+			{
+				path = GetDefaultLogPath();
+				return true;
+			}
+
+			var separatorIndex = trimmed.LastIndexOf(';');
+			if (separatorIndex >= 0)
+			{
+				var pathToken = trimmed.Substring(0, separatorIndex).Trim();
+				var levelToken = trimmed.Substring(separatorIndex + 1).Trim();
+				path = string.IsNullOrWhiteSpace(pathToken) ? GetDefaultLogPath() : pathToken;
+				level = ParseLogLevelOrDefault(levelToken);
+				return true;
+			}
+
+			if (TryParseLogLevel(trimmed, out var parsedLevel))
+			{
+				path = GetDefaultLogPath();
+				level = parsedLevel;
+				return true;
+			}
+
+			path = trimmed;
+			return true;
+		}
+
+		private static bool IsEnabledLogToken(string value)
+		{
+			return value.Equals("1", StringComparison.OrdinalIgnoreCase)
+				|| value.Equals("true", StringComparison.OrdinalIgnoreCase)
+				|| value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+		}
+
+		private static string GetDefaultLogPath()
+		{
+			return Path.Combine(Path.GetTempPath(), "Titanis.TBO.Smb2.log");
+		}
+
+		private static LogMessageSeverity ParseLogLevelOrDefault(string? value)
+		{
+			return TryParseLogLevel(value, out var parsed) ? parsed : LogMessageSeverity.Info;
+		}
+
+		private static bool TryParseLogLevel(string? value, out LogMessageSeverity level)
+		{
+			level = LogMessageSeverity.Info;
+			if (string.IsNullOrWhiteSpace(value))
+				return false;
+
+			return Enum.TryParse(value.Trim(), true, out level);
 		}
 	}
 
