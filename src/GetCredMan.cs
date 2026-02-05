@@ -174,6 +174,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string PathParameterSet = "Path";
 		private const string InputParameterSet = "Input";
 		private const int DefaultMaxBytes = 1024 * 1024;
+		private const int MinFragmentLength = 6;
+		private const int MaxFragmentLength = 256;
+		private const int MaxFragments = 12;
 
 		private const string TaskSchedulerMarker = "Domain:batch=TaskScheduler:Task:";
 
@@ -619,7 +622,169 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 			}
 
-			return null;
+			return TryExtractReadableCleartext(payload);
+		}
+
+		private static string? TryExtractReadableCleartext(byte[] payload)
+		{
+			var fragments = new List<(string Fragment, int Offset)>();
+			ExtractUnicodeFragments(payload, fragments);
+			ExtractAsciiFragments(payload, fragments);
+
+			if (fragments.Count == 0)
+				return null;
+
+			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var scored = new List<(string Fragment, int Score, int Offset)>();
+			foreach (var fragment in fragments)
+			{
+				var normalized = NormalizeFragment(fragment.Fragment);
+				if (string.IsNullOrWhiteSpace(normalized))
+					continue;
+				if (!IsLikelyFragment(normalized))
+					continue;
+				if (!seen.Add(normalized))
+					continue;
+
+				var score = ScoreFragment(normalized);
+				scored.Add((normalized, score, fragment.Offset));
+			}
+
+			if (scored.Count == 0)
+				return null;
+
+			var selected = scored
+				.OrderByDescending(item => item.Score)
+				.ThenBy(item => item.Offset)
+				.Take(MaxFragments)
+				.Select(item => item.Fragment)
+				.ToList();
+
+			return selected.Count == 0 ? null : string.Join(Environment.NewLine, selected);
+		}
+
+		private static void ExtractUnicodeFragments(byte[] payload, List<(string Fragment, int Offset)> results)
+		{
+			if (payload.Length < 2)
+				return;
+
+			var builder = new System.Text.StringBuilder();
+			var startOffset = -1;
+
+			for (var i = 0; i + 1 < payload.Length; i += 2)
+			{
+				var ch = (char)(payload[i] | (payload[i + 1] << 8));
+				if (IsPrintableTextChar(ch))
+				{
+					if (startOffset < 0)
+						startOffset = i;
+					builder.Append(ch);
+					continue;
+				}
+
+				if (builder.Length > 0)
+				{
+					results.Add((builder.ToString(), startOffset));
+					builder.Clear();
+					startOffset = -1;
+				}
+			}
+
+			if (builder.Length > 0)
+				results.Add((builder.ToString(), startOffset));
+		}
+
+		private static void ExtractAsciiFragments(byte[] payload, List<(string Fragment, int Offset)> results)
+		{
+			if (payload.Length == 0)
+				return;
+
+			var builder = new System.Text.StringBuilder();
+			var startOffset = -1;
+
+			for (var i = 0; i < payload.Length; i++)
+			{
+				var value = payload[i];
+				if (value >= 0x20 && value <= 0x7E)
+				{
+					if (startOffset < 0)
+						startOffset = i;
+					builder.Append((char)value);
+					continue;
+				}
+
+				if (builder.Length > 0)
+				{
+					results.Add((builder.ToString(), startOffset));
+					builder.Clear();
+					startOffset = -1;
+				}
+			}
+
+			if (builder.Length > 0)
+				results.Add((builder.ToString(), startOffset));
+		}
+
+		private static bool IsLikelyFragment(string fragment)
+		{
+			if (string.IsNullOrWhiteSpace(fragment))
+				return false;
+
+			var trimmed = fragment.Trim();
+			if (trimmed.Length < MinFragmentLength)
+				return false;
+
+			var letters = 0;
+			var digits = 0;
+			foreach (var ch in trimmed)
+			{
+				if (char.IsLetter(ch))
+					letters++;
+				else if (char.IsDigit(ch))
+					digits++;
+			}
+
+			if (letters + digits < Math.Min(3, trimmed.Length))
+				return false;
+
+			return true;
+		}
+
+		private static string NormalizeFragment(string fragment)
+		{
+			var trimmed = fragment.Trim();
+			if (trimmed.Length > MaxFragmentLength)
+				return trimmed.Substring(0, MaxFragmentLength) + "...";
+			return trimmed;
+		}
+
+		private static int ScoreFragment(string fragment)
+		{
+			var score = fragment.Length;
+
+			if (fragment.IndexOf("target=", StringComparison.OrdinalIgnoreCase) >= 0)
+				score += 20;
+			if (fragment.Contains("://", StringComparison.Ordinal))
+				score += 10;
+			if (fragment.Contains('@'))
+				score += 6;
+			if (fragment.Contains('\\') || fragment.Contains('/'))
+				score += 4;
+			if (fragment.Contains('='))
+				score += 6;
+			if (fragment.Contains(':'))
+				score += 3;
+			if (fragment.IndexOf("authstate", StringComparison.OrdinalIgnoreCase) >= 0)
+				score -= 15;
+
+			return score;
+		}
+
+		private static bool IsPrintableTextChar(char ch)
+		{
+			if (ch == '\r' || ch == '\n' || ch == '\t')
+				return false;
+			return !char.IsControl(ch);
 		}
 
 		private static bool TryDecodeTaskSchedulerCleartext(byte[] payload, out string? text)
@@ -734,13 +899,30 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return false;
 
 			int printable = 0;
+			int ascii = 0;
+			int nonAscii = 0;
 			foreach (var ch in text)
 			{
 				if (!char.IsControl(ch) || ch == '\r' || ch == '\n' || ch == '\t')
+				{
 					printable++;
+					if (ch <= '\u007e')
+						ascii++;
+					else
+						nonAscii++;
+				}
 			}
 
-			return printable >= text.Length * 0.8;
+			if (printable < text.Length * 0.8)
+				return false;
+
+			if (ascii < Math.Max(8, text.Length * 0.5))
+				return false;
+
+			if (nonAscii > text.Length * 0.4)
+				return false;
+
+			return true;
 		}
 
 		private sealed class CredManDecryptResult
