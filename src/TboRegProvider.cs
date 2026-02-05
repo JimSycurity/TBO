@@ -6,9 +6,7 @@ using System.IO;
 using System.Management.Automation;
 using System.Management.Automation.Provider;
 using System.Threading;
-using Titanis;
 using Titanis.Msrpc.Msrrp;
-using Titanis.Winterop;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
@@ -118,7 +116,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		protected override PSDriveInfo NewDrive(PSDriveInfo drive)
 		{
-			var serverName = NormalizeServerName(drive.Root);
+			var serverName = RegistryHelpers.NormalizeServerName(drive.Root);
 			var smb = GetSmbProviderInfo();
 
 			var baseParms = smb.GetConnectParametersFor(serverName, true);
@@ -152,7 +150,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override bool IsItemContainer(string path)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath) || IsHivePath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath) || RegistryHelpers.IsHivePath(providerPath))
 				return true;
 
 			return this.BeginOperation(token =>
@@ -165,7 +163,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override bool ItemExists(string path)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath) || IsHivePath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath) || RegistryHelpers.IsHivePath(providerPath))
 				return true;
 
 			return this.BeginOperation(token =>
@@ -187,7 +185,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override void GetItem(string path)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath))
 				return;
 
 			this.BeginOperation(token =>
@@ -212,7 +210,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 					if (RegistryHelpers.TryGetValue(session.Client, parsed, token, out var valueInfo, out var parentKeyPath))
 					{
-						var itemPath = CombineProviderPath(parentKeyPath, RegistryHelpers.NormalizeValueName(valueInfo.Name));
+						var itemPath = RegistryHelpers.CombineProviderPath(parentKeyPath, RegistryHelpers.NormalizeValueName(valueInfo.Name));
 						this.WriteItemObject(new TboRegistryValueInfo(drive.ServerName, parentKeyPath, valueInfo), itemPath, false);
 						return;
 					}
@@ -225,7 +223,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override void GetChildItems(string path, bool recurse)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath))
 			{
 				foreach (var rootKey in RootKeys)
 				{
@@ -282,7 +280,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						{
 							var normalizedName = RegistryHelpers.NormalizeValueName(value.Name);
 							var valueInfo = new TboRegistryValueInfo(drive.ServerName, parsed.KeyPath, value);
-							this.WriteItemObject(valueInfo, CombineProviderPath(parsed.KeyPath, normalizedName), false);
+							this.WriteItemObject(valueInfo, RegistryHelpers.CombineProviderPath(parsed.KeyPath, normalizedName), false);
 						}
 					}
 				});
@@ -292,7 +290,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override bool HasChildItems(string path)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath))
 				return RootKeys.Length > 0;
 
 			return this.BeginOperation(token =>
@@ -315,7 +313,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw new NotSupportedException($"Unsupported item type '{itemTypeName}'. Only registry keys are supported.");
 
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath) || IsHivePath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath) || RegistryHelpers.IsHivePath(providerPath))
 				throw new InvalidOperationException("Cannot create a registry hive.");
 
 			this.BeginOperation(token =>
@@ -349,7 +347,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override void RemoveItem(string path, bool recurse)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath) || IsHivePath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath) || RegistryHelpers.IsHivePath(providerPath))
 				throw new InvalidOperationException("Cannot remove a registry hive.");
 
 			this.BeginOperation(token =>
@@ -379,7 +377,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public void GetProperty(string path, Collection<string> providerSpecificPickList)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath) || IsHivePath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath) || RegistryHelpers.IsHivePath(providerPath))
 				throw new ArgumentException("Path must be a registry key.", nameof(path));
 
 			this.BeginOperation(token =>
@@ -422,7 +420,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return;
 
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath) || IsHivePath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath) || RegistryHelpers.IsHivePath(providerPath))
 				throw new ArgumentException("Path must be a registry key.", nameof(path));
 
 			this.BeginOperation(token =>
@@ -467,7 +465,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public void RemoveProperty(string path, string propertyName)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath) || IsHivePath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath) || RegistryHelpers.IsHivePath(providerPath))
 				throw new ArgumentException("Path must be a registry key.", nameof(path));
 
 			this.BeginOperation(token =>
@@ -517,7 +515,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public IContentReader GetContentReader(string path)
 		{
 			var providerPath = ResolveProviderPath(path, out var drive);
-			if (IsRootPath(providerPath) || IsHivePath(providerPath))
+			if (RegistryHelpers.IsRootPath(providerPath) || RegistryHelpers.IsHivePath(providerPath))
 				throw new ArgumentException("Path must be a registry value.", nameof(path));
 
 			return this.BeginOperation(token =>
@@ -549,52 +547,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public object GetContentWriterDynamicParameters(string path)
 			=> null;
 
-		private static bool IsRootPath(string providerPath)
-			=> string.IsNullOrWhiteSpace(providerPath) || providerPath == "\\";
-
-		private static bool IsHivePath(string providerPath)
-		{
-			if (string.IsNullOrWhiteSpace(providerPath))
-				return false;
-
-			var normalized = providerPath.TrimStart('\\');
-			string rootPart = normalized.Split('\\', 2)[0].TrimEnd(':');
-			if (RemoteRegistryClient.TryResolveRootKey(rootPart) == RegistryRootKey.Invalid)
-				return false;
-
-			return normalized.IndexOf('\\') < 0;
-		}
-
-		private static string CombineProviderPath(string basePath, string childName)
-		{
-			if (string.IsNullOrEmpty(basePath))
-				return childName;
-			if (string.IsNullOrEmpty(childName))
-				return basePath;
-			return $"{basePath}\\{childName}";
-		}
-
-		private static string NormalizeServerName(string root)
-		{
-			if (string.IsNullOrWhiteSpace(root))
-				throw new ArgumentException("Drive root must be a server name.", nameof(root));
-
-			var trimmed = root.Trim();
-			if (trimmed.StartsWith(@"\\", StringComparison.Ordinal))
-			{
-				if (UncPath.TryParse(trimmed, out var unc) && unc != null)
-				{
-					if (!string.IsNullOrEmpty(unc.ShareName))
-						throw new ArgumentException("Drive root must be a server name, not a UNC share.", nameof(root));
-					return unc.ServerName;
-				}
-
-				trimmed = trimmed.TrimStart('\\');
-			}
-
-			return trimmed.TrimEnd('\\');
-		}
-
 		private string ResolveProviderPath(string path, out TboRegDriveInfo driveInfo)
 		{
 			driveInfo = this.PSDriveInfo as TboRegDriveInfo
@@ -624,7 +576,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					providerPath = providerPath.Substring(prefix.Length);
 			}
 
-			if (!hasQualifier && !hasDrivePrefix && !IsRootedRegistryPath(providerPath))
+			if (!hasQualifier && !hasDrivePrefix && !RegistryHelpers.IsRootedRegistryPath(providerPath))
 			{
 				var current = driveInfo.CurrentLocation?.TrimStart('\\');
 				if (!string.IsNullOrEmpty(current))
@@ -638,22 +590,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						if (providerPath.StartsWith(".\\", StringComparison.Ordinal))
 							providerPath = providerPath.Substring(2);
 
-						providerPath = CombineProviderPath(current, providerPath);
+						providerPath = RegistryHelpers.CombineProviderPath(current, providerPath);
 					}
 				}
 			}
 
 			return providerPath;
-		}
-
-		private static bool IsRootedRegistryPath(string providerPath)
-		{
-			if (string.IsNullOrWhiteSpace(providerPath))
-				return false;
-
-			var normalized = providerPath.TrimStart('\\');
-			string rootPart = normalized.Split('\\', 2)[0].TrimEnd(':');
-			return RemoteRegistryClient.TryResolveRootKey(rootPart) != RegistryRootKey.Invalid;
 		}
 
 		private SmbProviderInfo GetSmbProviderInfo()

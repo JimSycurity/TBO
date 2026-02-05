@@ -4,11 +4,58 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using System.Threading;
+using Titanis;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Winterop;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
+	public readonly struct RegistryPathSpec
+	{
+		internal RegistryPathSpec(RegistryRootKey rootKey, string rootName, string? subkeyPath)
+		{
+			this.RootKey = rootKey;
+			this.RootName = rootName;
+			this.SubkeyPath = subkeyPath;
+		}
+
+		public RegistryRootKey RootKey { get; }
+		public string RootName { get; }
+		public string? SubkeyPath { get; }
+		public bool IsRoot => string.IsNullOrEmpty(this.SubkeyPath);
+		public string KeyPath => this.IsRoot ? this.RootName : $"{this.RootName}\\{this.SubkeyPath}";
+	}
+
+	internal static class RegistryPathParser
+	{
+		internal static RegistryPathSpec Parse(string path, string paramName)
+		{
+			if (string.IsNullOrWhiteSpace(path))
+				throw new ArgumentException("Registry path must be provided.", paramName);
+
+			var normalized = path.Trim().Replace('/', '\\');
+			if (normalized.StartsWith(@"\\", StringComparison.Ordinal))
+				throw new ArgumentException($"Registry path must start with a root key (for example HKLM), not a UNC path: {path}", paramName);
+
+			int sepIndex = normalized.IndexOf('\\');
+			string rootPart = sepIndex >= 0 ? normalized.Substring(0, sepIndex) : normalized;
+			string? subkeyPath = sepIndex >= 0 ? normalized.Substring(sepIndex + 1) : null;
+
+			rootPart = rootPart.TrimEnd(':');
+			if (string.IsNullOrWhiteSpace(rootPart))
+				throw new ArgumentException($"Registry path is missing a root key: {path}", paramName);
+
+			var rootKey = RemoteRegistryClient.TryResolveRootKey(rootPart);
+			if (rootKey == RegistryRootKey.Invalid)
+				throw new ArgumentException($"Unsupported registry root key '{rootPart}'.", paramName);
+
+			if (string.IsNullOrWhiteSpace(subkeyPath))
+				subkeyPath = null;
+
+			return new RegistryPathSpec(rootKey, RemoteRegistryClient.GetRootName(rootKey), subkeyPath);
+		}
+	}
+
 	internal static class RegistryHelpers
 	{
 		internal const RegistryKeyOptions BackupOptions = RegistryKeyOptions.BackupRestore;
@@ -19,6 +66,62 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static string DenormalizeValueName(string name)
 			=> string.Equals(name, DefaultValueName, StringComparison.OrdinalIgnoreCase) ? string.Empty : name;
+
+		internal static bool IsRootPath(string providerPath)
+			=> string.IsNullOrWhiteSpace(providerPath) || providerPath == "\\";
+
+		internal static bool IsHivePath(string providerPath)
+		{
+			if (string.IsNullOrWhiteSpace(providerPath))
+				return false;
+
+			var normalized = providerPath.TrimStart('\\');
+			string rootPart = normalized.Split('\\', 2)[0].TrimEnd(':');
+			if (RemoteRegistryClient.TryResolveRootKey(rootPart) == RegistryRootKey.Invalid)
+				return false;
+
+			return normalized.IndexOf('\\') < 0;
+		}
+
+		internal static string CombineProviderPath(string basePath, string childName)
+		{
+			if (string.IsNullOrEmpty(basePath))
+				return childName;
+			if (string.IsNullOrEmpty(childName))
+				return basePath;
+			return $"{basePath}\\{childName}";
+		}
+
+		internal static string NormalizeServerName(string root)
+		{
+			if (string.IsNullOrWhiteSpace(root))
+				throw new ArgumentException("Drive root must be a server name.", nameof(root));
+
+			var trimmed = root.Trim();
+			if (trimmed.StartsWith(@"\\", StringComparison.Ordinal))
+			{
+				if (UncPath.TryParse(trimmed, out var unc) && unc != null)
+				{
+					if (!string.IsNullOrEmpty(unc.ShareName))
+						throw new ArgumentException("Drive root must be a server name, not a UNC share.", nameof(root));
+					return unc.ServerName;
+				}
+
+				trimmed = trimmed.TrimStart('\\');
+			}
+
+			return trimmed.TrimEnd('\\');
+		}
+
+		internal static bool IsRootedRegistryPath(string providerPath)
+		{
+			if (string.IsNullOrWhiteSpace(providerPath))
+				return false;
+
+			var normalized = providerPath.TrimStart('\\');
+			string rootPart = normalized.Split('\\', 2)[0].TrimEnd(':');
+			return RemoteRegistryClient.TryResolveRootKey(rootPart) != RegistryRootKey.Invalid;
+		}
 
 		internal static IRegistryKey OpenRegistryKey(
 			IRegistryClient client,

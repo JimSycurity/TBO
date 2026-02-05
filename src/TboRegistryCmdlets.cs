@@ -7,52 +7,6 @@ using Titanis.Msrpc.Msrrp;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
-	public readonly struct RegistryPathSpec
-	{
-		internal RegistryPathSpec(RegistryRootKey rootKey, string rootName, string? subkeyPath)
-		{
-			this.RootKey = rootKey;
-			this.RootName = rootName;
-			this.SubkeyPath = subkeyPath;
-		}
-
-		public RegistryRootKey RootKey { get; }
-		public string RootName { get; }
-		public string? SubkeyPath { get; }
-		public bool IsRoot => string.IsNullOrEmpty(this.SubkeyPath);
-		public string KeyPath => this.IsRoot ? this.RootName : $"{this.RootName}\\{this.SubkeyPath}";
-	}
-
-	internal static class RegistryPathParser
-	{
-		internal static RegistryPathSpec Parse(string path, string paramName)
-		{
-			if (string.IsNullOrWhiteSpace(path))
-				throw new ArgumentException("Registry path must be provided.", paramName);
-
-			var normalized = path.Trim().Replace('/', '\\');
-			if (normalized.StartsWith(@"\\", StringComparison.Ordinal))
-				throw new ArgumentException($"Registry path must start with a root key (for example HKLM), not a UNC path: {path}", paramName);
-
-			int sepIndex = normalized.IndexOf('\\');
-			string rootPart = sepIndex >= 0 ? normalized.Substring(0, sepIndex) : normalized;
-			string? subkeyPath = sepIndex >= 0 ? normalized.Substring(sepIndex + 1) : null;
-
-			rootPart = rootPart.TrimEnd(':');
-			if (string.IsNullOrWhiteSpace(rootPart))
-				throw new ArgumentException($"Registry path is missing a root key: {path}", paramName);
-
-			var rootKey = RemoteRegistryClient.TryResolveRootKey(rootPart);
-			if (rootKey == RegistryRootKey.Invalid)
-				throw new ArgumentException($"Unsupported registry root key '{rootPart}'.", paramName);
-
-			if (string.IsNullOrWhiteSpace(subkeyPath))
-				subkeyPath = null;
-
-			return new RegistryPathSpec(rootKey, RemoteRegistryClient.GetRootName(rootKey), subkeyPath);
-		}
-	}
-
 	public sealed class TboRegistryKeyInfo
 	{
 		public TboRegistryKeyInfo(string serverName, string keyPath, RegistryKeyInfo info)
