@@ -25,12 +25,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return RegistryBootKeyReader.ExtractBootKey(lsaKey, lsaSpec.KeyPath, cancellationToken, null);
 		}
 
-		protected byte[]? ExtractLsaKey(
-			ISmbProviderInfo smb,
-			IRegistryClient client,
-			byte[] bootKey,
-			CancellationToken cancellationToken,
-			out string? lsaKeySource)
+	protected byte[]? ExtractLsaKey(
+		ISmbProviderInfo smb,
+		IRegistryClient client,
+		byte[] bootKey,
+		CancellationToken cancellationToken,
+		out string? lsaKeySource)
 		{
 			lsaKeySource = null;
 			byte[]? polEkList = null;
@@ -73,11 +73,41 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 			}
 
-			return null;
+		return null;
+	}
+
+	protected byte[]? ResolveLsaKey(
+		ISmbProviderInfo smb,
+		IRegistryClient client,
+		CancellationToken cancellationToken,
+		byte[]? lsaKeyBytes,
+		string? lsaKey,
+		string lsaKeyParamName,
+		out string? lsaKeySource)
+	{
+		lsaKeySource = null;
+		if (lsaKeyBytes != null && lsaKeyBytes.Length > 0)
+			return lsaKeyBytes;
+
+		if (!string.IsNullOrWhiteSpace(lsaKey))
+		{
+			try
+			{
+				return Titanis.BinaryHelper.ParseHexString(lsaKey.AsSpan());
+			}
+			catch (Exception ex)
+			{
+				var paramName = string.IsNullOrWhiteSpace(lsaKeyParamName) ? "LsaKey" : lsaKeyParamName;
+				throw new ArgumentException($"Invalid LSA key value: {ex.Message}", paramName, ex);
+			}
 		}
 
-		protected byte[]? TryReadPolicySecretValue(IRegistryClient client, string name, CancellationToken cancellationToken)
-		{
+		var bootKey = ExtractBootKey(client, cancellationToken);
+		return ExtractLsaKey(smb, client, bootKey, cancellationToken, out lsaKeySource);
+	}
+
+	protected byte[]? TryReadPolicySecretValue(IRegistryClient client, string name, CancellationToken cancellationToken)
+	{
 			var keyPath = CombineSubkeyPath(PolicyPath, name);
 			var spec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,

@@ -36,7 +36,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				var lsaKey = ResolveLsaKey(smb, session.Client, cancellationToken, out _);
+				var lsaKey = ResolveLsaKey(
+					smb,
+					session.Client,
+					cancellationToken,
+					this.LsaKeyBytes,
+					this.LsaKey,
+					nameof(this.LsaKey),
+					out _);
 				if (lsaKey == null || lsaKey.Length == 0)
 				{
 					this.LogWarning(smb, "Get-TBORegMachineAccount failed to derive the LSA key.");
@@ -94,30 +101,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private byte[]? ResolveLsaKey(
-			ISmbProviderInfo smb,
-			IRegistryClient client,
-			CancellationToken cancellationToken,
-			out string? lsaKeySource)
-		{
-			lsaKeySource = null;
-			if (this.LsaKeyBytes != null && this.LsaKeyBytes.Length > 0)
-				return this.LsaKeyBytes;
-
-			if (!string.IsNullOrWhiteSpace(this.LsaKey))
-			{
-				try
-				{
-					return Titanis.BinaryHelper.ParseHexString(this.LsaKey.AsSpan());
-				}
-				catch (Exception ex)
-				{
-					throw new ArgumentException($"Invalid LSA key value: {ex.Message}", nameof(this.LsaKey), ex);
-				}
-			}
-
-			var bootKey = ExtractBootKey(client, cancellationToken);
-			return ExtractLsaKey(smb, client, bootKey, cancellationToken, out lsaKeySource);
-		}
 	}
 }
