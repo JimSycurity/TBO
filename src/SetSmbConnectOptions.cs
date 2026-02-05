@@ -14,6 +14,41 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		protected abstract void ProcessRecord(ISmbProviderInfo smb);
+
+		protected void LogVerbose(ISmbProviderInfo smb, string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return;
+
+			this.WriteVerbose(message);
+			if (smb is SmbProviderInfo provider)
+				provider.LogVerbose(message);
+		}
+
+		protected void LogWarning(ISmbProviderInfo smb, string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return;
+
+			this.WriteWarning(message);
+			if (smb is SmbProviderInfo provider)
+				provider.LogWarning(message, emitToConsole: false);
+		}
+
+		protected void LogException(ISmbProviderInfo smb, string context, Exception ex, bool emitWarning = true)
+		{
+			if (string.IsNullOrWhiteSpace(context) || ex == null)
+				return;
+
+			smb.LogException(context, ex);
+			if (!emitWarning)
+				return;
+
+			var message = $"{context}: {ex.Message}";
+			this.WriteWarning(message);
+			if (smb is SmbProviderInfo provider)
+				provider.LogWarning(message, emitToConsole: false);
+		}
 	}
 
 	public abstract class SetTBOConnectOptionsBase : SmbCmdlet, IDynamicParameters
@@ -29,7 +64,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			if (string.IsNullOrEmpty(this.ServerName))
 			{
-				this.WriteVerbose(this.DefaultScopeMessage);
+				this.LogVerbose(smb, this.DefaultScopeMessage);
 				var baseParams = GetDefaultConnectParameters(smb);
 				smb.DefaultConnectParameters = this._parms.MergeOnto(baseParams);
 				return;

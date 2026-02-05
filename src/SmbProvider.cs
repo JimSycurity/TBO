@@ -961,21 +961,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(v))
 				return;
 
-			try
-			{
-				System.Diagnostics.Trace.TraceWarning(v);
-			}
-			catch
-			{
-			}
-
-			try
-			{
-				Console.Error.WriteLine($"WARNING: {v}");
-			}
-			catch
-			{
-			}
+			this.LogWarning(v);
 		}
 
 		private static bool CheckMatchingTicket(ServicePrincipalName targetSpn, TicketInfo ticket, ref string? userName, ref string? userRealm)

@@ -26,7 +26,56 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
+		internal void LogVerbose(string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return;
+
+			try
+			{
+				this._log?.WriteVerbose(message);
+			}
+			catch
+			{
+			}
+
+			try
+			{
+				System.Diagnostics.Trace.TraceInformation(message);
+			}
+			catch
+			{
+			}
+		}
+
+		internal void LogInfo(string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return;
+
+			try
+			{
+				this._log?.WriteInfo(message);
+			}
+			catch
+			{
+			}
+
+			try
+			{
+				System.Diagnostics.Trace.TraceInformation(message);
+			}
+			catch
+			{
+			}
+		}
+
 		internal void LogWarning(string message)
+		{
+			LogWarning(message, emitToConsole: true);
+		}
+
+		internal void LogWarning(string message, bool emitToConsole)
 		{
 			if (string.IsNullOrWhiteSpace(message))
 				return;
@@ -38,6 +87,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			catch
 			{
 			}
+
+			if (!emitToConsole)
+				return;
 
 			try
 			{
