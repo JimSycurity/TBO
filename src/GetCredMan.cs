@@ -74,6 +74,50 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string? FailureReason { get; init; }
 	}
 
+	internal static class CredManHelpers
+	{
+		internal static string NormalizeServerName(string? serverName)
+			=> DpapiHelpers.NormalizeServerName(serverName);
+
+		internal static string NormalizeShareName(string? shareName)
+			=> DpapiHelpers.NormalizeShareName(shareName);
+
+		internal static IReadOnlyList<WildcardPattern> BuildUserFilters(string[]? filters)
+		{
+			if (filters == null || filters.Length == 0)
+				return Array.Empty<WildcardPattern>();
+
+			var patterns = new List<WildcardPattern>();
+			foreach (var filter in filters)
+			{
+				if (string.IsNullOrWhiteSpace(filter))
+					continue;
+				patterns.Add(new WildcardPattern(filter, WildcardOptions.IgnoreCase));
+			}
+
+			return patterns;
+		}
+
+		internal static int? FindDpapiOffset(ReadOnlySpan<byte> buffer)
+		{
+			var offset = DpapiHelpers.FindMagicOffset(buffer);
+			return offset >= 0 ? offset : null;
+		}
+
+		internal static bool IsMissingPath(NtstatusException ex)
+		{
+			return ex.StatusCode is Ntstatus.STATUS_OBJECT_NAME_NOT_FOUND
+				or Ntstatus.STATUS_OBJECT_PATH_NOT_FOUND
+				or Ntstatus.STATUS_OBJECT_NAME_INVALID;
+		}
+
+		internal static bool IsAccessDenied(NtstatusException ex)
+		{
+			return ex.StatusCode is Ntstatus.STATUS_ACCESS_DENIED
+				or Ntstatus.STATUS_PRIVILEGE_NOT_HELD;
+		}
+	}
+
 	[Cmdlet(VerbsCommon.Get, "TBOCredManFiles")]
 	[OutputType(typeof(TboCredManFileInfo))]
 	public sealed class GetTBOCredManFiles : SmbCmdlet
@@ -100,15 +144,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this._cancelSource ??= new CancellationTokenSource();
 			var cancellationToken = this._cancelSource.Token;
 
-			var serverName = NormalizeServerName(this.ServerName);
+			var serverName = CredManHelpers.NormalizeServerName(this.ServerName);
 			if (string.IsNullOrWhiteSpace(serverName))
 				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
 
-			var shareName = NormalizeShareName(this.ShareName);
+			var shareName = CredManHelpers.NormalizeShareName(this.ShareName);
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
-			var userFilters = BuildUserFilters(this.UserName);
+			var userFilters = CredManHelpers.BuildUserFilters(this.UserName);
 
 			var results = CredManLocator.Enumerate(
 				smb,
@@ -117,8 +161,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				this.Scope,
 				userFilters,
 				this.IncludeSystemProfiles,
-				message => this.WriteWarning(message),
-				message => this.WriteVerbose(message),
+				message => this.LogWarning(smb, message),
+				message => this.LogVerbose(smb, message),
+				(context, ex) => this.LogException(smb, context, ex, emitWarning: false),
 				cancellationToken);
 
 			foreach (var entry in results)
@@ -131,39 +176,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			this._cancelSource?.Cancel();
 			base.StopProcessing();
-		}
-
-		private static string NormalizeServerName(string? serverName)
-		{
-			return string.IsNullOrWhiteSpace(serverName)
-				? string.Empty
-				: serverName.TrimStart('\\');
-		}
-
-		private static string NormalizeShareName(string? shareName)
-		{
-			if (string.IsNullOrWhiteSpace(shareName))
-				return string.Empty;
-
-			var trimmed = shareName.Trim();
-			trimmed = trimmed.Trim('\\');
-			return trimmed;
-		}
-
-		private static IReadOnlyList<WildcardPattern> BuildUserFilters(string[]? filters)
-		{
-			if (filters == null || filters.Length == 0)
-				return Array.Empty<WildcardPattern>();
-
-			var patterns = new List<WildcardPattern>();
-			foreach (var filter in filters)
-			{
-				if (string.IsNullOrWhiteSpace(filter))
-					continue;
-				patterns.Add(new WildcardPattern(filter, WildcardOptions.IgnoreCase));
-			}
-
-			return patterns;
 		}
 	}
 
@@ -181,11 +193,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private const string TaskSchedulerMarker = "Domain:batch=TaskScheduler:Task:";
 
-		private static readonly byte[] DpapiMagic = new byte[]
-		{
-			0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF, 0x01, 0x15,
-			0xD1, 0x11, 0x8C, 0x7A, 0x00, 0xC0, 0x4F, 0xC2, 0x97, 0xEB
-		};
 		private static readonly byte[] TaskSchedulerMarkerBytes = System.Text.Encoding.Unicode.GetBytes(TaskSchedulerMarker);
 
 		[Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true, ParameterSetName = PathParameterSet)]
@@ -222,7 +229,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			var input = this.InputObject;
-			var serverName = input?.ServerName ?? NormalizeServerName(this.ServerName);
+			var serverName = input?.ServerName ?? CredManHelpers.NormalizeServerName(this.ServerName);
 			if (string.IsNullOrWhiteSpace(serverName))
 				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
 
@@ -240,11 +247,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var fileSystem = SmbFileSystemResolver.Resolve(smb);
 			var masterKey = ResolveMasterKey();
-			var masterKeySet = ResolveMasterKeySet();
+			var masterKeySet = ResolveMasterKeySet(smb);
 			if ((this.MasterKeyBytes != null || !string.IsNullOrWhiteSpace(this.MasterKey)) && (masterKey == null || masterKey.Length == 0))
 				throw new ArgumentException("MasterKey must be provided (hex) or MasterKeyBytes must be set.", nameof(this.MasterKey));
 			if (this.MasterKeys != null && this.MasterKeys.Length > 0 && masterKeySet.Count == 0)
-				this.WriteWarning("Get-TBOCredManEntry did not receive any usable master keys (missing MasterKeyGuid or MasterKey).");
+				this.LogWarning(smb, "Get-TBOCredManEntry did not receive any usable master keys (missing MasterKeyGuid or MasterKey).");
 			var entropy = ResolveEntropy();
 			ReadCredManFile(smb, fileSystem, uncPath, input, masterKey, masterKeySet, entropy);
 		}
@@ -276,26 +283,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				using var stream = file.OpenRead();
 				bytesRead = ReadPrefix(stream, buffer);
 			}
-			catch (NtstatusException ex) when (IsMissingPath(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsMissingPath(ex))
 			{
-				this.WriteWarning($"Get-TBOCredManEntry could not open {path}: {ex.StatusCode}.");
+				this.LogWarning(smb, $"Get-TBOCredManEntry could not open {path}: {ex.StatusCode}.");
 				return;
 			}
-			catch (NtstatusException ex) when (IsAccessDenied(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsAccessDenied(ex))
 			{
-				this.WriteWarning($"Get-TBOCredManEntry was denied access to {path}: {ex.StatusCode}.");
+				this.LogWarning(smb, $"Get-TBOCredManEntry was denied access to {path}: {ex.StatusCode}.");
 				return;
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBOCredManEntry failed to read {path}", ex);
+				this.LogException(smb, $"Get-TBOCredManEntry failed to read {path}", ex, emitWarning: false);
 				throw;
 			}
 
-			int? offset = FindDpapiOffset(buffer.AsSpan(0, bytesRead));
+			int? offset = CredManHelpers.FindDpapiOffset(buffer.AsSpan(0, bytesRead));
 			var decryptResult = TryDecryptBlob(buffer.AsSpan(0, bytesRead), offset, masterKey, masterKeySet, entropy);
 			var cleartextBytes = decryptResult.Cleartext;
+			if (cleartextBytes == null && !string.IsNullOrWhiteSpace(decryptResult.FailureReason))
+			{
+				this.LogVerbose(smb, $"Get-TBOCredManEntry did not decrypt DPAPI blob for {path}: {decryptResult.FailureReason}");
+			}
 			var cleartextText = cleartextBytes != null ? TryDecodeCleartext(cleartextBytes) : null;
+			if (cleartextBytes != null && cleartextText == null)
+			{
+				this.LogVerbose(smb, $"Get-TBOCredManEntry could not decode cleartext from DPAPI payload for {path} (length {cleartextBytes.Length}).");
+			}
 			if (cleartextText == null)
 			{
 				cleartextText = TryDecodeVaultCredentialFile(
@@ -306,7 +321,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					this.MaxBytes,
 					masterKey,
 					masterKeySet,
-					entropy);
+					entropy,
+					message => this.LogVerbose(smb, message));
 			}
 			this.WriteObject(new TboCredManEntryInfo
 			{
@@ -356,15 +372,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return totalRead;
-		}
-
-		private static int? FindDpapiOffset(ReadOnlySpan<byte> buffer)
-		{
-			if (buffer.Length < DpapiMagic.Length)
-				return null;
-
-			var offset = buffer.IndexOf(DpapiMagic);
-			return offset >= 0 ? offset : null;
 		}
 
 		private static CredManDecryptResult TryDecryptBlob(
@@ -488,26 +495,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			throw new ArgumentException($"Resolved provider path is not a UNC path: {providerPath}", paramName);
 		}
 
-		private static string NormalizeServerName(string? serverName)
-		{
-			return string.IsNullOrWhiteSpace(serverName)
-				? string.Empty
-				: serverName.TrimStart('\\');
-		}
-
-		private static bool IsMissingPath(NtstatusException ex)
-		{
-			return ex.StatusCode is Ntstatus.STATUS_OBJECT_NAME_NOT_FOUND
-				or Ntstatus.STATUS_OBJECT_PATH_NOT_FOUND
-				or Ntstatus.STATUS_OBJECT_NAME_INVALID;
-		}
-
-		private static bool IsAccessDenied(NtstatusException ex)
-		{
-			return ex.StatusCode is Ntstatus.STATUS_ACCESS_DENIED
-				or Ntstatus.STATUS_PRIVILEGE_NOT_HELD;
-		}
-
 		private static string ResolveCryptAlgorithmName(uint algoId, uint algoLen)
 		{
 			return algoId switch
@@ -561,7 +548,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		private IReadOnlyDictionary<Guid, byte[]> ResolveMasterKeySet()
+		private IReadOnlyDictionary<Guid, byte[]> ResolveMasterKeySet(ISmbProviderInfo smb)
 		{
 			if (this.MasterKeys == null || this.MasterKeys.Length == 0)
 				return new Dictionary<Guid, byte[]>();
@@ -583,7 +570,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (Exception ex)
 				{
-					this.WriteWarning($"Get-TBOCredManEntry failed to parse master key {entry.MasterKeyGuid}: {ex.Message}");
+					this.LogWarning(smb, $"Get-TBOCredManEntry failed to parse master key {entry.MasterKeyGuid}: {ex.Message}");
 					continue;
 				}
 
@@ -652,8 +639,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			int maxBytes,
 			byte[]? masterKey,
 			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
-			byte[]? entropy)
+			byte[]? entropy,
+			Action<string>? logVerbose)
 		{
+			logVerbose ??= _ => { };
+
 			var fileName = path.GetFileName();
 			if (string.IsNullOrWhiteSpace(fileName))
 				return null;
@@ -667,23 +657,45 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return null;
 
 			var policyPath = path.GetDirectoryPath().Append("Policy.vpol");
-			if (!TryReadFileBytes(fileSystem, policyPath, maxBytes, out var policyBytes, out var policyLength))
+			if (!TryReadFileBytes(fileSystem, policyPath, maxBytes, out var policyBytes, out var policyLength, out var policyFailure))
+			{
+				if (!string.IsNullOrWhiteSpace(policyFailure))
+					logVerbose($"Get-TBOCredManEntry could not read vault policy file {policyPath}: {policyFailure}.");
 				return null;
+			}
 
 			var policySpan = policyBytes.AsSpan(0, policyLength);
-			var policyOffset = FindDpapiOffset(policySpan);
+			var policyOffset = CredManHelpers.FindDpapiOffset(policySpan);
 			var policyDecrypt = TryDecryptBlob(policySpan, policyOffset, masterKey, masterKeySet, entropy);
 			if (policyDecrypt.Cleartext == null || policyDecrypt.Cleartext.Length == 0)
+			{
+				var reason = string.IsNullOrWhiteSpace(policyDecrypt.FailureReason)
+					? "no cleartext returned"
+					: policyDecrypt.FailureReason;
+				logVerbose($"Get-TBOCredManEntry could not decrypt vault policy {policyPath}: {reason}.");
 				return null;
+			}
 
 			if (!TryParseVaultPolicyKeys(policyDecrypt.Cleartext, out var aes128Key, out var aes256Key))
+			{
+				logVerbose($"Get-TBOCredManEntry could not parse vault policy keys from {policyPath}.");
 				return null;
+			}
 
 			aes128Key ??= Array.Empty<byte>();
 			if (aes256Key == null || aes256Key.Length == 0)
+			{
+				logVerbose($"Get-TBOCredManEntry did not find a Vault AES-256 key in {policyPath}.");
 				return null;
+			}
 
-			return TryParseVaultCredential(fileBytes, aes128Key, aes256Key, out var text) ? text : null;
+			if (!TryParseVaultCredential(fileBytes, aes128Key, aes256Key, out var text))
+			{
+				logVerbose($"Get-TBOCredManEntry could not parse vault credential data in {path}.");
+				return null;
+			}
+
+			return text;
 		}
 
 		private static bool TryReadFileBytes(
@@ -691,10 +703,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			UncPath path,
 			int maxBytes,
 			out byte[] buffer,
-			out int bytesRead)
+			out int bytesRead,
+			out string? failureReason)
 		{
 			buffer = Array.Empty<byte>();
 			bytesRead = 0;
+			failureReason = null;
 
 			try
 			{
@@ -709,16 +723,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				bytesRead = ReadPrefix(stream, buffer);
 				return true;
 			}
-			catch (NtstatusException ex) when (IsMissingPath(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsMissingPath(ex))
 			{
+				failureReason = ex.StatusCode.ToString();
 				return false;
 			}
-			catch (NtstatusException ex) when (IsAccessDenied(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsAccessDenied(ex))
 			{
+				failureReason = ex.StatusCode.ToString();
 				return false;
 			}
-			catch
+			catch (Exception ex)
 			{
+				failureReason = ex.Message;
 				return false;
 			}
 		}
@@ -1744,18 +1761,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			bool includeSystemProfiles,
 			Action<string>? writeWarning,
 			Action<string>? writeVerbose,
+			Action<string, Exception>? logException,
 			CancellationToken cancellationToken)
 		{
 			writeWarning ??= _ => { };
 			writeVerbose ??= _ => { };
+			logException ??= (context, ex) => smb.LogException(context, ex);
 
 			var results = new List<TboCredManFileInfo>();
 
 			if (scope.HasFlag(CredManScope.User))
-				EnumerateUserProfiles(smb, serverName, shareName, userFilters, results, writeWarning, writeVerbose, cancellationToken);
+				EnumerateUserProfiles(smb, serverName, shareName, userFilters, results, writeWarning, writeVerbose, logException, cancellationToken);
 
 			if (scope.HasFlag(CredManScope.Machine) && includeSystemProfiles)
-				EnumerateMachineProfiles(smb, serverName, shareName, results, writeWarning, writeVerbose, cancellationToken);
+				EnumerateMachineProfiles(smb, serverName, shareName, results, writeWarning, writeVerbose, logException, cancellationToken);
 
 			return results;
 		}
@@ -1768,6 +1787,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			List<TboCredManFileInfo> results,
 			Action<string> writeWarning,
 			Action<string> writeVerbose,
+			Action<string, Exception> logException,
 			CancellationToken cancellationToken)
 		{
 			var usersRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users");
@@ -1803,20 +1823,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						results,
 						writeWarning,
 						writeVerbose,
+						logException,
 						cancellationToken);
 				}
 			}
-			catch (NtstatusException ex) when (IsMissingPath(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsMissingPath(ex))
 			{
 				writeVerbose($"Get-TBOCredManFiles could not open {usersRoot}: {ex.StatusCode}.");
 			}
-			catch (NtstatusException ex) when (IsAccessDenied(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsAccessDenied(ex))
 			{
 				writeWarning($"Get-TBOCredManFiles was denied access to {usersRoot}: {ex.StatusCode}.");
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBOCredManFiles failed to enumerate {usersRoot}", ex);
+				logException($"Get-TBOCredManFiles failed to enumerate {usersRoot}", ex);
 				throw;
 			}
 			finally
@@ -1833,6 +1854,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			List<TboCredManFileInfo> results,
 			Action<string> writeWarning,
 			Action<string> writeVerbose,
+			Action<string, Exception> logException,
 			CancellationToken cancellationToken)
 		{
 			foreach (var profile in MachineProfiles)
@@ -1849,6 +1871,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					results,
 					writeWarning,
 					writeVerbose,
+					logException,
 					cancellationToken);
 			}
 		}
@@ -1863,6 +1886,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			List<TboCredManFileInfo> results,
 			Action<string> writeWarning,
 			Action<string> writeVerbose,
+			Action<string, Exception> logException,
 			CancellationToken cancellationToken)
 		{
 			foreach (var relative in UserCredentialRoots)
@@ -1878,6 +1902,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					results,
 					writeWarning,
 					writeVerbose,
+					logException,
 					cancellationToken);
 			}
 
@@ -1894,6 +1919,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					results,
 					writeWarning,
 					writeVerbose,
+					logException,
 					cancellationToken);
 			}
 		}
@@ -1908,6 +1934,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			List<TboCredManFileInfo> results,
 			Action<string> writeWarning,
 			Action<string> writeVerbose,
+			Action<string, Exception> logException,
 			CancellationToken cancellationToken)
 		{
 			EnumerateFiles(
@@ -1932,6 +1959,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}),
 				writeWarning,
 				writeVerbose,
+				logException,
 				cancellationToken);
 		}
 
@@ -1945,6 +1973,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			List<TboCredManFileInfo> results,
 			Action<string> writeWarning,
 			Action<string> writeVerbose,
+			Action<string, Exception> logException,
 			CancellationToken cancellationToken)
 		{
 			var fileSystem = ResolveFileSystem(smb);
@@ -1988,20 +2017,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						}),
 						writeWarning,
 						writeVerbose,
+						logException,
 						cancellationToken);
 				}
 			}
-			catch (NtstatusException ex) when (IsMissingPath(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsMissingPath(ex))
 			{
 				writeVerbose($"Get-TBOCredManFiles could not open {vaultRoot}: {ex.StatusCode}.");
 			}
-			catch (NtstatusException ex) when (IsAccessDenied(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsAccessDenied(ex))
 			{
 				writeWarning($"Get-TBOCredManFiles was denied access to {vaultRoot}: {ex.StatusCode}.");
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBOCredManFiles failed to enumerate {vaultRoot}", ex);
+				logException($"Get-TBOCredManFiles failed to enumerate {vaultRoot}", ex);
 				throw;
 			}
 			finally
@@ -2017,6 +2047,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			Action<Smb2DirEntry> handleFile,
 			Action<string> writeWarning,
 			Action<string> writeVerbose,
+			Action<string, Exception> logException,
 			CancellationToken cancellationToken)
 		{
 			var fileSystem = ResolveFileSystem(smb);
@@ -2038,17 +2069,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					handleFile(entry);
 				}
 			}
-			catch (NtstatusException ex) when (IsMissingPath(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsMissingPath(ex))
 			{
 				writeVerbose($"Get-TBOCredManFiles could not open {directoryPath}: {ex.StatusCode}.");
 			}
-			catch (NtstatusException ex) when (IsAccessDenied(ex))
+			catch (NtstatusException ex) when (CredManHelpers.IsAccessDenied(ex))
 			{
 				writeWarning($"Get-TBOCredManFiles was denied access to {directoryPath}: {ex.StatusCode}.");
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBOCredManFiles failed to enumerate {directoryPath}", ex);
+				logException($"Get-TBOCredManFiles failed to enumerate {directoryPath}", ex);
 				throw;
 			}
 			finally
@@ -2113,17 +2144,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return false;
 		}
 
-		private static bool IsMissingPath(NtstatusException ex)
-		{
-			return ex.StatusCode is Ntstatus.STATUS_OBJECT_NAME_NOT_FOUND
-				or Ntstatus.STATUS_OBJECT_PATH_NOT_FOUND
-				or Ntstatus.STATUS_OBJECT_NAME_INVALID;
-		}
-
-		private static bool IsAccessDenied(NtstatusException ex)
-		{
-			return ex.StatusCode is Ntstatus.STATUS_ACCESS_DENIED
-				or Ntstatus.STATUS_PRIVILEGE_NOT_HELD;
-		}
 	}
 }
