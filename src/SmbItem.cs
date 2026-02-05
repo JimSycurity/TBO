@@ -1,0 +1,82 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Winterop = Titanis.Winterop;
+using Titanis.Smb2;
+
+namespace Titanis.Tbo.Smb2.PowerShell
+{
+	public class SmbItem
+	{
+		private UncPath itemPath;
+		private Smb2DirEntry entry;
+		private readonly Winterop.ReparseTag? reparseTagOverride;
+		private readonly string? linkTargetOverride;
+
+		public SmbItem(UncPath itemPath, Smb2DirEntry entry, Winterop.ReparseTag? reparseTagOverride = null, string? linkTargetOverride = null)
+		{
+			this.itemPath = itemPath;
+			this.entry = entry;
+			this.reparseTagOverride = reparseTagOverride;
+			this.linkTargetOverride = linkTargetOverride;
+		}
+
+		public string? Name => this.entry.FileName;
+		public DateTime CreationTime => this.entry.CreationTime;
+		public DateTime LastAccessTime => this.entry.LastAccessTime;
+		public DateTime LastWriteTime => this.entry.LastWriteTime;
+		public DateTime LastChangeTime => this.entry.LastChangeTime;
+		public ulong Size => this.entry.Size;
+		public string SizeText => Titanis.Cli.FileSizeFormatter.FormatValue(this.entry.Size, "H2");
+		public ulong SizeOnDisk => this.entry.SizeOnDisk;
+		public Winterop.FileAttributes FileAttributes => this.entry.FileAttributes;
+		public bool IsDirectory => (0 != (this.FileAttributes & Winterop.FileAttributes.Directory));
+		public bool IsReparsePoint => (0 != (this.FileAttributes & Winterop.FileAttributes.ReparsePoint));
+
+		public string FileAttributesText => FileAttributeFormatter.FormatValue(this.FileAttributes);
+		public string? ShortName => this.entry.ShortName;
+		public ulong FileId => this.entry.FileId;
+		public Winterop.ReparseTag ReparseTag => this.reparseTagOverride ?? this.entry.ReparseTag;
+		public string? LinkTarget => this.linkTargetOverride ?? this.entry.LinkTarget;
+
+		public string ItemClass
+		{
+			get
+			{
+				if (this.IsDirectory)
+				{
+					if (this.IsReparsePoint)
+					{
+						if (this.ReparseTag == Winterop.ReparseTag.SymbolicLink)
+						{
+							return SmbItemClasses.SymlinkDir;
+						}
+						else if (this.ReparseTag == Winterop.ReparseTag.MountPoint)
+						{
+							if (this.LinkTarget?.StartsWith(@"\??\Volume") ?? false)
+								return SmbItemClasses.MountPoint;
+							else
+								return SmbItemClasses.Junction;
+						}
+					}
+
+					return SmbItemClasses.Directory;
+				}
+				else
+				{
+					if (this.IsReparsePoint)
+					{
+						if (this.ReparseTag == Winterop.ReparseTag.SymbolicLink)
+						{
+							return SmbItemClasses.Symlink;
+						}
+					}
+				}
+
+				return SmbItemClasses.File;
+			}
+		}
+	}
+}

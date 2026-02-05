@@ -1,0 +1,84 @@
+TOPIC
+    about_TBO_Reg_Provider
+
+SHORT DESCRIPTION
+    Describes the TBO.Reg PowerShell provider for remote registry access.
+
+LONG DESCRIPTION
+    The TBO.Reg provider exposes the remote Windows registry as a PowerShell
+    drive. The drive root is the server name, and the top-level items are
+    registry hives (HKLM, HKCU, HKU, etc). Keys enumerate subkeys by default.
+    Use -IncludeProperties to include per-subkey value names (Property column).
+    Use -IncludeValues or -IncludeData to include values. The default value is
+    shown as (Default).
+
+    The provider uses the winreg named pipe over IPC$ and opens keys using
+    backup/restore semantics. Use Set-TBOConnectOptions or New-PSDrive
+    dynamic parameters to supply credentials.
+
+PROVIDER FEATURES
+    - Navigation: Get-ChildItem, Set-Location, and key enumeration.
+    - Values: Get-ChildItem lists subkeys by default. Use -IncludeProperties to
+      include per-subkey value names, -IncludeValues to include value metadata,
+      and -IncludeData to retrieve value data.
+    - Content: Get-Content reads a registry value's data (typed value when
+      available, or byte[] for binary types).
+    - Write: New-Item/Remove-Item manage keys, Set-ItemProperty and
+      Remove-ItemProperty manage values.
+
+LIMITATIONS
+    - Set-Content is not supported. Use Set-ItemProperty.
+    - New-ItemProperty, Rename-ItemProperty, Copy-ItemProperty, and
+      Move-ItemProperty are not supported.
+
+DYNAMIC PARAMETERS
+    New-PSDrive and Set-TBOConnectOptions accept dynamic SMB options:
+      - HostName, RemotePort, NameResolveOptions
+      - Dialects, Capabilities, SecurityMode, RequireSecureNegotiate
+      - ClientGuid, PreauthSaltLength, Ciphers, SigningAlgorithms
+      - CompressionCapabilities, CompressionAlgorithms
+      - UserName, UserDomain, Password, NtlmHash, Workstation
+      - AesKey, DesKey
+      - Tgt, Tickets, TicketCache
+      - Kdc, KdcPort
+
+    These parameters set or override defaults for the target server.
+    NtlmHash accepts NT (32 hex), LM:NT, or combined 64-hex strings.
+    TicketCache honors KRB5CCNAME by default.
+
+EXAMPLES
+    Example 1: Create a registry drive and list hives
+        Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
+            -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
+            -Password 'YourSecurePassword'
+        New-PSDrive -Name tbo-reg -PSProvider 'TBO.Reg' -Root corp1-web01.corp1.lab.home-labs.lol
+        Get-ChildItem tbo-reg:\
+
+    Example 1b: Use an NTLM hash
+        Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
+            -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol `
+            -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
+
+    Example 1c: Use a ticket cache
+        Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol `
+            -TicketCache C:\temp\krb5cc
+
+    Example 2: Enumerate keys and values
+        Set-Location tbo-reg:\HKLM\SOFTWARE
+        Get-ChildItem
+        Get-ChildItem -IncludeProperties
+        Get-ChildItem -IncludeValues
+        Get-ChildItem -IncludeData
+
+    Example 3: Read a registry value with Get-Content
+        Get-Content tbo-reg:\HKLM\SOFTWARE\TBO\Flags
+
+    Example 4: Create, set, and remove values
+        New-Item -Path tbo-reg:\HKLM\SOFTWARE\TBO
+        Set-ItemProperty -Path tbo-reg:\HKLM\SOFTWARE\TBO -Name InstallId -Value "abc123"
+        Set-ItemProperty -Path tbo-reg:\HKLM\SOFTWARE\TBO -Name Flags -Type DwordLE -Value 1
+        Remove-ItemProperty -Path tbo-reg:\HKLM\SOFTWARE\TBO -Name Flags
+        Remove-Item -Path tbo-reg:\HKLM\SOFTWARE\TBO -Recurse
+
+NOTES
+    - Use TITANIS_TBO_LOG=1 to enable diagnostic logging.

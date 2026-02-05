@@ -1,0 +1,89 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Titanis.TBO.Smb2.PowerShell</AssemblyName>
+    <RootNamespace>Titanis.Tbo.Smb2.PowerShell</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="..\Format.ps1xml" />
+    <None Remove="..\Titanis.TBO.Smb2.psd1" />
+    <None Remove="..\Titanis.TBO.Smb2.psm1" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TitanisRepoRoot)' != '' ">
+    <Compile Include="$(TitanisRepoRoot)\tools\net\smb2\Smb2Client\FileAttributeFormatter.cs" Link="FileAttributeFormatter.cs" />
+    <Compile Include="$(TitanisRepoRoot)\tools\net\smb2\Smb2Client\StringHelper.cs" Link="StringHelper.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\Format.ps1xml">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="README.md">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\en-US\about_TBO_Smb2_Provider.help.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Titanis.TBO.Smb2.PowerShell.dll-Help.xml">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\Titanis.TBO.Smb2.psd1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\Titanis.TBO.Smb2.psm1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="PowerShellStandard.Library" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TitanisRepoRoot)' != '' ">
+    <ProjectReference Include="$(TitanisRepoRoot)\src\base\Titanis.Cli\Titanis.Cli.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\base\Titanis.Winterop.FileInfo\Titanis.Winterop.FileInfo.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\base\Titanis.Winterop.Sam\Titanis.Winterop.Sam.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\net\Titanis.DceRpc\Titanis.DceRpc.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Mslsar\Titanis.Msrpc.Mslsar.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Msrrp\Titanis.Msrpc.Msrrp.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Msscmr.Core\Titanis.Msrpc.Msscmr.Core.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Mssrvs\Titanis.Msrpc.Mssrvs.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\net\Titanis.Smb2\Titanis.Smb2.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\security\Titanis.Security.Kerberos\Titanis.Security.Kerberos.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\security\Titanis.Security.Ntlm\Titanis.Security.Ntlm.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\security\Titanis.Security.Spnego\Titanis.Security.Spnego.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\security\Titanis.Security\Titanis.Security.csproj" />
+  </ItemGroup>
+
+  <Target Name="EnsureTitanisRepoRoot" BeforeTargets="Build" Condition="'$(TitanisRepoRoot)' == ''">
+    <Error Text="TitanisRepoRoot is not set. Set TITANIS_REPO or TitanisRepoRoot to the Titanis repo path for development builds." />
+  </Target>
+
+  <PropertyGroup>
+    <BinPublishDir>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', 'bin', '$(Configuration)', '$(TargetFramework)', 'publish'))</BinPublishDir>
+  </PropertyGroup>
+
+  <!-- PSPublishModule expects publish output under bin\Configuration\TargetFramework\publish. -->
+  <Target Name="CopyPublishOutputToBin" AfterTargets="Publish">
+    <PropertyGroup>
+      <ResolvedPublishDir Condition="'$(PublishDir)' != ''">$([System.IO.Path]::GetFullPath('$(PublishDir)'))</ResolvedPublishDir>
+      <ResolvedBinPublishDir>$([System.IO.Path]::GetFullPath('$(BinPublishDir)'))</ResolvedBinPublishDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <PublishOutputFiles Condition="'$(ResolvedPublishDir)' != '' and '$(ResolvedPublishDir)' != '$(ResolvedBinPublishDir)'"
+                          Include="$(PublishDir)**\*" />
+    </ItemGroup>
+    <MakeDir Condition="'$(ResolvedPublishDir)' != '' and '$(ResolvedPublishDir)' != '$(ResolvedBinPublishDir)'"
+             Directories="$(BinPublishDir)" />
+    <Copy Condition="'$(ResolvedPublishDir)' != '' and '$(ResolvedPublishDir)' != '$(ResolvedBinPublishDir)'"
+          SourceFiles="@(PublishOutputFiles)"
+          DestinationFiles="@(PublishOutputFiles->'$(BinPublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

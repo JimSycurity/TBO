@@ -1,0 +1,476 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Globalization;
+using System.Linq;
+using System.Management.Automation;
+using System.Security.AccessControl;
+using System.Text;
+using System.Threading;
+using Titanis.Msrpc.Msrrp;
+using Titanis.Winterop;
+
+namespace Titanis.Tbo.Smb2.PowerShell
+{
+	public sealed class TboRegServiceInfo
+	{
+		public TboRegServiceInfo(
+			string serverName,
+			string keyName,
+			string keyPath,
+			string? imagePath,
+			string? objectName,
+			int? start,
+			int? type,
+			int? errorControl,
+			string? displayName,
+			object? securityDescriptor,
+			byte[]? securityDescriptorBytes)
+		{
+			this.ServerName = serverName;
+			this.KeyName = keyName;
+			this.KeyPath = keyPath;
+			this.ImagePath = imagePath;
+			this.ObjectName = objectName;
+			this.Start = start;
+			this.Type = type;
+			this.ErrorControl = errorControl;
+			this.DisplayName = displayName;
+			this.SecurityDescriptor = securityDescriptor;
+			this.SecurityDescriptorBytes = securityDescriptorBytes;
+		}
+
+		public string ServerName { get; }
+		public string KeyName { get; }
+		public string KeyPath { get; }
+		public string? ImagePath { get; }
+		public string? ObjectName { get; }
+		public int? Start { get; }
+		public int? Type { get; }
+		public int? ErrorControl { get; }
+		public string? DisplayName { get; }
+		public object? SecurityDescriptor { get; }
+		public byte[]? SecurityDescriptorBytes { get; }
+	}
+
+	[Cmdlet(VerbsCommon.Get, "TBORegServices")]
+	[OutputType(typeof(TboRegServiceInfo))]
+	public sealed class GetTBORegServices : TboRegCmdlet
+	{
+		private const string DefaultServicesPath = @"HKLM\SYSTEM\CurrentControlSet\Services";
+		private const string SecuritySubkeyName = "Security";
+		private const string SecurityValueName = "Security";
+
+		[Parameter(Position = 1)]
+		public string Path { get; set; } = DefaultServicesPath;
+
+		[Parameter(Position = 2)]
+		[Alias("ServiceName")]
+		public string[]? Name { get; set; }
+
+		[Parameter]
+		public SwitchParameter AsSddl { get; set; }
+
+		[Parameter]
+		public SwitchParameter AsWindows { get; set; }
+
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		{
+			if (this.AsSddl.IsPresent && this.AsWindows.IsPresent)
+				throw new ArgumentException("Only one of -AsSddl or -AsWindows can be specified.");
+
+			var basePath = string.IsNullOrWhiteSpace(this.Path) ? DefaultServicesPath : this.Path;
+			var parsedPath = ParseRegistryPath(basePath, nameof(this.Path));
+
+			var requestedNames = FilterNames(this.Name);
+			if (requestedNames.Count > 0)
+			{
+				ProcessRequestedNames(smb, parsedPath, requestedNames, cancellationToken);
+				return;
+			}
+
+			var subkeys = LoadServiceSubkeys(smb, parsedPath, cancellationToken, out _);
+			foreach (var subkey in subkeys)
+			{
+				if (string.IsNullOrWhiteSpace(subkey.KeyName))
+					continue;
+
+				TryWriteServiceInfo(
+					smb,
+					parsedPath,
+					subkey.KeyName,
+					cancellationToken,
+					warnOnMissing: false);
+			}
+		}
+
+		private void ProcessRequestedNames(
+			ISmbProviderInfo smb,
+			RegistryPathSpec servicesPath,
+			List<string> requestedNames,
+			CancellationToken cancellationToken)
+		{
+			var exactNames = new List<string>();
+			var wildcardPatterns = new List<WildcardPattern>();
+			var wildcardInputs = new List<string>();
+			foreach (var name in requestedNames)
+			{
+				if (WildcardPattern.ContainsWildcardCharacters(name))
+				{
+					wildcardPatterns.Add(new WildcardPattern(name, WildcardOptions.IgnoreCase));
+					wildcardInputs.Add(name);
+				}
+				else
+					exactNames.Add(name);
+			}
+
+			var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var name in exactNames)
+			{
+				if (string.IsNullOrWhiteSpace(name))
+					continue;
+
+				if (TryWriteServiceInfo(smb, servicesPath, name, cancellationToken, warnOnMissing: true))
+					emitted.Add(name);
+			}
+
+			if (wildcardPatterns.Count == 0)
+				return;
+
+			var subkeys = LoadServiceSubkeys(smb, servicesPath, cancellationToken, out var servicesInfo);
+			var wildcardMatched = false;
+			foreach (var subkey in subkeys)
+			{
+				var keyName = subkey.KeyName;
+				if (string.IsNullOrWhiteSpace(keyName) || emitted.Contains(keyName))
+					continue;
+
+				if (!MatchesAnyPattern(wildcardPatterns, keyName))
+					continue;
+
+				wildcardMatched = true;
+				if (TryWriteServiceInfo(smb, servicesPath, keyName, cancellationToken, warnOnMissing: false))
+					emitted.Add(keyName);
+			}
+
+			if (!wildcardMatched)
+				this.WriteWarning($"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
+		}
+
+		private List<RegistrySubkeyInfo> LoadServiceSubkeys(
+			ISmbProviderInfo smb,
+			RegistryPathSpec servicesPath,
+			CancellationToken cancellationToken,
+			out RegistryKeyInfo servicesInfo)
+		{
+			var result = ExecuteRegistryOperation(
+				smb,
+				cancellationToken,
+				session =>
+				{
+					using var servicesKey = OpenRegistryKey(
+						session.Client,
+						servicesPath,
+						RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
+						cancellationToken);
+
+					var keyInfo = servicesKey.QueryInfo(cancellationToken).GetAwaiter().GetResult();
+					List<RegistrySubkeyInfo> subkeys;
+					try
+					{
+						subkeys = CollectSubkeys(servicesKey, cancellationToken);
+					}
+					catch (Exception ex)
+					{
+						smb.LogException("Get-TBORegServices failed to enumerate service keys", ex);
+						throw;
+					}
+
+					return (keyInfo, subkeys);
+				});
+
+			servicesInfo = result.keyInfo;
+			var subkeys = result.subkeys;
+
+			if (servicesInfo.SubkeyCount > 0 && subkeys.Count != servicesInfo.SubkeyCount)
+			{
+				this.WriteWarning(
+					$"Get-TBORegServices enumerated {subkeys.Count} of {servicesInfo.SubkeyCount} subkeys under {servicesPath.KeyPath}. Some services may be missing.");
+			}
+
+			return subkeys;
+		}
+
+		private static List<string> FilterNames(string[]? names)
+		{
+			if (names == null || names.Length == 0)
+				return new List<string>();
+
+			var filtered = new List<string>(names.Length);
+			foreach (var name in names)
+			{
+				if (!string.IsNullOrWhiteSpace(name))
+					filtered.Add(name.Trim());
+			}
+
+			return filtered;
+		}
+
+		private bool TryWriteServiceInfo(
+			ISmbProviderInfo smb,
+			RegistryPathSpec basePath,
+			string serviceName,
+			CancellationToken cancellationToken,
+			bool warnOnMissing)
+		{
+			try
+			{
+				return ExecuteRegistryOperation(
+					smb,
+					cancellationToken,
+					session =>
+					{
+						WriteServiceInfo(smb, session.Client, basePath, serviceName, cancellationToken);
+						return true;
+					});
+
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex))
+			{
+				if (warnOnMissing)
+					this.WriteWarning($"Service key not found: {basePath.KeyPath}\\{serviceName}");
+			}
+			catch (Exception ex)
+			{
+				smb.LogException($"Get-TBORegServices failed to read service '{serviceName}'", ex);
+				this.WriteWarning($"Get-TBORegServices failed to read service '{serviceName}': {ex.Message}");
+			}
+
+			return false;
+		}
+
+		private void WriteServiceInfo(
+			ISmbProviderInfo smb,
+			IRegistryClient client,
+			RegistryPathSpec basePath,
+			string serviceName,
+			CancellationToken cancellationToken)
+		{
+			var serviceSpec = new RegistryPathSpec(
+				basePath.RootKey,
+				basePath.RootName,
+				CombineSubkeyPath(basePath.SubkeyPath, serviceName));
+
+			using var serviceKey = OpenRegistryKey(
+				client,
+				serviceSpec,
+				RegistryAccessRights.QueryValue,
+				cancellationToken);
+
+			var values = LoadValues(serviceKey, cancellationToken);
+			PopulateMissingValues(values, serviceKey, cancellationToken);
+
+			var imagePath = TryGetString(values, "ImagePath");
+			var objectName = TryGetString(values, "ObjectName");
+			var displayName = TryGetString(values, "DisplayName");
+			var start = TryGetInt(values, "Start");
+			var type = TryGetInt(values, "Type");
+			var errorControl = TryGetInt(values, "ErrorControl");
+
+			byte[]? sdBytes = null;
+			object? sd = null;
+			TryReadSecurityDescriptor(
+				smb,
+				client,
+				serviceSpec,
+				cancellationToken,
+				out sdBytes,
+				out sd);
+
+			this.WriteObject(new TboRegServiceInfo(
+				this.ServerName,
+				serviceName,
+				serviceSpec.KeyPath,
+				imagePath,
+				objectName,
+				start,
+				type,
+				errorControl,
+				displayName,
+				sd,
+				sdBytes));
+		}
+
+		private static bool MatchesAnyPattern(IReadOnlyList<WildcardPattern> patterns, string value)
+		{
+			foreach (var pattern in patterns)
+			{
+				if (pattern.IsMatch(value))
+					return true;
+			}
+
+			return false;
+		}
+
+		private static bool IsMissingKey(Win32Exception ex)
+		{
+			return ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
+				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND
+				or (int)Win32ErrorCode.ERROR_BAD_PATHNAME;
+		}
+
+		private void TryReadSecurityDescriptor(
+			ISmbProviderInfo smb,
+			IRegistryClient client,
+			RegistryPathSpec serviceSpec,
+			CancellationToken cancellationToken,
+			out byte[]? sdBytes,
+			out object? sd)
+		{
+			sdBytes = null;
+			sd = null;
+
+			try
+			{
+				var securitySpec = new RegistryPathSpec(
+					serviceSpec.RootKey,
+					serviceSpec.RootName,
+					CombineSubkeyPath(serviceSpec.SubkeyPath, SecuritySubkeyName));
+
+				using var securityKey = OpenRegistryKey(client, securitySpec, RegistryAccessRights.QueryValue, cancellationToken);
+				var valueInfo = securityKey.GetValue(SecurityValueName, cancellationToken).GetAwaiter().GetResult();
+				sdBytes = valueInfo.Bytes;
+				if (sdBytes == null && valueInfo.TypedValue is byte[] typedBytes)
+					sdBytes = typedBytes;
+
+				if (sdBytes == null || sdBytes.Length == 0)
+					return;
+
+				if (this.AsSddl.IsPresent)
+				{
+					sd = OperatingSystem.IsWindows()
+						? SecurityDescriptorHelpers.FromRegistryBinaryAsWindows(sdBytes).GetSddlForm(AccessControlSections.All)
+						: TBOSD.FromRegistryBinary(sdBytes).ToSddlString(Titanis.Winterop.Security.SecurityDescriptorSections.All);
+				}
+				else if (this.AsWindows.IsPresent)
+				{
+					sd = TBOSD.FromRegistryBinaryAsWindows(sdBytes);
+				}
+				else
+				{
+					sd = TBOSD.FromRegistryBinary(sdBytes);
+				}
+			}
+			catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
+				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND
+				or (int)Win32ErrorCode.ERROR_BAD_PATHNAME)
+			{
+			}
+			catch (Exception ex)
+			{
+				smb.LogException($"Get-TBORegServices failed to read security descriptor for '{serviceSpec.KeyPath}'", ex);
+				this.WriteWarning($"Get-TBORegServices failed to read security descriptor for '{serviceSpec.KeyPath}'. SecurityDescriptorBytes is available; try -AsWindows or -AsSddl for raw output.");
+			}
+		}
+
+		private static Dictionary<string, RegistryValueInfo> LoadValues(IRegistryKey key, CancellationToken cancellationToken)
+		{
+			try
+			{
+				return CollectValues(key, includeData: true, cancellationToken)
+					.ToDictionary(value => value.Name, StringComparer.OrdinalIgnoreCase);
+			}
+			catch (NotSupportedException)
+			{
+				return CollectValues(key, includeData: false, cancellationToken)
+					.ToDictionary(value => value.Name, StringComparer.OrdinalIgnoreCase);
+			}
+		}
+
+		private static void PopulateMissingValues(
+			Dictionary<string, RegistryValueInfo> values,
+			IRegistryKey key,
+			CancellationToken cancellationToken)
+		{
+			foreach (var name in new[] { "ImagePath", "ObjectName", "DisplayName", "Start", "Type", "ErrorControl" })
+			{
+				if (values.ContainsKey(name))
+					continue;
+
+				try
+				{
+					var valueInfo = key.GetValue(name, cancellationToken).GetAwaiter().GetResult();
+					values[name] = valueInfo;
+				}
+				catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
+					or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND
+					or (int)Win32ErrorCode.ERROR_BAD_PATHNAME)
+				{
+				}
+			}
+		}
+
+		private static string? TryGetString(Dictionary<string, RegistryValueInfo> values, string name)
+		{
+			if (!values.TryGetValue(name, out var info))
+				return null;
+
+			var typed = info.TypedValue;
+			if (typed != null)
+				return Convert.ToString(typed, CultureInfo.InvariantCulture);
+
+			if (info.Bytes is { Length: > 0 }
+				&& info.ValueType is RegistryValueType.String or RegistryValueType.ExpandString)
+				return TryDecodeUtf16String(info.Bytes);
+
+			return null;
+		}
+
+		private static int? TryGetInt(Dictionary<string, RegistryValueInfo> values, string name)
+		{
+			if (!values.TryGetValue(name, out var info))
+				return null;
+
+			var typed = info.TypedValue;
+			if (typed == null)
+				return null;
+
+			try
+			{
+				return Convert.ToInt32(typed, CultureInfo.InvariantCulture);
+			}
+			catch
+			{
+				return null;
+			}
+		}
+
+		private static string CombineSubkeyPath(string? basePath, string childName)
+		{
+			if (string.IsNullOrEmpty(basePath))
+				return childName;
+			if (string.IsNullOrEmpty(childName))
+				return basePath;
+			return $"{basePath}\\{childName}";
+		}
+
+		private static string? TryDecodeUtf16String(byte[] bytes)
+		{
+			int length = bytes.Length;
+			if ((length % 2) != 0)
+				return null;
+
+			if (length >= 2 && bytes[^1] == 0 && bytes[^2] == 0)
+				length -= 2;
+
+			try
+			{
+				return Encoding.Unicode.GetString(bytes, 0, length);
+			}
+			catch
+			{
+				return null;
+			}
+		}
+	}
+}

