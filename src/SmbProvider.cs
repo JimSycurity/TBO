@@ -105,6 +105,109 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return UncPath.TryParse(path, out _);
 		}
 
+		#region CreateInfo helpers
+		private const Smb2FileCreateOptions BaseCreateOptions =
+			Smb2FileCreateOptions.SynchronousIoNonalert
+			| Smb2FileCreateOptions.OpenForBackupIntent;
+
+		private static Smb2FileCreateOptions ApplyBaseCreateOptions(Smb2FileCreateOptions options)
+			=> options | BaseCreateOptions;
+
+		private static Smb2CreateInfo CreateOpenInfo(
+			Smb2CreateDisposition disposition,
+			uint desiredAccess,
+			Smb2ShareAccess shareAccess,
+			Winterop.FileAttributes fileAttributes,
+			DateTime? timeWarpToken,
+			Smb2FileCreateOptions createOptions,
+			Smb2ImpersonationLevel impersonationLevel = Smb2ImpersonationLevel.Impersonation)
+		{
+			return new Smb2CreateInfo
+			{
+				CreateDisposition = disposition,
+				DesiredAccess = desiredAccess,
+				ShareAccess = shareAccess,
+				ImpersonationLevel = impersonationLevel,
+				CreateOptions = ApplyBaseCreateOptions(createOptions),
+				FileAttributes = fileAttributes,
+				TimeWarpToken = timeWarpToken
+			};
+		}
+
+		private static Smb2CreateInfo CreateOpenDirectoryInfo(DateTime? timeWarpToken)
+		{
+			var info = CreateOpenInfo(
+				Smb2CreateDisposition.Open,
+				(uint)Smb2AccessRights.DefaultOpenDirAccess,
+				Smb2ShareAccess.DefaultDirShare,
+				Winterop.FileAttributes.None,
+				timeWarpToken,
+				Smb2FileCreateOptions.Directory);
+
+			info.Priority = Smb2Priority.OpenDir;
+			info.RequestMaximalAccess = true;
+			info.QueryOnDiskId = true;
+			info.OplockLevel = Smb2OplockLevel.None;
+			return info;
+		}
+
+		private static Smb2CreateInfo CreateOpenReadFileInfo(
+			DateTime? timeWarpToken,
+			bool nonDirectory,
+			bool openReparsePoint,
+			Smb2ShareAccess shareAccess = Smb2ShareAccess.Read,
+			uint? desiredAccess = null,
+			Winterop.FileAttributes fileAttributes = Winterop.FileAttributes.Normal)
+		{
+			var options = Smb2FileCreateOptions.None;
+			if (nonDirectory)
+				options |= Smb2FileCreateOptions.NonDirectory;
+			if (openReparsePoint)
+				options |= Smb2FileCreateOptions.OpenReparsePoint;
+
+			return CreateOpenInfo(
+				Smb2CreateDisposition.Open,
+				desiredAccess ?? (uint)Smb2AccessRights.DefaultOpenReadAccess,
+				shareAccess,
+				fileAttributes,
+				timeWarpToken,
+				options);
+		}
+
+		private static Smb2CreateInfo CreateOpenReparseInfo(DateTime? timeWarpToken)
+		{
+			return CreateOpenInfo(
+				Smb2CreateDisposition.Open,
+				(uint)(Smb2AccessRights.ReadAttributes | Smb2AccessRights.ReadEa),
+				Smb2ShareAccess.ReadWriteDelete,
+				Winterop.FileAttributes.None,
+				timeWarpToken,
+				Smb2FileCreateOptions.OpenReparsePoint | Smb2FileCreateOptions.OpenNoRecall);
+		}
+
+		private static Smb2CreateInfo CreateContentWriteInfo(
+			Smb2CreateDisposition disposition,
+			DateTime? timeWarpToken)
+		{
+			return CreateOpenInfo(
+				disposition,
+				(uint)Smb2AccessRights.DefaultCreateAccess,
+				Smb2ShareAccess.ReadWrite,
+				Winterop.FileAttributes.Normal,
+				timeWarpToken,
+				Smb2FileCreateOptions.NonDirectory);
+		}
+
+		private void LogDiagnostic(string message)
+			=> this.smb.LogDiagnostic(message);
+
+		private void LogWarning(string message)
+			=> this.smb.LogWarning(message);
+
+		private void LogException(string context, Exception ex)
+			=> this.smb.LogException(context, ex);
+		#endregion
+
 		#region Drives
 		protected override object NewDriveDynamicParameters()
 		{
@@ -258,7 +361,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					bool includeReparseInfo = !string.IsNullOrEmpty(uncPath.ShareRelativePath) || includeRootReparseInfo;
 
 					if (!includeReparseInfo)
-						this.smb.LogDiagnostic($"Skipping reparse info for root enumeration on '{snapshotPath.OriginalPath}'.");
+						this.LogDiagnostic($"Skipping reparse info for root enumeration on '{snapshotPath.OriginalPath}'.");
 
 					var entries = dir.QueryDirAsync("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken).GetAwaiter().GetResult();
 
@@ -318,7 +421,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				this.smb.LogDiagnostic($"Reparse info probe failed for '{resolvedPath}': {ex.Message}");
+				this.LogDiagnostic($"Reparse info probe failed for '{resolvedPath}': {ex.Message}");
 				return false;
 			}
 		}
