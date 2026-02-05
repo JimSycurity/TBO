@@ -1,7 +1,5 @@
 using System;
-using System.ComponentModel;
 using System.Management.Automation;
-using System.Text;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Winterop;
@@ -32,75 +30,56 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
-			ExecuteRegistryOperation(smb, cancellationToken, session =>
+			var winlogonSpec = new RegistryPathSpec(
+				RegistryRootKey.LocalMachine,
+				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
+				WinlogonPath);
+
+			try
 			{
-				var winlogonSpec = new RegistryPathSpec(
-					RegistryRootKey.LocalMachine,
-					RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
-					WinlogonPath);
-
-				using var winlogonKey = OpenRegistryKey(session.Client, winlogonSpec, RegistryAccessRights.QueryValue, cancellationToken);
-
-				this.WriteObject(new TboRegAutoLogonInfo
+				ExecuteRegistryOperation(smb, cancellationToken, session =>
 				{
-					ServerName = this.ServerName,
-					KeyPath = winlogonSpec.KeyPath,
-					DefaultUserName = TryReadValueString(winlogonKey, "DefaultUserName", cancellationToken),
-					DefaultDomainName = TryReadValueString(winlogonKey, "DefaultDomainName", cancellationToken),
-					DefaultPassword = TryReadValueString(winlogonKey, "DefaultPassword", cancellationToken),
-					AltDefaultUserName = TryReadValueString(winlogonKey, "AltDefaultUserName", cancellationToken),
-					AltDefaultDomainName = TryReadValueString(winlogonKey, "AltDefaultDomainName", cancellationToken),
-					AltDefaultPassword = TryReadValueString(winlogonKey, "AltDefaultPassword", cancellationToken),
-					DefaultLogonDomain = TryReadValueString(winlogonKey, "DefaultLogonDomain", cancellationToken),
-					AutoAdminLogon = TryReadValueString(winlogonKey, "AutoAdminLogon", cancellationToken),
-					ForceAutoLogon = TryReadValueString(winlogonKey, "ForceAutoLogon", cancellationToken),
-					AutoLogonCount = TryReadValueString(winlogonKey, "AutoLogonCount", cancellationToken)
+					var winlogonKey = RegistryHelpers.TryOpenKey(
+						session.Client,
+						winlogonSpec,
+						RegistryAccessRights.QueryValue,
+						cancellationToken);
+					if (winlogonKey == null)
+					{
+						this.LogWarning(smb, $"Get-TBORegAutoLogon could not open {winlogonSpec.KeyPath} on {this.ServerName}.");
+						return;
+					}
+
+					using (winlogonKey)
+					{
+						this.WriteObject(new TboRegAutoLogonInfo
+						{
+							ServerName = this.ServerName,
+							KeyPath = winlogonSpec.KeyPath,
+							DefaultUserName = RegistryHelpers.TryReadValueString(winlogonKey, "DefaultUserName", cancellationToken),
+							DefaultDomainName = RegistryHelpers.TryReadValueString(winlogonKey, "DefaultDomainName", cancellationToken),
+							DefaultPassword = RegistryHelpers.TryReadValueString(winlogonKey, "DefaultPassword", cancellationToken),
+							AltDefaultUserName = RegistryHelpers.TryReadValueString(winlogonKey, "AltDefaultUserName", cancellationToken),
+							AltDefaultDomainName = RegistryHelpers.TryReadValueString(winlogonKey, "AltDefaultDomainName", cancellationToken),
+							AltDefaultPassword = RegistryHelpers.TryReadValueString(winlogonKey, "AltDefaultPassword", cancellationToken),
+							DefaultLogonDomain = RegistryHelpers.TryReadValueString(winlogonKey, "DefaultLogonDomain", cancellationToken),
+							AutoAdminLogon = RegistryHelpers.TryReadValueString(winlogonKey, "AutoAdminLogon", cancellationToken),
+							ForceAutoLogon = RegistryHelpers.TryReadValueString(winlogonKey, "ForceAutoLogon", cancellationToken),
+							AutoLogonCount = RegistryHelpers.TryReadValueString(winlogonKey, "AutoLogonCount", cancellationToken)
+						});
+					}
 				});
-			});
-		}
-
-		private static string? TryReadValueString(IRegistryKey key, string name, CancellationToken cancellationToken)
-		{
-			try
-			{
-				var valueInfo = key.GetValue(name, cancellationToken).GetAwaiter().GetResult();
-				if (valueInfo.TypedValue is string str && !string.IsNullOrEmpty(str))
-					return str;
-
-				if (valueInfo.Bytes != null && valueInfo.Bytes.Length > 0)
-					return DecodeUnicodeString(valueInfo.Bytes);
 			}
-			catch (Win32Exception ex) when (IsMissingKey(ex))
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 			{
+				this.LogException(smb, $"Get-TBORegAutoLogon failed to read {winlogonSpec.KeyPath}", ex);
+				this.LogWarning(smb, $"Get-TBORegAutoLogon could not read autologon registry values: {ex.Message}");
 			}
-
-			return null;
-		}
-
-		private static string? DecodeUnicodeString(byte[] bytes)
-		{
-			int length = bytes.Length;
-			if ((length % 2) != 0)
-				return null;
-
-			if (length >= 2 && bytes[^1] == 0 && bytes[^2] == 0)
-				length -= 2;
-
-			try
+			catch (Exception ex)
 			{
-				return Encoding.Unicode.GetString(bytes, 0, length);
+				this.LogException(smb, $"Get-TBORegAutoLogon failed to read {winlogonSpec.KeyPath}", ex);
+				this.LogWarning(smb, $"Get-TBORegAutoLogon could not read autologon registry values: {ex.Message}");
 			}
-			catch
-			{
-				return null;
-			}
-		}
-
-		private static bool IsMissingKey(Win32Exception ex)
-		{
-			return ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
-				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND
-				or (int)Win32ErrorCode.ERROR_BAD_PATHNAME;
 		}
 	}
 }

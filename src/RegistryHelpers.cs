@@ -76,6 +76,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
+		internal static string? ExtractValueString(RegistryValueInfo info)
+		{
+			if (info.TypedValue is string str && !string.IsNullOrEmpty(str))
+				return str;
+
+			var bytes = ExtractValueBytes(info);
+			if (bytes == null || bytes.Length == 0)
+				return null;
+
+			return DecodeUnicodeString(bytes);
+		}
+
+		internal static string? TryReadValueString(IRegistryKey key, string name, CancellationToken cancellationToken)
+		{
+			try
+			{
+				var valueInfo = key.GetValue(name, cancellationToken).GetAwaiter().GetResult();
+				return ExtractValueString(valueInfo);
+			}
+			catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
+				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND
+				or (int)Win32ErrorCode.ERROR_BAD_PATHNAME)
+			{
+			}
+
+			return null;
+		}
+
 		internal static bool IsRootPath(string providerPath)
 			=> string.IsNullOrWhiteSpace(providerPath) || providerPath == "\\";
 
@@ -477,6 +505,25 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (!BitConverter.IsLittleEndian)
 				Array.Reverse(data);
 			return data;
+		}
+
+		private static string? DecodeUnicodeString(byte[] bytes)
+		{
+			int length = bytes.Length;
+			if ((length % 2) != 0)
+				return null;
+
+			if (length >= 2 && bytes[^1] == 0 && bytes[^2] == 0)
+				length -= 2;
+
+			try
+			{
+				return Encoding.Unicode.GetString(bytes, 0, length);
+			}
+			catch
+			{
+				return null;
+			}
 		}
 
 		private static void RemoveSubkeyRecursive(IRegistryKey parentKey, string subkeyName, CancellationToken cancellationToken)
