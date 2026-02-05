@@ -39,7 +39,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var lsaKey = ResolveLsaKey(smb, session.Client, cancellationToken, out _);
 				if (lsaKey == null || lsaKey.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegMachineAccount failed to derive the LSA key.");
+					this.LogWarning(smb, "Get-TBORegMachineAccount failed to derive the LSA key.");
 					return;
 				}
 
@@ -47,14 +47,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var secretBlob = TryReadSecretValue(session.Client, MachineSecretName, "CurrVal", cancellationToken, out lastWriteTime);
 				if (secretBlob == null || secretBlob.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegMachineAccount failed to read $MACHINE.ACC: value is empty.");
+					this.LogWarning(smb, "Get-TBORegMachineAccount failed to read $MACHINE.ACC: value is empty.");
 					return;
 				}
 
 				var decrypted = DecryptLsaSecret(secretBlob, lsaKey);
 				if (decrypted == null || decrypted.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegMachineAccount failed to decrypt $MACHINE.ACC: data was empty.");
+					this.LogWarning(smb, "Get-TBORegMachineAccount failed to decrypt $MACHINE.ACC: data was empty.");
 					return;
 				}
 

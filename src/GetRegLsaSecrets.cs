@@ -42,7 +42,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var lsaKey = ResolveLsaKey(smb, session.Client, cancellationToken, out _);
 				if (lsaKey == null || lsaKey.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegLsaSecrets failed to derive the LSA key.");
+					this.LogWarning(smb, "Get-TBORegLsaSecrets failed to derive the LSA key.");
 					return;
 				}
 
@@ -60,14 +60,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					var secretBlob = TryReadSecretValue(session.Client, name, "CurrVal", cancellationToken, out lastWriteTime);
 					if (secretBlob == null || secretBlob.Length == 0)
 					{
-						this.WriteWarning($"Get-TBORegLsaSecrets failed to read secret '{name}': value is empty.");
+						this.LogWarning(smb, $"Get-TBORegLsaSecrets failed to read secret '{name}': value is empty.");
 						continue;
 					}
 
 					var decrypted = DecryptLsaSecret(secretBlob, lsaKey);
 					if (decrypted == null || decrypted.Length == 0)
 					{
-						this.WriteWarning($"Get-TBORegLsaSecrets failed to decrypt secret '{name}': data was empty.");
+						this.LogWarning(smb, $"Get-TBORegLsaSecrets failed to decrypt secret '{name}': data was empty.");
 						continue;
 					}
 

@@ -38,8 +38,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (Exception ex)
 				{
-					smb.LogException($"Get-TBORegLsaKeys failed to derive the boot key from {this.ServerName}", ex);
-					this.WriteWarning($"Get-TBORegLsaKeys failed to derive the boot key: {ex.Message}");
+					this.LogException(smb, $"Get-TBORegLsaKeys failed to derive the boot key from {this.ServerName}", ex);
+					this.LogWarning(smb, $"Get-TBORegLsaKeys failed to derive the boot key: {ex.Message}");
 				}
 
 				if (bootKey != null)
@@ -50,8 +50,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					}
 					catch (Exception ex)
 					{
-						smb.LogException($"Get-TBORegLsaKeys failed to derive the LSA key from {this.ServerName}", ex);
-						this.WriteWarning($"Get-TBORegLsaKeys failed to derive the LSA key: {ex.Message}");
+						this.LogException(smb, $"Get-TBORegLsaKeys failed to derive the LSA key from {this.ServerName}", ex);
+						this.LogWarning(smb, $"Get-TBORegLsaKeys failed to derive the LSA key: {ex.Message}");
 					}
 				}
 

@@ -48,7 +48,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var lsaKey = ResolveLsaKey(smb, session.Client, cancellationToken, out var lsaKeySource);
 				if (lsaKey == null || lsaKey.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegCachedCredentials failed to derive the LSA key.");
+					this.LogWarning(smb, "Get-TBORegCachedCredentials failed to derive the LSA key.");
 					return;
 				}
 
@@ -56,7 +56,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var nlkm = ResolveNlkmSecret(session.Client, lsaKey, vistaOrLater, cancellationToken);
 				if (nlkm == null || nlkm.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegCachedCredentials failed to derive the NL$KM secret.");
+					this.LogWarning(smb, "Get-TBORegCachedCredentials failed to derive the NL$KM secret.");
 					return;
 				}
 
@@ -75,7 +75,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (Exception ex)
 				{
-					smb.LogException("Get-TBORegCachedCredentials failed to enumerate cache values", ex);
+					this.LogException(smb, "Get-TBORegCachedCredentials failed to enumerate cache values", ex);
 					throw;
 				}
 
