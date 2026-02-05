@@ -38,7 +38,7 @@ bd sync               # Sync with git
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
 
-Note: Commit signing is configured, allow time for human interaction with passphrase.
+Note: Commit signing is configured, allow time for human interaction with passphrase. **DO NOT USE `commit.gpgsign=false`!**
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds

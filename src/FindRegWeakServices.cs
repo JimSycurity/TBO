@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Globalization;
 using System.Management.Automation;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
@@ -20,6 +21,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			WellKnownSid trusteeWellKnownSid,
 			AccessControlEntryType aceType,
 			uint accessMask,
+			string accessMaskText,
 			IReadOnlyList<string> accessRights,
 			ServiceAccess serviceAccess,
 			StandardAccessRights standardAccessRights)
@@ -31,6 +33,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this.TrusteeWellKnownSid = trusteeWellKnownSid;
 			this.AceType = aceType;
 			this.AccessMask = accessMask;
+			this.AccessMaskText = accessMaskText;
 			this.AccessRights = accessRights;
 			this.ServiceAccess = serviceAccess;
 			this.StandardAccessRights = standardAccessRights;
@@ -43,6 +46,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public WellKnownSid TrusteeWellKnownSid { get; }
 		public AccessControlEntryType AceType { get; }
 		public uint AccessMask { get; }
+		public string AccessMaskText { get; }
 		public IReadOnlyList<string> AccessRights { get; }
 		public ServiceAccess ServiceAccess { get; }
 		public StandardAccessRights StandardAccessRights { get; }
@@ -55,7 +59,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string DefaultServicesPath = @"HKLM\SYSTEM\CurrentControlSet\Services";
 		private const string SecuritySubkeyName = "Security";
 		private const string SecurityValueName = "Security";
+		private const uint GenericAllMask = 0x10000000;
+		private const uint GenericExecuteMask = 0x20000000;
 		private const uint GenericWriteMask = 0x40000000;
+		private const uint GenericReadMask = 0x80000000;
 		private const uint DefaultInterestingAccessMask =
 			(uint)ServiceAccess.AllRights |
 			(uint)ServiceAccess.ChangeConfig |
@@ -332,6 +339,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					wellKnownSid,
 					ace.AceType,
 					accessMask,
+					FormatAccessMask(accessMask),
 					accessRights,
 					(ServiceAccess)accessMask,
 					(StandardAccessRights)accessMask));
@@ -464,16 +472,55 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			if ((accessMask & (uint)ServiceAccess.AllRights) == (uint)ServiceAccess.AllRights)
 				rights.Add("SERVICE_ALL_ACCESS");
+			if ((accessMask & (uint)ServiceAccess.QueryConfig) != 0)
+				rights.Add("SERVICE_QUERY_CONFIG");
 			if ((accessMask & (uint)ServiceAccess.ChangeConfig) != 0)
 				rights.Add("SERVICE_CHANGE_CONFIG");
+			if ((accessMask & (uint)ServiceAccess.QueryStatus) != 0)
+				rights.Add("SERVICE_QUERY_STATUS");
+			if ((accessMask & (uint)ServiceAccess.EnumerateDependents) != 0)
+				rights.Add("SERVICE_ENUMERATE_DEPENDENTS");
+			if ((accessMask & (uint)ServiceAccess.Start) != 0)
+				rights.Add("SERVICE_START");
+			if ((accessMask & (uint)ServiceAccess.Stop) != 0)
+				rights.Add("SERVICE_STOP");
+			if ((accessMask & (uint)ServiceAccess.PauseContinue) != 0)
+				rights.Add("SERVICE_PAUSE_CONTINUE");
+			if ((accessMask & (uint)ServiceAccess.Interrogate) != 0)
+				rights.Add("SERVICE_INTERROGATE");
+			if ((accessMask & (uint)ServiceAccess.UserDefinedControl) != 0)
+				rights.Add("SERVICE_USER_DEFINED_CONTROL");
+
+			if ((accessMask & (uint)StandardAccessRights.Delete) != 0)
+				rights.Add("DELETE");
+			if ((accessMask & (uint)StandardAccessRights.ReadControl) != 0)
+				rights.Add("READ_CONTROL");
 			if ((accessMask & (uint)StandardAccessRights.WriteDac) != 0)
 				rights.Add("WRITE_DAC");
 			if ((accessMask & (uint)StandardAccessRights.WriteOwner) != 0)
 				rights.Add("WRITE_OWNER");
+			if ((accessMask & (uint)StandardAccessRights.Synchronize) != 0)
+				rights.Add("SYNCHRONIZE");
+			if ((accessMask & (uint)StandardAccessRights.AccessSystemSecurity) != 0)
+				rights.Add("ACCESS_SYSTEM_SECURITY");
+			if ((accessMask & (uint)StandardAccessRights.MaxAllowed) != 0)
+				rights.Add("MAXIMUM_ALLOWED");
+
+			if ((accessMask & GenericAllMask) != 0)
+				rights.Add("GENERIC_ALL");
+			if ((accessMask & GenericExecuteMask) != 0)
+				rights.Add("GENERIC_EXECUTE");
 			if ((accessMask & GenericWriteMask) != 0)
 				rights.Add("GENERIC_WRITE");
+			if ((accessMask & GenericReadMask) != 0)
+				rights.Add("GENERIC_READ");
 
 			return rights;
+		}
+
+		private static string FormatAccessMask(uint accessMask)
+		{
+			return string.Format(CultureInfo.InvariantCulture, "0x{0:X8}", accessMask);
 		}
 	}
 }

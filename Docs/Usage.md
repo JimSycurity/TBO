@@ -593,6 +593,7 @@ Get-TBONtHash -Password 'Passw0rd!'
 
 Scans service security descriptors and reports AccessAllowed entries that grant service configuration rights to non-system trustees.
 The default `AccessMask` flags include SERVICE_ALL_ACCESS, SERVICE_CHANGE_CONFIG, WRITE_DAC, WRITE_OWNER, and GENERIC_WRITE.
+Output includes `AccessMaskText` (hex) and `AccessRights` (human-readable rights derived from the access mask).
 
 ```powershell
 Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol
@@ -600,6 +601,8 @@ Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'T
 Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -IgnoreServiceSids
 Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00040002 -IncludeUninteresting
 Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol -AccessMask 0x00000002
+Find-TBORegWeakServices -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Select-Object ServiceName, AccessMaskText, AccessRights
 ```
 
 #### Get-TBORegChildItem
