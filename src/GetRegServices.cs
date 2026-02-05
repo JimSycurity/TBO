@@ -55,12 +55,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	[Cmdlet(VerbsCommon.Get, "TBORegServices")]
 	[OutputType(typeof(TboRegServiceInfo))]
-	public sealed class GetTBORegServices : TboRegCmdlet
+	public sealed class GetTBORegServices : ServiceRegistryCmdletBase
 	{
-		private const string DefaultServicesPath = @"HKLM\SYSTEM\CurrentControlSet\Services";
-		private const string SecuritySubkeyName = "Security";
-		private const string SecurityValueName = "Security";
-
 		[Parameter(Position = 1)]
 		public string Path { get; set; } = DefaultServicesPath;
 
@@ -175,16 +171,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						cancellationToken);
 
 					var keyInfo = servicesKey.QueryInfo(cancellationToken).GetAwaiter().GetResult();
-					List<RegistrySubkeyInfo> subkeys;
-					try
-					{
-						subkeys = CollectSubkeys(servicesKey, cancellationToken);
-					}
-					catch (Exception ex)
-					{
-						this.LogException(smb, "Get-TBORegServices failed to enumerate service keys", ex);
-						throw;
-					}
+					var subkeys = CollectServiceSubkeys(
+						smb,
+						servicesKey,
+						keyInfo,
+						servicesPath,
+						cancellationToken,
+						"Get-TBORegServices");
 
 					return (keyInfo, subkeys);
 				});
@@ -192,28 +185,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			servicesInfo = result.keyInfo;
 			var subkeys = result.subkeys;
 
-			if (servicesInfo.SubkeyCount > 0 && subkeys.Count != servicesInfo.SubkeyCount)
-			{
-				this.LogWarning(smb, 
-					$"Get-TBORegServices enumerated {subkeys.Count} of {servicesInfo.SubkeyCount} subkeys under {servicesPath.KeyPath}. Some services may be missing.");
-			}
-
 			return subkeys;
-		}
-
-		private static List<string> FilterNames(string[]? names)
-		{
-			if (names == null || names.Length == 0)
-				return new List<string>();
-
-			var filtered = new List<string>(names.Length);
-			foreach (var name in names)
-			{
-				if (!string.IsNullOrWhiteSpace(name))
-					filtered.Add(name.Trim());
-			}
-
-			return filtered;
 		}
 
 		private bool TryWriteServiceInfo(
@@ -299,17 +271,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				displayName,
 				sd,
 				sdBytes));
-		}
-
-		private static bool MatchesAnyPattern(IReadOnlyList<WildcardPattern> patterns, string value)
-		{
-			foreach (var pattern in patterns)
-			{
-				if (pattern.IsMatch(value))
-					return true;
-			}
-
-			return false;
 		}
 
 		private static bool IsMissingKey(Win32Exception ex)

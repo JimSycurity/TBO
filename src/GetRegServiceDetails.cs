@@ -153,13 +153,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	[Cmdlet(VerbsCommon.Get, "TBORegServiceDetails")]
 	[OutputType(typeof(TboRegServiceDetailsInfo))]
-	public sealed class GetTBORegServiceDetails : TboRegCmdlet
+	public sealed class GetTBORegServiceDetails : ServiceRegistryCmdletBase
 	{
-		private const string DefaultServicesPath = @"HKLM\SYSTEM\CurrentControlSet\Services";
 		private const string SecretsPath = @"HKLM\SECURITY\Policy\Secrets";
 		private const string ServiceSecretPrefix = "_SC_";
-		private const string SecuritySubkeyName = "Security";
-		private const string SecurityValueName = "Security";
 		private const string ParametersSubkeyName = "Parameters";
 
 		[Parameter(Position = 1)]
@@ -190,7 +187,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					return;
 				}
 
-				var subkeys = CollectServiceSubkeys(smb, servicesKey, keyInfo, parsedPath, cancellationToken);
+				var subkeys = CollectServiceSubkeys(
+					smb,
+					servicesKey,
+					keyInfo,
+					parsedPath,
+					cancellationToken,
+					"Get-TBORegServiceDetails");
 				foreach (var subkey in subkeys)
 				{
 					if (string.IsNullOrWhiteSpace(subkey.KeyName))
@@ -243,7 +246,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (wildcardPatterns.Count == 0)
 				return;
 
-			var subkeys = CollectServiceSubkeys(smb, servicesKey, servicesInfo, servicesPath, cancellationToken);
+			var subkeys = CollectServiceSubkeys(
+				smb,
+				servicesKey,
+				servicesInfo,
+				servicesPath,
+				cancellationToken,
+				"Get-TBORegServiceDetails");
 			var wildcardMatched = false;
 			foreach (var subkey in subkeys)
 			{
@@ -263,47 +272,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				this.LogWarning(smb, $"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
 		}
 
-		private List<RegistrySubkeyInfo> CollectServiceSubkeys(
-			ISmbProviderInfo smb,
-			IRegistryKey servicesKey,
-			RegistryKeyInfo servicesInfo,
-			RegistryPathSpec servicesPath,
-			CancellationToken cancellationToken)
-		{
-			List<RegistrySubkeyInfo> subkeys;
-			try
-			{
-				subkeys = CollectSubkeys(servicesKey, cancellationToken);
-			}
-			catch (Exception ex)
-			{
-				this.LogException(smb, "Get-TBORegServiceDetails failed to enumerate service keys", ex);
-				throw;
-			}
-
-			if (servicesInfo.SubkeyCount > 0 && subkeys.Count != servicesInfo.SubkeyCount)
-			{
-				this.LogWarning(smb, 
-					$"Get-TBORegServiceDetails enumerated {subkeys.Count} of {servicesInfo.SubkeyCount} subkeys under {servicesPath.KeyPath}. Some services may be missing.");
-			}
-
-			return subkeys;
-		}
-
-		private static List<string> FilterNames(string[]? names)
-		{
-			if (names == null || names.Length == 0)
-				return new List<string>();
-
-			var filtered = new List<string>(names.Length);
-			foreach (var name in names)
-			{
-				if (!string.IsNullOrWhiteSpace(name))
-					filtered.Add(name.Trim());
-			}
-
-			return filtered;
-		}
 
 		private bool TryWriteServiceDetails(
 			ISmbProviderInfo smb,
@@ -840,17 +808,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			uint a4 = BinaryPrimitives.ReadUInt32LittleEndian(hash.AsSpan(16, 4));
 
 			return $"S-1-5-80-{a0}-{a1}-{a2}-{a3}-{a4}";
-		}
-
-		private static bool MatchesAnyPattern(IReadOnlyList<WildcardPattern> patterns, string value)
-		{
-			foreach (var pattern in patterns)
-			{
-				if (pattern.IsMatch(value))
-					return true;
-			}
-
-			return false;
 		}
 
 		private static int CompareTriggerKeyNames(string? left, string? right)
