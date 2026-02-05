@@ -56,7 +56,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (names.Count == 0)
 					return;
 
-				var filters = BuildNameFilters();
+				var filters = BuildNameFilters(this.Name);
 				foreach (var name in names)
 				{
 					if (!MatchesAny(filters, name))
@@ -141,39 +141,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return false;
 		}
 
-		private static List<WildcardPattern> BuildNameFilters(IEnumerable<string>? names = null)
-		{
-			var filters = new List<WildcardPattern>();
-			if (names == null)
-				return filters;
-
-			foreach (var name in names)
-			{
-				if (string.IsNullOrWhiteSpace(name))
-					continue;
-				filters.Add(new WildcardPattern(name, WildcardOptions.IgnoreCase));
-			}
-
-			return filters;
-		}
-
-		private List<WildcardPattern> BuildNameFilters()
-		{
-			return BuildNameFilters(this.Name);
-		}
-
-		private static bool MatchesAny(List<WildcardPattern> filters, string name)
-		{
-			if (filters.Count == 0)
-				return true;
-
-			foreach (var filter in filters)
-			{
-				if (filter.IsMatch(name))
-					return true;
-			}
-
-			return false;
-		}
 	}
 }

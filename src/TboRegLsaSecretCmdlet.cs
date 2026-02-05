@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Management.Automation;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -420,20 +421,50 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return output;
 		}
 
-		protected static string? CombineSubkeyPath(string? basePath, string childName)
+	protected static string? CombineSubkeyPath(string? basePath, string childName)
+	{
+		if (string.IsNullOrEmpty(basePath))
+			return childName;
+		if (string.IsNullOrEmpty(childName))
+			return basePath;
+		return $"{basePath}\\{childName}";
+	}
+
+	protected static List<WildcardPattern> BuildNameFilters(IEnumerable<string>? names)
+	{
+		var filters = new List<WildcardPattern>();
+		if (names == null)
+			return filters;
+
+		foreach (var name in names)
 		{
-			if (string.IsNullOrEmpty(basePath))
-				return childName;
-			if (string.IsNullOrEmpty(childName))
-				return basePath;
-			return $"{basePath}\\{childName}";
+			if (string.IsNullOrWhiteSpace(name))
+				continue;
+			filters.Add(new WildcardPattern(name, WildcardOptions.IgnoreCase));
 		}
 
-		private static bool TrySlice(byte[] data, int offset, int length, out byte[] payload)
+		return filters;
+	}
+
+	protected static bool MatchesAny(IReadOnlyCollection<WildcardPattern> filters, string name)
+	{
+		if (filters.Count == 0)
+			return true;
+
+		foreach (var filter in filters)
 		{
-			payload = Array.Empty<byte>();
-			if (length <= 0 || offset < 0 || offset > data.Length)
-				return false;
+			if (filter.IsMatch(name))
+				return true;
+		}
+
+		return false;
+	}
+
+	private static bool TrySlice(byte[] data, int offset, int length, out byte[] payload)
+	{
+		payload = Array.Empty<byte>();
+		if (length <= 0 || offset < 0 || offset > data.Length)
+			return false;
 			if (offset + length > data.Length)
 				return false;
 			payload = data.AsSpan(offset, length).ToArray();

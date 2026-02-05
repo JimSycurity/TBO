@@ -311,34 +311,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return true;
 		}
 
-		private static List<WildcardPattern> BuildNameFilters(string[]? names)
-		{
-			var filters = new List<WildcardPattern>();
-			if (names == null)
-				return filters;
-
-			foreach (var name in names)
-			{
-				if (string.IsNullOrWhiteSpace(name))
-					continue;
-				filters.Add(new WildcardPattern(name, WildcardOptions.IgnoreCase));
-			}
-
-			return filters;
-		}
-
-		private static bool MatchesAny(List<WildcardPattern> filters, string name)
-		{
-			if (filters.Count == 0)
-				return true;
-
-			foreach (var filter in filters)
-			{
-				if (filter.IsMatch(name))
-					return true;
-			}
-
-			return false;
-		}
 	}
 }
