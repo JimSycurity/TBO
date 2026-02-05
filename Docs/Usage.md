@@ -549,6 +549,7 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
 #### Get-TBOCredManEntry
 
 Reads a Credential Manager file and reports metadata plus DPAPI blob offsets (no decryption in this phase).
+Scheduled task credentials (TaskScheduler:Task entries) are decoded into target, user, and secret lines when cleartext is available.
 
 ```powershell
 $files = Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith'

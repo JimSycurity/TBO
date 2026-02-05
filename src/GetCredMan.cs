@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -174,11 +175,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string InputParameterSet = "Input";
 		private const int DefaultMaxBytes = 1024 * 1024;
 
+		private const string TaskSchedulerMarker = "Domain:batch=TaskScheduler:Task:";
+
 		private static readonly byte[] DpapiMagic = new byte[]
 		{
 			0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF, 0x01, 0x15,
 			0xD1, 0x11, 0x8C, 0x7A, 0x00, 0xC0, 0x4F, 0xC2, 0x97, 0xEB
 		};
+		private static readonly byte[] TaskSchedulerMarkerBytes = System.Text.Encoding.Unicode.GetBytes(TaskSchedulerMarker);
 
 		[Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true, ParameterSetName = PathParameterSet)]
 		public string ServerName { get; set; } = string.Empty;
@@ -589,6 +593,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (payload.Length == 0)
 				return null;
 
+			if (TryDecodeTaskSchedulerCleartext(payload, out var taskText))
+				return taskText;
+
 			if (payload.Length % 2 == 0)
 			{
 				try
@@ -613,6 +620,112 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return null;
+		}
+
+		private static bool TryDecodeTaskSchedulerCleartext(byte[] payload, out string? text)
+		{
+			text = null;
+
+			if (TaskSchedulerMarkerBytes.Length == 0)
+				return false;
+
+			var markerIndex = payload.AsSpan().IndexOf(TaskSchedulerMarkerBytes);
+			if (markerIndex < 4)
+				return false;
+
+			if (!TryReadUInt32(payload, markerIndex - 4, out var targetLength))
+				return false;
+			if (!TryReadUnicodeString(payload, markerIndex, targetLength, out var target))
+				return false;
+
+			var offset = markerIndex + targetLength;
+			offset = SkipNullBytes(payload, offset);
+
+			if (!TryReadLengthPrefixedUnicode(payload, ref offset, out var userName))
+				return false;
+
+			offset = SkipNullBytes(payload, offset);
+
+			if (!TryReadLengthPrefixedUnicode(payload, ref offset, out var secret))
+				return false;
+
+			text = string.Join(Environment.NewLine, new[] { target, userName, secret });
+			return true;
+		}
+
+		private static bool TryReadLengthPrefixedUnicode(byte[] payload, ref int offset, out string? value)
+		{
+			value = null;
+
+			if (!TryReadUInt32(payload, offset, out var length))
+				return false;
+
+			offset += sizeof(uint);
+			if (!TryReadUnicodeString(payload, offset, length, out value))
+				return false;
+
+			offset += length;
+			return true;
+		}
+
+		private static bool TryReadUnicodeString(byte[] payload, int offset, int length, out string? value)
+		{
+			value = null;
+
+			if (length <= 0)
+				return false;
+			if (offset < 0 || offset >= payload.Length)
+				return false;
+
+			var byteLength = length;
+			if (byteLength % 2 != 0)
+			{
+				var altLength = checked(length * 2);
+				if (offset + altLength > payload.Length)
+					return false;
+				byteLength = altLength;
+			}
+
+			if (offset + byteLength > payload.Length)
+				return false;
+
+			string decoded;
+			try
+			{
+				decoded = System.Text.Encoding.Unicode.GetString(payload, offset, byteLength).TrimEnd('\0');
+			}
+			catch
+			{
+				return false;
+			}
+
+			if (!IsLikelyText(decoded))
+				return false;
+
+			value = decoded;
+			return true;
+		}
+
+		private static int SkipNullBytes(byte[] payload, int offset)
+		{
+			var current = offset;
+			while (current + 1 < payload.Length && payload[current] == 0 && payload[current + 1] == 0)
+				current += 2;
+			return current;
+		}
+
+		private static bool TryReadUInt32(byte[] payload, int offset, out int value)
+		{
+			value = 0;
+			if (offset < 0 || offset + sizeof(uint) > payload.Length)
+				return false;
+
+			var raw = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(offset, sizeof(uint)));
+			if (raw > int.MaxValue)
+				return false;
+
+			value = (int)raw;
+			return true;
 		}
 
 		private static bool IsLikelyText(string? text)
