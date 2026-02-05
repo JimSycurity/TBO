@@ -105,99 +105,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return UncPath.TryParse(path, out _);
 		}
 
-		#region CreateInfo helpers
-		private const Smb2FileCreateOptions BaseCreateOptions =
-			Smb2FileCreateOptions.SynchronousIoNonalert
-			| Smb2FileCreateOptions.OpenForBackupIntent;
-
-		private static Smb2FileCreateOptions ApplyBaseCreateOptions(Smb2FileCreateOptions options)
-			=> options | BaseCreateOptions;
-
-		private static Smb2CreateInfo CreateOpenInfo(
-			Smb2CreateDisposition disposition,
-			uint desiredAccess,
-			Smb2ShareAccess shareAccess,
-			Winterop.FileAttributes fileAttributes,
-			DateTime? timeWarpToken,
-			Smb2FileCreateOptions createOptions,
-			Smb2ImpersonationLevel impersonationLevel = Smb2ImpersonationLevel.Impersonation)
-		{
-			return new Smb2CreateInfo
-			{
-				CreateDisposition = disposition,
-				DesiredAccess = desiredAccess,
-				ShareAccess = shareAccess,
-				ImpersonationLevel = impersonationLevel,
-				CreateOptions = ApplyBaseCreateOptions(createOptions),
-				FileAttributes = fileAttributes,
-				TimeWarpToken = timeWarpToken
-			};
-		}
-
-		private static Smb2CreateInfo CreateOpenDirectoryInfo(DateTime? timeWarpToken)
-		{
-			var info = CreateOpenInfo(
-				Smb2CreateDisposition.Open,
-				(uint)Smb2AccessRights.DefaultOpenDirAccess,
-				Smb2ShareAccess.DefaultDirShare,
-				Winterop.FileAttributes.None,
-				timeWarpToken,
-				Smb2FileCreateOptions.Directory);
-
-			info.Priority = Smb2Priority.OpenDir;
-			info.RequestMaximalAccess = true;
-			info.QueryOnDiskId = true;
-			info.OplockLevel = Smb2OplockLevel.None;
-			return info;
-		}
-
-		private static Smb2CreateInfo CreateOpenReadFileInfo(
-			DateTime? timeWarpToken,
-			bool nonDirectory,
-			bool openReparsePoint,
-			Smb2ShareAccess shareAccess = Smb2ShareAccess.Read,
-			uint? desiredAccess = null,
-			Winterop.FileAttributes fileAttributes = Winterop.FileAttributes.Normal)
-		{
-			var options = Smb2FileCreateOptions.None;
-			if (nonDirectory)
-				options |= Smb2FileCreateOptions.NonDirectory;
-			if (openReparsePoint)
-				options |= Smb2FileCreateOptions.OpenReparsePoint;
-
-			return CreateOpenInfo(
-				Smb2CreateDisposition.Open,
-				desiredAccess ?? (uint)Smb2AccessRights.DefaultOpenReadAccess,
-				shareAccess,
-				fileAttributes,
-				timeWarpToken,
-				options);
-		}
-
-		private static Smb2CreateInfo CreateOpenReparseInfo(DateTime? timeWarpToken)
-		{
-			return CreateOpenInfo(
-				Smb2CreateDisposition.Open,
-				(uint)(Smb2AccessRights.ReadAttributes | Smb2AccessRights.ReadEa),
-				Smb2ShareAccess.ReadWriteDelete,
-				Winterop.FileAttributes.None,
-				timeWarpToken,
-				Smb2FileCreateOptions.OpenReparsePoint | Smb2FileCreateOptions.OpenNoRecall);
-		}
-
-		private static Smb2CreateInfo CreateContentWriteInfo(
-			Smb2CreateDisposition disposition,
-			DateTime? timeWarpToken)
-		{
-			return CreateOpenInfo(
-				disposition,
-				(uint)Smb2AccessRights.DefaultCreateAccess,
-				Smb2ShareAccess.ReadWrite,
-				Winterop.FileAttributes.Normal,
-				timeWarpToken,
-				Smb2FileCreateOptions.NonDirectory);
-		}
-
+		#region Logging helpers
 		private void LogDiagnostic(string message)
 			=> this.smb.LogDiagnostic(message);
 
@@ -298,16 +206,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			return this.BeginOperation(cancellationToken =>
 			{
-				using (var file = this.smb.SmbClient.CreateFileAsync(uncPath, new Smb2CreateInfo
-				{
-					CreateDisposition = Smb2CreateDisposition.Open,
-					DesiredAccess = (uint)Smb2AccessRights.DefaultOpenReadAccess,
-					ShareAccess = Smb2ShareAccess.Read,
-					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-					CreateOptions = Smb2FileCreateOptions.SynchronousIoNonalert | Smb2FileCreateOptions.OpenForBackupIntent,
-					FileAttributes = Winterop.FileAttributes.Normal,
-					TimeWarpToken = snapshotPath.TimeWarpToken
-				}, FileAccess.Read, cancellationToken).Result)
+				var createInfo = SmbCreateInfoFactory.CreateOpenReadFileInfo(
+					snapshotPath.TimeWarpToken,
+					nonDirectory: false,
+					openReparsePoint: false);
+
+				using (var file = this.smb.SmbClient.CreateFileAsync(uncPath, createInfo, FileAccess.Read, cancellationToken).Result)
 				{
 					return file.IsDirectory;
 				}
@@ -336,22 +240,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			this.BeginOperation(cancellationToken =>
 			{
-				using (var dir = (Smb2Directory)this.smb.SmbClient.CreateFileAsync(uncPath, new Smb2CreateInfo
-				{
-					CreateDisposition = Smb2CreateDisposition.Open,
-					Priority = Smb2Priority.OpenDir,
-					DesiredAccess = (uint)Smb2AccessRights.DefaultOpenDirAccess,
-					ShareAccess = Smb2ShareAccess.DefaultDirShare,
-					FileAttributes = Winterop.FileAttributes.None,
-					CreateOptions = Smb2FileCreateOptions.Directory
-						| Smb2FileCreateOptions.SynchronousIoNonalert
-						| Smb2FileCreateOptions.OpenForBackupIntent,
-					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-					RequestMaximalAccess = true,
-					QueryOnDiskId = true,
-					TimeWarpToken = snapshotPath.TimeWarpToken,
-					OplockLevel = Smb2OplockLevel.None
-				}, FileAccess.Read, cancellationToken).Result)
+				var createInfo = SmbCreateInfoFactory.CreateOpenDirectoryInfo(snapshotPath.TimeWarpToken);
+				using (var dir = (Smb2Directory)this.smb.SmbClient.CreateFileAsync(uncPath, createInfo, FileAccess.Read, cancellationToken).Result)
 				{
 					bool includeRootReparseInfo = false;
 					var connectParams = SmbConnectionParameters.ResolveOrDefault(this.smb, uncPath.ServerName);
@@ -396,19 +286,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			try
 			{
-				using var file = this.smb.SmbClient.CreateFileAsync(resolvedPath, new Smb2CreateInfo
-				{
-					CreateDisposition = Smb2CreateDisposition.Open,
-					DesiredAccess = (uint)(Smb2AccessRights.ReadAttributes | Smb2AccessRights.ReadEa),
-					ShareAccess = Smb2ShareAccess.ReadWriteDelete,
-					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-					CreateOptions = Smb2FileCreateOptions.SynchronousIoNonalert
-						| Smb2FileCreateOptions.OpenReparsePoint
-						| Smb2FileCreateOptions.OpenNoRecall
-						| Smb2FileCreateOptions.OpenForBackupIntent,
-					FileAttributes = 0,
-					TimeWarpToken = timeWarpToken
-				}, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
+				var createInfo = SmbCreateInfoFactory.CreateOpenReparseInfo(timeWarpToken);
+				using var file = this.smb.SmbClient.CreateFileAsync(resolvedPath, createInfo, FileAccess.Read, cancellationToken).GetAwaiter().GetResult();
 
 				var reparseInfo = file.GetReparseInfoAsync(cancellationToken).GetAwaiter().GetResult();
 				tag = reparseInfo.Tag;
@@ -453,18 +332,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				try
 				{
-					using (this.SmbClient.CreateFileAsync(uncPath, new Smb2CreateInfo
-					{
-						CreateDisposition = Smb2CreateDisposition.Open,
-						DesiredAccess = (uint)Smb2AccessRights.DefaultOpenReadAccess,
-						ShareAccess = Smb2ShareAccess.Read,
-						ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
-						CreateOptions = Smb2FileCreateOptions.SynchronousIoNonalert
-							| Smb2FileCreateOptions.OpenReparsePoint
-							| Smb2FileCreateOptions.OpenForBackupIntent,
-						FileAttributes = Winterop.FileAttributes.Normal,
-						TimeWarpToken = snapshotPath.TimeWarpToken
-					}, FileAccess.Read, token).Result)
+					var createInfo = SmbCreateInfoFactory.CreateOpenReadFileInfo(
+						snapshotPath.TimeWarpToken,
+						nonDirectory: false,
+						openReparsePoint: true);
+
+					using (this.SmbClient.CreateFileAsync(uncPath, createInfo, FileAccess.Read, token).Result)
 					{
 						return true;
 					}
