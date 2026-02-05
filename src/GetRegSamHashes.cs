@@ -164,7 +164,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						RegistryHelpers.BackupOptions,
 						cancellationToken).GetAwaiter().GetResult();
 					var valueInfo = userKey.GetValue("V", cancellationToken).GetAwaiter().GetResult();
-					var bytes = ExtractValueBytes(valueInfo);
+					var bytes = RegistryHelpers.ExtractValueBytes(valueInfo);
 					LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM user {keyName} value size {(bytes?.Length ?? 0)} bytes on {this.ServerName}.");
 					if (bytes == null || bytes.Length == 0)
 					{
@@ -269,7 +269,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			CancellationToken cancellationToken)
 		{
 			var usersF = accountKey.GetValue("F", cancellationToken).GetAwaiter().GetResult();
-			var fBytes = ExtractValueBytes(usersF);
+			var fBytes = RegistryHelpers.ExtractValueBytes(usersF);
 			LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM account F value size {(fBytes?.Length ?? 0)} bytes.");
 			if (fBytes == null || fBytes.Length < 136)
 			{
@@ -344,12 +344,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					catch (Exception ex)
 					{
 						this.LogException(smb, $"Get-TBORegSamHashes failed to read SAM name entry {name}", ex);
+						this.LogWarning(smb, $"Get-TBORegSamHashes failed to read SAM name entry {name}: {ex.Message}");
 					}
 				}
 			}
 			catch (Exception ex)
 			{
 				this.LogException(smb, "Get-TBORegSamHashes failed to read SAM user name map", ex);
+				this.LogWarning(smb, $"Get-TBORegSamHashes failed to read SAM user name map: {ex.Message}");
 			}
 
 			return results;
@@ -392,7 +394,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (candidate != null && TryReadRid(candidate, out rid))
 				return true;
 
-			var bytes = candidate != null ? ExtractValueBytes(candidate) : null;
+			var bytes = candidate != null ? RegistryHelpers.ExtractValueBytes(candidate) : null;
 			LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM name entry {name} value size {(bytes?.Length ?? 0)} bytes is not a RID.");
 			return TryReadRidFromClassName(smb, userKey, name, cancellationToken, out rid);
 		}
@@ -427,17 +429,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			catch (Exception ex)
 			{
 				this.LogException(smb, $"Get-TBORegSamHashes failed to read class name for {name}", ex);
+				this.LogWarning(smb, $"Get-TBORegSamHashes failed to read class name for {name}: {ex.Message}");
 				return false;
 			}
-		}
-
-		private static byte[]? ExtractValueBytes(RegistryValueInfo info)
-		{
-			if (info.Bytes != null && info.Bytes.Length > 0)
-				return info.Bytes;
-			if (info.TypedValue is byte[] typedBytes && typedBytes.Length > 0)
-				return typedBytes;
-			return null;
 		}
 
 		private static void LogDiagnostic(ISmbProviderInfo smb, string message)
@@ -463,21 +457,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return true;
 			}
 
-			var bytes = ExtractValueBytes(info);
+			var bytes = RegistryHelpers.ExtractValueBytes(info);
 			if (bytes == null || bytes.Length < 4)
 				return false;
 
 			rid = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(0, 4));
 			return true;
-		}
-
-		private static string? CombineSubkeyPath(string? basePath, string childName)
-		{
-			if (string.IsNullOrEmpty(basePath))
-				return childName;
-			if (string.IsNullOrEmpty(childName))
-				return basePath;
-			return $"{basePath}\\{childName}";
 		}
 
 		private static bool TryValidateSamUserRecord(byte[] bytes, out string? reason)

@@ -296,14 +296,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return true;
 		}
 
-		protected static byte[]? ExtractValueBytes(RegistryValueInfo info)
-		{
-			if (info.Bytes != null && info.Bytes.Length > 0)
-				return info.Bytes;
-			if (info.TypedValue is byte[] typedBytes && typedBytes.Length > 0)
-				return typedBytes;
-			return null;
-		}
+	protected static byte[]? ExtractValueBytes(RegistryValueInfo info)
+	{
+		return RegistryHelpers.ExtractValueBytes(info);
+	}
 
 		protected static byte[]? TryReadValueBytes(IRegistryKey key, string name, CancellationToken cancellationToken)
 		{

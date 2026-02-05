@@ -67,6 +67,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		internal static string DenormalizeValueName(string name)
 			=> string.Equals(name, DefaultValueName, StringComparison.OrdinalIgnoreCase) ? string.Empty : name;
 
+		internal static byte[]? ExtractValueBytes(RegistryValueInfo info)
+		{
+			if (info.Bytes != null && info.Bytes.Length > 0)
+				return info.Bytes;
+			if (info.TypedValue is byte[] typedBytes && typedBytes.Length > 0)
+				return typedBytes;
+			return null;
+		}
+
 		internal static bool IsRootPath(string providerPath)
 			=> string.IsNullOrWhiteSpace(providerPath) || providerPath == "\\";
 
