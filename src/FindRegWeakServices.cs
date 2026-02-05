@@ -97,6 +97,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			var basePath = string.IsNullOrWhiteSpace(this.Path) ? DefaultServicesPath : this.Path;
 			var parsedPath = ParseRegistryPath(basePath, nameof(this.Path));
+			var useDefaultAccessMask = !this.AccessMask.HasValue;
 			var interestingAccessMask = ResolveAccessMask();
 
 			ExecuteRegistryOperation(smb, cancellationToken, session =>
@@ -119,6 +120,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						keyInfo,
 						requestedNames,
 						interestingAccessMask,
+						useDefaultAccessMask,
 						cancellationToken);
 					return;
 				}
@@ -135,6 +137,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						parsedPath,
 						subkey.KeyName,
 						interestingAccessMask,
+						useDefaultAccessMask,
 						cancellationToken,
 						warnOnMissing: false);
 				}
@@ -149,6 +152,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			RegistryKeyInfo servicesInfo,
 			List<string> requestedNames,
 			uint interestingAccessMask,
+			bool useDefaultAccessMask,
 			CancellationToken cancellationToken)
 		{
 			var exactNames = new List<string>();
@@ -171,7 +175,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (string.IsNullOrWhiteSpace(name))
 					continue;
 
-				if (TryScanService(smb, client, servicesPath, name, interestingAccessMask, cancellationToken, warnOnMissing: true))
+				if (TryScanService(smb, client, servicesPath, name, interestingAccessMask, useDefaultAccessMask, cancellationToken, warnOnMissing: true))
 					checkedNames.Add(name);
 			}
 
@@ -190,7 +194,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					continue;
 
 				wildcardMatched = true;
-				if (TryScanService(smb, client, servicesPath, keyName, interestingAccessMask, cancellationToken, warnOnMissing: false))
+				if (TryScanService(smb, client, servicesPath, keyName, interestingAccessMask, useDefaultAccessMask, cancellationToken, warnOnMissing: false))
 					checkedNames.Add(keyName);
 			}
 
@@ -246,12 +250,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			RegistryPathSpec basePath,
 			string serviceName,
 			uint interestingAccessMask,
+			bool useDefaultAccessMask,
 			CancellationToken cancellationToken,
 			bool warnOnMissing)
 		{
 			try
 			{
-				ScanService(smb, client, basePath, serviceName, interestingAccessMask, cancellationToken);
+				ScanService(smb, client, basePath, serviceName, interestingAccessMask, useDefaultAccessMask, cancellationToken);
 				return true;
 			}
 			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
@@ -263,7 +268,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						cancellationToken,
 						session =>
 						{
-							ScanService(smb, session.Client, basePath, serviceName, interestingAccessMask, cancellationToken);
+							ScanService(smb, session.Client, basePath, serviceName, interestingAccessMask, useDefaultAccessMask, cancellationToken);
 							return true;
 						});
 				}
@@ -297,6 +302,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			RegistryPathSpec basePath,
 			string serviceName,
 			uint interestingAccessMask,
+			bool useDefaultAccessMask,
 			CancellationToken cancellationToken)
 		{
 			var serviceSpec = new RegistryPathSpec(
@@ -321,7 +327,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (!TryGetAceInfo(ace, out var trustee, out var accessMask))
 					continue;
 
-				if ((accessMask & interestingAccessMask) == 0)
+				if (!IsAccessMaskInteresting(accessMask, interestingAccessMask, useDefaultAccessMask))
 					continue;
 
 				var wellKnownSid = trustee.AsWellKnownSid();
@@ -455,6 +461,25 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private uint ResolveAccessMask()
 		{
 			return this.AccessMask ?? DefaultInterestingAccessMask;
+		}
+
+		private static bool IsAccessMaskInteresting(uint accessMask, uint interestingAccessMask, bool useDefaultAccessMask)
+		{
+			if (!useDefaultAccessMask)
+				return (accessMask & interestingAccessMask) != 0;
+
+			if ((accessMask & (uint)ServiceAccess.AllRights) == (uint)ServiceAccess.AllRights)
+				return true;
+			if ((accessMask & (uint)ServiceAccess.ChangeConfig) != 0)
+				return true;
+			if ((accessMask & (uint)StandardAccessRights.WriteDac) != 0)
+				return true;
+			if ((accessMask & (uint)StandardAccessRights.WriteOwner) != 0)
+				return true;
+			if ((accessMask & GenericWriteMask) != 0)
+				return true;
+
+			return false;
 		}
 
 		private static bool IsServiceSid(SecurityIdentifier trustee)
