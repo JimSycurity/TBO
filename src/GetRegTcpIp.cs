@@ -65,104 +65,189 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[ValidateSet("IPv4", "IPv6", "Both")]
 		public string Protocol { get; set; } = "Both";
 
-		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		private sealed class TcpIpParametersSnapshot
 		{
-			ExecuteRegistryOperation(smb, cancellationToken, session =>
-			{
-				foreach (var protocol in ResolveProtocols())
-				{
-					var interfaceNameMap = BuildInterfaceNameMap(session.Client, smb, cancellationToken);
-					var paths = GetProtocolPaths(protocol);
-					var parametersSpec = new RegistryPathSpec(
-						RegistryRootKey.LocalMachine,
-						RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
-						paths.ParametersPath);
-					var interfacesSpec = new RegistryPathSpec(
-						RegistryRootKey.LocalMachine,
-						RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
-						paths.InterfacesPath);
-
-					IRegistryKey? parametersKey = null;
-					IRegistryKey? interfacesKey = null;
-					try
-					{
-						parametersKey = OpenRegistryKey(session.Client, parametersSpec, RegistryAccessRights.QueryValue, cancellationToken);
-						interfacesKey = OpenRegistryKey(session.Client, interfacesSpec, RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue, cancellationToken);
-					}
-					catch (Win32Exception ex) when (IsMissingKey(ex))
-					{
-						smb.LogException($"Get-TBORegTCPIP failed to open {protocol} parameters", ex);
-						this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} registry data: {ex.Message}");
-						parametersKey?.Dispose();
-						interfacesKey?.Dispose();
-						continue;
-					}
-
-					using (parametersKey)
-					using (interfacesKey)
-					{
-						var interfaces = CollectInterfaces(smb, interfacesKey, protocol, interfaceNameMap, cancellationToken);
-
-						this.WriteObject(new TboRegTcpIpInfo
-						{
-							ServerName = this.ServerName,
-							Protocol = protocol,
-							ParametersKeyPath = parametersSpec.KeyPath,
-							InterfacesKeyPath = interfacesSpec.KeyPath,
-							Domain = TryReadString(parametersKey, cancellationToken, "Domain"),
-							DhcpDomain = TryReadString(parametersKey, cancellationToken, "DhcpDomain"),
-							SearchList = TryReadStringList(parametersKey, cancellationToken, "SearchList"),
-							DhcpSearchList = TryReadStringList(parametersKey, cancellationToken, "DhcpSearchList", "Dhcpv6DomainSearchList"),
-							NameServers = TryReadStringList(parametersKey, cancellationToken, "NameServer"),
-							DhcpNameServers = TryReadStringList(parametersKey, cancellationToken, "DhcpNameServer", "Dhcpv6DNSServers"),
-							RoutingEnabled = TryReadBool(parametersKey, cancellationToken, "IPEnableRouter"),
-							PersistentRoutes = TryReadStringList(parametersKey, cancellationToken, "PersistentRoutes"),
-							Interfaces = interfaces
-						});
-					}
-				}
-			});
+			public string? Domain { get; init; }
+			public string? DhcpDomain { get; init; }
+			public string[]? SearchList { get; init; }
+			public string[]? DhcpSearchList { get; init; }
+			public string[]? NameServers { get; init; }
+			public string[]? DhcpNameServers { get; init; }
+			public bool? RoutingEnabled { get; init; }
+			public string[]? PersistentRoutes { get; init; }
 		}
 
-		private IReadOnlyList<TboRegTcpIpInterfaceInfo> CollectInterfaces(
+		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		{
+			var interfaceNameMap = BuildInterfaceNameMap(smb, cancellationToken);
+			foreach (var protocol in ResolveProtocols())
+			{
+				if (!TryBuildProtocolInfo(smb, protocol, interfaceNameMap, cancellationToken, out var info))
+					continue;
+
+				this.WriteObject(info);
+			}
+		}
+
+		private bool TryBuildProtocolInfo(
 			ISmbProviderInfo smb,
-			IRegistryKey interfacesKey,
 			string protocol,
+			IReadOnlyDictionary<string, string> interfaceNameMap,
+			CancellationToken cancellationToken,
+			out TboRegTcpIpInfo info)
+		{
+			info = null!;
+			var paths = GetProtocolPaths(protocol);
+			var parametersSpec = new RegistryPathSpec(
+				RegistryRootKey.LocalMachine,
+				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
+				paths.ParametersPath);
+			var interfacesSpec = new RegistryPathSpec(
+				RegistryRootKey.LocalMachine,
+				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
+				paths.InterfacesPath);
+
+			var parameters = TryReadProtocolParameters(smb, protocol, parametersSpec, cancellationToken);
+			if (parameters == null)
+				return false;
+
+			var interfaceIds = TryReadInterfaceIds(smb, protocol, interfacesSpec, cancellationToken);
+			if (interfaceIds == null)
+				return false;
+
+			var interfaces = new List<TboRegTcpIpInterfaceInfo>();
+			foreach (var interfaceId in interfaceIds)
+			{
+				var interfaceInfo = TryReadInterfaceInfo(
+					smb,
+					protocol,
+					interfacesSpec,
+					interfaceId,
+					interfaceNameMap,
+					cancellationToken);
+				if (interfaceInfo != null)
+					interfaces.Add(interfaceInfo);
+			}
+
+			info = new TboRegTcpIpInfo
+			{
+				ServerName = this.ServerName,
+				Protocol = protocol,
+				ParametersKeyPath = parametersSpec.KeyPath,
+				InterfacesKeyPath = interfacesSpec.KeyPath,
+				Domain = parameters.Domain,
+				DhcpDomain = parameters.DhcpDomain,
+				SearchList = parameters.SearchList,
+				DhcpSearchList = parameters.DhcpSearchList,
+				NameServers = parameters.NameServers,
+				DhcpNameServers = parameters.DhcpNameServers,
+				RoutingEnabled = parameters.RoutingEnabled,
+				PersistentRoutes = parameters.PersistentRoutes,
+				Interfaces = interfaces
+			};
+			return true;
+		}
+
+		private TcpIpParametersSnapshot? TryReadProtocolParameters(
+			ISmbProviderInfo smb,
+			string protocol,
+			RegistryPathSpec parametersSpec,
+			CancellationToken cancellationToken)
+		{
+			try
+			{
+				return ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					using var parametersKey = OpenRegistryKey(session.Client, parametersSpec, RegistryAccessRights.QueryValue, cancellationToken);
+					return new TcpIpParametersSnapshot
+					{
+						Domain = TryReadString(parametersKey, cancellationToken, "Domain"),
+						DhcpDomain = TryReadString(parametersKey, cancellationToken, "DhcpDomain"),
+						SearchList = TryReadStringList(parametersKey, cancellationToken, "SearchList"),
+						DhcpSearchList = TryReadStringList(parametersKey, cancellationToken, "DhcpSearchList", "Dhcpv6DomainSearchList"),
+						NameServers = TryReadStringList(parametersKey, cancellationToken, "NameServer"),
+						DhcpNameServers = TryReadStringList(parametersKey, cancellationToken, "DhcpNameServer", "Dhcpv6DNSServers"),
+						RoutingEnabled = TryReadBool(parametersKey, cancellationToken, "IPEnableRouter"),
+						PersistentRoutes = TryReadStringList(parametersKey, cancellationToken, "PersistentRoutes")
+					};
+				});
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex))
+			{
+				smb.LogException($"Get-TBORegTCPIP failed to open {protocol} parameters", ex);
+				this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} registry parameters: {ex.Message}");
+				return null;
+			}
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+			{
+				smb.LogException($"Get-TBORegTCPIP failed to read {protocol} parameters", ex);
+				this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} registry parameters: {ex.Message}");
+				return null;
+			}
+		}
+
+		private List<string>? TryReadInterfaceIds(
+			ISmbProviderInfo smb,
+			string protocol,
+			RegistryPathSpec interfacesSpec,
+			CancellationToken cancellationToken)
+		{
+			try
+			{
+				return ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					using var interfacesKey = OpenRegistryKey(
+						session.Client,
+						interfacesSpec,
+						RegistryAccessRights.EnumerateSubkeys,
+						cancellationToken);
+					var subkeys = CollectSubkeys(interfacesKey, cancellationToken);
+					return subkeys
+						.Select(subkeyInfo => subkeyInfo.KeyName)
+						.Where(name => !string.IsNullOrWhiteSpace(name))
+						.ToList();
+				});
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex))
+			{
+				smb.LogException($"Get-TBORegTCPIP failed to open {protocol} interfaces", ex);
+				this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} interface list: {ex.Message}");
+				return null;
+			}
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+			{
+				smb.LogException($"Get-TBORegTCPIP failed to enumerate {protocol} interfaces", ex);
+				this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} interface list: {ex.Message}");
+				return null;
+			}
+		}
+
+		private TboRegTcpIpInterfaceInfo? TryReadInterfaceInfo(
+			ISmbProviderInfo smb,
+			string protocol,
+			RegistryPathSpec interfacesSpec,
+			string interfaceId,
 			IReadOnlyDictionary<string, string> interfaceNameMap,
 			CancellationToken cancellationToken)
 		{
-			var results = new List<TboRegTcpIpInterfaceInfo>();
-			var subkeys = CollectSubkeys(interfacesKey, cancellationToken);
-			foreach (var subkeyInfo in subkeys)
+			try
 			{
-				var name = subkeyInfo.KeyName;
-				if (string.IsNullOrWhiteSpace(name))
-					continue;
-
-				IRegistryKey? ifaceKey = null;
-				try
+				return ExecuteRegistryOperation(smb, cancellationToken, session =>
 				{
-					ifaceKey = interfacesKey.OpenSubkey(
-						name,
+					using var interfacesKey = OpenRegistryKey(
+						session.Client,
+						interfacesSpec,
+						RegistryAccessRights.QueryValue,
+						RegistryAccessRights.EnumerateSubkeys,
+						cancellationToken);
+					using var ifaceKey = interfacesKey.OpenSubkey(
+						interfaceId,
 						RegistryAccessRights.QueryValue,
 						BackupOptions,
 						cancellationToken).GetAwaiter().GetResult();
-				}
-				catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
-				{
-					smb.LogException($"Get-TBORegTCPIP failed to read interface {name}", ex);
-					this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{name}': {ex.Message}");
-					continue;
-				}
-				catch (Win32Exception ex) when (IsMissingKey(ex) || ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
-				{
-					continue;
-				}
 
-				using (ifaceKey)
-				{
-					var keyPath = $"{interfacesKey.KeyPath}\\{name}";
-					interfaceNameMap.TryGetValue(name, out var friendlyName);
+					var keyPath = $"{interfacesSpec.KeyPath}\\{interfaceId}";
+					interfaceNameMap.TryGetValue(interfaceId, out var friendlyName);
 					var dhcpEnabled = TryReadBool(ifaceKey, cancellationToken, "EnableDHCP");
 					var ipAddresses = TryReadStringList(ifaceKey, cancellationToken, "IPAddress", "Address");
 					var dhcpIpAddresses = TryReadStringList(ifaceKey, cancellationToken, "DhcpIPAddress", "Dhcpv6Address");
@@ -171,11 +256,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					var defaultGateways = TryReadStringList(ifaceKey, cancellationToken, "DefaultGateway");
 					var dhcpDefaultGateways = TryReadStringList(ifaceKey, cancellationToken, "DhcpDefaultGateway");
 
-					results.Add(new TboRegTcpIpInterfaceInfo
+					return new TboRegTcpIpInterfaceInfo
 					{
 						ServerName = this.ServerName,
 						Protocol = protocol,
-						InterfaceId = name,
+						InterfaceId = interfaceId,
 						FriendlyName = friendlyName,
 						KeyPath = keyPath,
 						DhcpEnabled = dhcpEnabled,
@@ -192,67 +277,122 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						DhcpSubnetMasks = dhcpSubnetMasks,
 						DefaultGateways = defaultGateways,
 						DhcpDefaultGateways = dhcpDefaultGateways
-					});
-				}
+					};
+				});
 			}
-
-			return results;
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+			{
+				smb.LogException($"Get-TBORegTCPIP failed to read interface {interfaceId}", ex);
+				this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{interfaceId}': {ex.Message}");
+				return null;
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex) || ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
+			{
+				return null;
+			}
+			catch (Exception ex)
+			{
+				smb.LogException($"Get-TBORegTCPIP failed to read interface {interfaceId}", ex);
+				this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{interfaceId}': {ex.Message}");
+				return null;
+			}
 		}
 
 		private IReadOnlyDictionary<string, string> BuildInterfaceNameMap(
-			IRegistryClient client,
 			ISmbProviderInfo smb,
 			CancellationToken cancellationToken)
 		{
 			var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			var interfaceIds = TryReadNetworkInterfaceIds(smb, cancellationToken);
+			if (interfaceIds.Count == 0)
+				return map;
+
+			foreach (var interfaceId in interfaceIds)
+			{
+				var friendlyName = TryReadNetworkInterfaceName(smb, interfaceId, cancellationToken);
+				if (!string.IsNullOrWhiteSpace(friendlyName))
+					map[interfaceId] = friendlyName;
+			}
+
+			return map;
+		}
+
+		private List<string> TryReadNetworkInterfaceIds(ISmbProviderInfo smb, CancellationToken cancellationToken)
+		{
 			var spec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
 				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
 				NetworkConnectionsPath);
-
-			IRegistryKey? connectionsKey = null;
 			try
 			{
-				connectionsKey = OpenRegistryKey(client, spec, RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue, cancellationToken);
+				return ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					using var connectionsKey = OpenRegistryKey(
+						session.Client,
+						spec,
+						RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
+						cancellationToken);
+					var subkeys = CollectSubkeys(connectionsKey, cancellationToken);
+					return subkeys
+						.Select(subkeyInfo => subkeyInfo.KeyName)
+						.Where(name => !string.IsNullOrWhiteSpace(name))
+						.ToList();
+				});
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
-				return map;
+				return new List<string>();
 			}
-
-			using (connectionsKey)
+			catch (Exception ex)
 			{
-				var subkeys = CollectSubkeys(connectionsKey, cancellationToken);
-				foreach (var subkeyInfo in subkeys)
-				{
-					var guid = subkeyInfo.KeyName;
-					if (string.IsNullOrWhiteSpace(guid))
-						continue;
-
-					IRegistryKey? connectionKey = null;
-					try
-					{
-						connectionKey = connectionsKey.OpenSubkey(
-							$"{guid}\\Connection",
-							RegistryAccessRights.QueryValue,
-							BackupOptions,
-							cancellationToken).GetAwaiter().GetResult();
-					}
-					catch (Win32Exception ex) when (IsMissingKey(ex) || ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
-					{
-						continue;
-					}
-
-					using (connectionKey)
-					{
-						var name = TryReadString(connectionKey, cancellationToken, "Name");
-						if (!string.IsNullOrWhiteSpace(name))
-							map[guid] = name;
-					}
-				}
+				smb.LogException("Get-TBORegTCPIP failed to enumerate network connections", ex);
+				this.WriteWarning($"Get-TBORegTCPIP failed to read interface names: {ex.Message}");
+				return new List<string>();
 			}
+		}
 
-			return map;
+		private string? TryReadNetworkInterfaceName(
+			ISmbProviderInfo smb,
+			string interfaceId,
+			CancellationToken cancellationToken)
+		{
+			var spec = new RegistryPathSpec(
+				RegistryRootKey.LocalMachine,
+				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
+				NetworkConnectionsPath);
+			try
+			{
+				return ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					using var connectionsKey = OpenRegistryKey(
+						session.Client,
+						spec,
+						RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
+						cancellationToken);
+					using var connectionKey = connectionsKey.OpenSubkey(
+						$"{interfaceId}\\Connection",
+						RegistryAccessRights.QueryValue,
+						BackupOptions,
+						cancellationToken).GetAwaiter().GetResult();
+					return TryReadString(connectionKey, cancellationToken, "Name");
+				});
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex) || ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
+			{
+				return null;
+			}
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+			{
+				smb.LogException($"Get-TBORegTCPIP failed to read interface name for {interfaceId}", ex);
+				this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{interfaceId}' name: {ex.Message}");
+				return null;
+			}
+			catch (Exception ex)
+			{
+				smb.LogException($"Get-TBORegTCPIP failed to read interface name for {interfaceId}", ex);
+				this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{interfaceId}' name: {ex.Message}");
+				return null;
+			}
 		}
 
 		private static (string ParametersPath, string InterfacesPath) GetProtocolPaths(string protocol)
