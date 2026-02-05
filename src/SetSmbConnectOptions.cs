@@ -65,27 +65,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrEmpty(this.ServerName))
 			{
 				this.LogVerbose(smb, this.DefaultScopeMessage);
-				var baseParams = GetDefaultConnectParameters(smb);
-				smb.DefaultConnectParameters = this._parms.MergeOnto(baseParams);
+				smb.DefaultConnectParameters = SmbConnectionParameters.MergeDefaults(smb, this._parms);
 				return;
 			}
 
-			var baseServerParams = GetServerConnectParameters(smb, this.ServerName);
-			var parms = this._parms.MergeOnto(baseServerParams);
+			var parms = SmbConnectionParameters.MergeForServer(smb, this.ServerName, this._parms);
 			smb.SetConnectParameters(this.ServerName, parms);
 		}
 
 		protected virtual string DefaultScopeMessage
 			=> "Setting default connection parameters (no server specified)";
-
-		private static SmbConnectionParameters GetDefaultConnectParameters(ISmbProviderInfo smb)
-			=> smb.DefaultConnectParameters as SmbConnectionParameters ?? SmbConnectionParameters.GetDefault();
-
-		private static SmbConnectionParameters GetServerConnectParameters(ISmbProviderInfo smb, string serverName)
-		{
-			var existing = smb.GetConnectParametersFor(serverName, false) as SmbConnectionParameters;
-			return existing ?? GetDefaultConnectParameters(smb);
-		}
 	}
 
 	[Cmdlet(VerbsCommon.Set, "TBOConnectOptions")]

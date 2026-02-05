@@ -119,9 +119,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				var uncPath = UncPath.Parse(drive.Root);
 
-				var baseParms = this.smb.GetConnectParametersFor(uncPath.ServerName, true);
-				var parms = (SmbConnectionParameters)this.DynamicParameters;
-				parms = parms.MergeOnto(baseParms);
+				var overrides = this.DynamicParameters as SmbConnectionParameters ?? new SmbConnectionParameters();
+				var parms = SmbConnectionParameters.MergeForServer(this.smb, uncPath.ServerName, overrides);
 				this.smb.SetConnectParameters(uncPath.ServerName, parms);
 
 				if (string.IsNullOrEmpty(uncPath.ShareName))
@@ -252,8 +251,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}, FileAccess.Read, cancellationToken).Result)
 				{
 					bool includeRootReparseInfo = false;
-					var connectParams = this.smb.GetConnectParametersFor(uncPath.ServerName, true) as SmbConnectionParameters;
-					if (connectParams?.IncludeRootReparseInfo != null)
+					var connectParams = SmbConnectionParameters.ResolveOrDefault(this.smb, uncPath.ServerName);
+					if (connectParams.IncludeRootReparseInfo != null)
 						includeRootReparseInfo = connectParams.IncludeRootReparseInfo.Value;
 
 					bool includeReparseInfo = !string.IsNullOrEmpty(uncPath.ShareRelativePath) || includeRootReparseInfo;
@@ -766,7 +765,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrEmpty(serverName))
 				return null;
 
-			var parms = this.GetConnectParametersFor(serverName, true) ?? SmbConnectionParameters.GetDefault();
+			var parms = SmbConnectionParameters.ResolveOrDefault(this, serverName);
 
 			// Create SPNEGO context required by SMB2
 			var authContext = new SpnegoClientContext();
@@ -987,9 +986,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		public Task<IPAddress[]> ResolveAsync(string hostName, CancellationToken cancellationToken)
 		{
-			var parms = this.GetConnectParametersFor(hostName, false);
-
-			if (parms != null)
+			var parms = SmbConnectionParameters.TryGetServerSpecific(this, hostName);
+			if (!string.IsNullOrWhiteSpace(parms?.HostName))
 				hostName = parms.HostName;
 
 			return PlatformNameResolverService.ResolveAsync(hostName, this.DefaultConnectParameters.NameResolveOptions.Value, null, cancellationToken);
@@ -999,7 +997,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		public Smb2ConnectionOptions? GetConnectionOptionsFor(string serverName)
 		{
-			var parms = this.GetConnectParametersFor(serverName, true);
+			var parms = SmbConnectionParameters.ResolveOrDefault(this, serverName);
 			var options = parms.ToConnectionOptions();
 			if (s_forceZeroCreditFallback.Value)
 				options.AllowZeroCreditFallback = true;
