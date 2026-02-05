@@ -2,12 +2,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Globalization;
 using System.IO;
 using System.Management.Automation;
 using System.Management.Automation.Provider;
-using System.Text;
 using System.Threading;
 using Titanis;
 using Titanis.Msrpc.Msrrp;
@@ -48,8 +45,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	public sealed class TboRegProvider : NavigationCmdletProvider, IPropertyCmdletProvider, IDynamicPropertyCmdletProvider, IContentCmdletProvider
 	{
 		public const string ProviderName = "TBO.Reg";
-		private const RegistryKeyOptions BackupOptions = RegistryKeyOptions.BackupRestore;
-		private const string DefaultValueName = "(Default)";
 
 		private static readonly RegistryRootKey[] RootKeys = new[]
 		{
@@ -164,7 +159,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				ExecuteRegistryOperation(
 					drive.ServerName,
 					token,
-					session => TryOpenKey(session.Client, RegistryPathParser.Parse(providerPath, nameof(path)), RegistryAccessRights.QueryValue, token) != null));
+					session => RegistryHelpers.TryOpenKey(session.Client, RegistryPathParser.Parse(providerPath, nameof(path)), RegistryAccessRights.QueryValue, token) != null));
 		}
 
 		protected override bool ItemExists(string path)
@@ -181,11 +176,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					{
 						var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
 
-						using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
+						using var key = RegistryHelpers.TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
 						if (key != null)
 							return true;
 
-						return TryValueExists(session.Client, parsed, token);
+						return RegistryHelpers.TryValueExists(session.Client, parsed, token);
 					}));
 		}
 
@@ -207,7 +202,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys, token);
+					using var key = RegistryHelpers.TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys, token);
 					if (key != null)
 					{
 						var info = key.QueryInfo(token).GetAwaiter().GetResult();
@@ -215,9 +210,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						return;
 					}
 
-					if (TryGetValue(session.Client, parsed, token, out var valueInfo, out var parentKeyPath))
+					if (RegistryHelpers.TryGetValue(session.Client, parsed, token, out var valueInfo, out var parentKeyPath))
 					{
-						var itemPath = CombineProviderPath(parentKeyPath, NormalizeValueName(valueInfo.Name));
+						var itemPath = CombineProviderPath(parentKeyPath, RegistryHelpers.NormalizeValueName(valueInfo.Name));
 						this.WriteItemObject(new TboRegistryValueInfo(drive.ServerName, parentKeyPath, valueInfo), itemPath, false);
 						return;
 					}
@@ -256,17 +251,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (includeValues)
 						access |= RegistryAccessRights.QueryValue;
 
-					using var key = OpenRegistryKey(session.Client, parsed, access, token);
+					using var key = RegistryHelpers.OpenRegistryKey(session.Client, parsed, access, token);
 
-					foreach (var subkey in EnumerateSubkeys(key, token))
+					foreach (var subkey in RegistryHelpers.EnumerateSubkeys(key, token))
 					{
 						var propertyNames = Array.Empty<string>();
 						if (includeProperties)
 						{
 							try
 							{
-								using var subkeyHandle = key.OpenSubkey(subkey.KeyName, RegistryAccessRights.QueryValue, BackupOptions, token).GetAwaiter().GetResult();
-								propertyNames = CollectValueNames(subkeyHandle, token);
+								using var subkeyHandle = key.OpenSubkey(subkey.KeyName, RegistryAccessRights.QueryValue, RegistryHelpers.BackupOptions, token).GetAwaiter().GetResult();
+								propertyNames = RegistryHelpers.CollectValueNames(subkeyHandle, token);
 							}
 							catch (OperationCanceledException)
 							{
@@ -283,9 +278,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 					if (includeValues)
 					{
-						foreach (var value in EnumerateValues(key, includeData, token))
+						foreach (var value in RegistryHelpers.EnumerateValues(key, includeData, token))
 						{
-							var normalizedName = NormalizeValueName(value.Name);
+							var normalizedName = RegistryHelpers.NormalizeValueName(value.Name);
 							var valueInfo = new TboRegistryValueInfo(drive.ServerName, parsed.KeyPath, value);
 							this.WriteItemObject(valueInfo, CombineProviderPath(parsed.KeyPath, normalizedName), false);
 						}
@@ -307,7 +302,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					session =>
 					{
 						var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
-						using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys, token);
+						using var key = RegistryHelpers.OpenRegistryKey(session.Client, parsed, RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys, token);
 						var info = key.QueryInfo(token).GetAwaiter().GetResult();
 						return info.SubkeyCount > 0 || info.ValueCount > 0;
 					}));
@@ -336,7 +331,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					using var parentKey = OpenRegistryKey(
+					using var parentKey = RegistryHelpers.OpenRegistryKey(
 						session.Client,
 						parentSpec,
 						RegistryAccessRights.CreateSubkey,
@@ -344,7 +339,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						token);
 
 					var createAccess = RegistryAccessRights.CreateSubkey | RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys;
-					using var created = parentKey.CreateSubkey(subkeyName, createAccess, BackupOptions, token).GetAwaiter().GetResult();
+					using var created = parentKey.CreateSubkey(subkeyName, createAccess, RegistryHelpers.BackupOptions, token).GetAwaiter().GetResult();
 					var info = created.QueryInfo(token).GetAwaiter().GetResult();
 					this.WriteItemObject(new TboRegistryKeyInfo(drive.ServerName, parsed.KeyPath, info), parsed.KeyPath, true);
 				});
@@ -362,17 +357,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
 				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					var existingKey = TryOpenKey(session.Client, parsed, RegistryAccessRights.EnumerateSubkeys, token);
+					var existingKey = RegistryHelpers.TryOpenKey(session.Client, parsed, RegistryAccessRights.EnumerateSubkeys, token);
 					if (existingKey != null)
 					{
 						existingKey.Dispose();
-						RemoveRegistryKey(session.Client, parsed, recurse, token);
+						RegistryHelpers.RemoveRegistryKey(session.Client, parsed, recurse, token);
 						return;
 					}
 
-					if (TryValueExists(session.Client, parsed, token))
+					if (RegistryHelpers.TryValueExists(session.Client, parsed, token))
 					{
-						RemoveRegistryValue(session.Client, parsed, token);
+						RegistryHelpers.RemoveRegistryValue(session.Client, parsed, token);
 						return;
 					}
 
@@ -392,24 +387,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
 				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
+					using var key = RegistryHelpers.OpenRegistryKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
 
 					var output = new PSObject();
 					if (providerSpecificPickList != null && providerSpecificPickList.Count > 0)
 					{
 						foreach (var entry in providerSpecificPickList)
 						{
-							var valueName = DenormalizeValueName(entry);
+							var valueName = RegistryHelpers.DenormalizeValueName(entry);
 							var valueInfo = key.GetValue(valueName, token).GetAwaiter().GetResult();
-							output.Properties.Add(new PSNoteProperty(NormalizeValueName(valueInfo.Name), valueInfo.TypedValue));
+							output.Properties.Add(new PSNoteProperty(RegistryHelpers.NormalizeValueName(valueInfo.Name), valueInfo.TypedValue));
 						}
 					}
 					else
 					{
-						var values = EnumerateValues(key, includeData: true, token);
+						var values = RegistryHelpers.EnumerateValues(key, includeData: true, token);
 						foreach (var valueInfo in values)
 						{
-							output.Properties.Add(new PSNoteProperty(NormalizeValueName(valueInfo.Name), valueInfo.TypedValue));
+							output.Properties.Add(new PSNoteProperty(RegistryHelpers.NormalizeValueName(valueInfo.Name), valueInfo.TypedValue));
 						}
 					}
 
@@ -435,7 +430,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
 				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					using var key = OpenRegistryKey(
+					using var key = RegistryHelpers.OpenRegistryKey(
 						session.Client,
 						parsed,
 						RegistryAccessRights.SetValue,
@@ -445,9 +440,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					var setParams = this.DynamicParameters as TboRegSetPropertyParams;
 					foreach (var entry in EnumeratePropertyValues(propertyValue))
 					{
-						var valueName = DenormalizeValueName(entry.Key);
-						var valueType = ResolveValueType(entry.Value, setParams?.Type);
-						var data = EncodeValue(valueType, entry.Value);
+						var valueName = RegistryHelpers.DenormalizeValueName(entry.Key);
+						var valueType = RegistryHelpers.ResolveValueType(entry.Value, setParams?.Type);
+						var data = RegistryHelpers.EncodeValue(valueType, entry.Value);
 						key.SetValue(valueName, valueType, data, token).GetAwaiter().GetResult();
 					}
 				});
@@ -480,13 +475,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
 				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					using var key = OpenRegistryKey(
+					using var key = RegistryHelpers.OpenRegistryKey(
 						session.Client,
 						parsed,
 						RegistryAccessRights.SetValue,
 						RegistryAccessRights.EnumerateSubkeys,
 						token);
-					var valueName = DenormalizeValueName(propertyName);
+					var valueName = RegistryHelpers.DenormalizeValueName(propertyName);
 					key.DeleteValue(valueName, token).GetAwaiter().GetResult();
 				});
 			});
@@ -533,10 +528,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					token,
 					session =>
 					{
-						if (TryGetValue(session.Client, parsed, token, out var valueInfo, out _))
+						if (RegistryHelpers.TryGetValue(session.Client, parsed, token, out var valueInfo, out _))
 							return (IContentReader)new TboRegContentReader(valueInfo);
 
-						using var key = TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
+						using var key = RegistryHelpers.TryOpenKey(session.Client, parsed, RegistryAccessRights.QueryValue, token);
 						if (key != null)
 							throw new NotSupportedException("Get-Content requires a registry value path. Use Get-ChildItem or Get-ItemProperty for keys.");
 
@@ -578,12 +573,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return basePath;
 			return $"{basePath}\\{childName}";
 		}
-
-		private static string NormalizeValueName(string name)
-			=> string.IsNullOrEmpty(name) ? DefaultValueName : name;
-
-		private static string DenormalizeValueName(string name)
-			=> string.Equals(name, DefaultValueName, StringComparison.OrdinalIgnoreCase) ? string.Empty : name;
 
 		private static string NormalizeServerName(string root)
 		{
@@ -670,241 +659,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private SmbProviderInfo GetSmbProviderInfo()
 			=> (SmbProviderInfo)this.SessionState.Provider.GetOne(SmbProvider.ProviderName);
 
-		private static IRegistryKey OpenRegistryKey(
-			IRegistryClient client,
-			RegistryPathSpec path,
-			RegistryAccessRights access,
-			RegistryAccessRights? rootAccess,
-			CancellationToken cancellationToken)
-		{
-			var baseAccess = rootAccess ?? (path.IsRoot ? access : RegistryAccessRights.EnumerateSubkeys | access);
-			var rootKey = client.OpenRootKey(path.RootKey, baseAccess, cancellationToken).GetAwaiter().GetResult();
-			if (path.IsRoot)
-				return rootKey;
-
-			var subkeyPath = path.SubkeyPath ?? string.Empty;
-			try
-			{
-				var key = rootKey.OpenSubkey(subkeyPath, access, BackupOptions, cancellationToken).GetAwaiter().GetResult();
-				rootKey.Dispose();
-				return key;
-			}
-			catch
-			{
-				rootKey.Dispose();
-				throw;
-			}
-		}
-
-		private static IRegistryKey OpenRegistryKey(
-			IRegistryClient client,
-			RegistryPathSpec path,
-			RegistryAccessRights access,
-			CancellationToken cancellationToken)
-			=> OpenRegistryKey(client, path, access, null, cancellationToken);
-
-		private static IRegistryKey? TryOpenKey(
-			IRegistryClient client,
-			RegistryPathSpec path,
-			RegistryAccessRights access,
-			CancellationToken cancellationToken)
-		{
-			try
-			{
-				return OpenRegistryKey(client, path, access, cancellationToken);
-			}
-			catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
-				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND
-				or (int)Win32ErrorCode.ERROR_BAD_PATHNAME)
-			{
-				return null;
-			}
-		}
-
-		private static IEnumerable<RegistrySubkeyInfo> EnumerateSubkeys(IRegistryKey key, CancellationToken cancellationToken)
-		{
-			var enumerator = key.GetSubkeyNames(cancellationToken).GetAsyncEnumerator();
-			try
-			{
-				while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
-					yield return enumerator.Current;
-			}
-			finally
-			{
-				try
-				{
-					enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-				}
-				catch (NotSupportedException)
-				{
-				}
-			}
-		}
-
-		private static IEnumerable<RegistryValueInfo> EnumerateValues(IRegistryKey key, bool includeData, CancellationToken cancellationToken)
-		{
-			if (!includeData)
-				return CollectValues(key, includeData: false, cancellationToken);
-
-			try
-			{
-				return CollectValues(key, includeData: true, cancellationToken);
-			}
-			catch (NotSupportedException)
-			{
-				var values = CollectValues(key, includeData: false, cancellationToken);
-				var fullValues = new List<RegistryValueInfo>(values.Count);
-				foreach (var value in values)
-					fullValues.Add(key.GetValue(value.Name, cancellationToken).GetAwaiter().GetResult());
-				return fullValues;
-			}
-		}
-
-		private static List<RegistryValueInfo> CollectValues(IRegistryKey key, bool includeData, CancellationToken cancellationToken)
-		{
-			var values = new List<RegistryValueInfo>();
-			var enumerator = key.GetValues(includeData, cancellationToken).GetAsyncEnumerator();
-			try
-			{
-				while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
-					values.Add(enumerator.Current);
-			}
-			finally
-			{
-				try
-				{
-					enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-				}
-				catch (NotSupportedException)
-				{
-				}
-			}
-
-			return values;
-		}
-
-		private static string[] CollectValueNames(IRegistryKey key, CancellationToken cancellationToken)
-		{
-			var values = CollectValues(key, includeData: false, cancellationToken);
-			if (values.Count == 0)
-				return Array.Empty<string>();
-
-			var names = new string[values.Count];
-			for (int i = 0; i < values.Count; i++)
-				names[i] = NormalizeValueName(values[i].Name);
-			return names;
-		}
-
-		private static bool TryValueExists(IRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken)
-		{
-			if (string.IsNullOrEmpty(path.SubkeyPath))
-				return false;
-
-			var parentSubkey = RegistryPath.GetParentKeyNameFromPath(path.SubkeyPath);
-			var valueName = RegistryPath.GetSubkeyNameFromPath(path.SubkeyPath);
-			var parentSpec = new RegistryPathSpec(path.RootKey, path.RootName, parentSubkey);
-
-			try
-			{
-				using var parentKey = OpenRegistryKey(client, parentSpec, RegistryAccessRights.QueryValue, cancellationToken);
-				valueName = DenormalizeValueName(valueName);
-				parentKey.GetValue(valueName, cancellationToken).GetAwaiter().GetResult();
-				return true;
-			}
-			catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
-				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND)
-			{
-				return false;
-			}
-		}
-
-		private static bool TryGetValue(IRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken, out RegistryValueInfo info, out string keyPath)
-		{
-			info = null!;
-			keyPath = string.Empty;
-			if (string.IsNullOrEmpty(path.SubkeyPath))
-				return false;
-
-			var parentSubkey = RegistryPath.GetParentKeyNameFromPath(path.SubkeyPath);
-			var valueName = RegistryPath.GetSubkeyNameFromPath(path.SubkeyPath);
-			var parentSpec = new RegistryPathSpec(path.RootKey, path.RootName, parentSubkey);
-
-			try
-			{
-				using var parentKey = OpenRegistryKey(client, parentSpec, RegistryAccessRights.QueryValue, cancellationToken);
-				valueName = DenormalizeValueName(valueName);
-				info = parentKey.GetValue(valueName, cancellationToken).GetAwaiter().GetResult();
-				keyPath = parentSpec.KeyPath;
-				return true;
-			}
-			catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
-				or (int)Win32ErrorCode.ERROR_PATH_NOT_FOUND)
-			{
-				return false;
-			}
-		}
-
-		private static void RemoveRegistryKey(IRegistryClient client, RegistryPathSpec path, bool recurse, CancellationToken cancellationToken)
-		{
-			if (path.IsRoot)
-				throw new InvalidOperationException("Cannot remove a root registry key.");
-
-			var subkeyPath = path.SubkeyPath!;
-			var parentPath = RegistryPath.GetParentKeyNameFromPath(subkeyPath);
-			var subkeyName = RegistryPath.GetSubkeyNameFromPath(subkeyPath);
-			var parentSpec = new RegistryPathSpec(path.RootKey, path.RootName, parentPath);
-
-			using var parentKey = OpenRegistryKey(
-				client,
-				parentSpec,
-				RegistryAccessRights.CreateSubkey | RegistryAccessRights.EnumerateSubkeys,
-				RegistryAccessRights.EnumerateSubkeys,
-				cancellationToken);
-
-			if (recurse)
-			{
-				RemoveSubkeyRecursive(parentKey, subkeyName, cancellationToken);
-				return;
-			}
-
-			parentKey.DeleteSubkey(subkeyName, cancellationToken).GetAwaiter().GetResult();
-		}
-
-		private static void RemoveSubkeyRecursive(IRegistryKey parentKey, string subkeyName, CancellationToken cancellationToken)
-		{
-			using var subkey = parentKey.OpenSubkey(
-				subkeyName,
-				RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.CreateSubkey,
-				BackupOptions,
-				cancellationToken).GetAwaiter().GetResult();
-
-			foreach (var child in EnumerateSubkeys(subkey, cancellationToken))
-			{
-				RemoveSubkeyRecursive(subkey, child.KeyName, cancellationToken);
-			}
-
-			parentKey.DeleteSubkey(subkeyName, cancellationToken).GetAwaiter().GetResult();
-		}
-
-		private static void RemoveRegistryValue(IRegistryClient client, RegistryPathSpec path, CancellationToken cancellationToken)
-		{
-			if (string.IsNullOrEmpty(path.SubkeyPath))
-				throw new InvalidOperationException("Path must specify a registry value.");
-
-			var parentSubkey = RegistryPath.GetParentKeyNameFromPath(path.SubkeyPath);
-			var valueName = RegistryPath.GetSubkeyNameFromPath(path.SubkeyPath);
-			var parentSpec = new RegistryPathSpec(path.RootKey, path.RootName, parentSubkey);
-
-			using var parentKey = OpenRegistryKey(
-				client,
-				parentSpec,
-				RegistryAccessRights.SetValue,
-				RegistryAccessRights.EnumerateSubkeys,
-				cancellationToken);
-			valueName = DenormalizeValueName(valueName);
-			parentKey.DeleteValue(valueName, cancellationToken).GetAwaiter().GetResult();
-		}
-
 		private static IEnumerable<KeyValuePair<string, object?>> EnumeratePropertyValues(PSObject propertyValue)
 		{
 			if (propertyValue.BaseObject is IDictionary dictionary)
@@ -924,104 +678,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				yield return new KeyValuePair<string, object?>(property.Name ?? string.Empty, property.Value);
 			}
-		}
-
-		private static RegistryValueType ResolveValueType(object? value, RegistryValueType? type)
-		{
-			if (type.HasValue)
-				return type.Value;
-
-			if (value == null)
-				return RegistryValueType.None;
-
-			if (value is string)
-				return RegistryValueType.String;
-			if (value is string[] or IEnumerable<string>)
-				return RegistryValueType.MultiString;
-			if (value is byte[])
-				return RegistryValueType.Binary;
-			if (value is int or uint or short or ushort or byte or sbyte)
-				return RegistryValueType.DwordLE;
-			if (value is long or ulong)
-				return RegistryValueType.Qword;
-
-			throw new ArgumentException("Unable to infer registry value type. Specify the value type explicitly.");
-		}
-
-		private static byte[] EncodeValue(RegistryValueType valueType, object? value)
-		{
-			if (valueType == RegistryValueType.None)
-				return Array.Empty<byte>();
-
-			switch (valueType)
-			{
-				case RegistryValueType.String:
-				case RegistryValueType.ExpandString:
-					return EncodeString(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
-				case RegistryValueType.MultiString:
-					return EncodeMultiString(ResolveStringList(value));
-				case RegistryValueType.DwordLE:
-					return EncodeUInt32(Convert.ToUInt32(value, CultureInfo.InvariantCulture), littleEndian: true);
-				case RegistryValueType.DwordBE:
-					return EncodeUInt32(Convert.ToUInt32(value, CultureInfo.InvariantCulture), littleEndian: false);
-				case RegistryValueType.Qword:
-					return EncodeUInt64(Convert.ToUInt64(value, CultureInfo.InvariantCulture));
-				case RegistryValueType.Binary:
-					if (value is byte[] bytes)
-						return bytes;
-					throw new ArgumentException("Binary registry values must be provided as a byte array.");
-				default:
-					throw new ArgumentException($"Unsupported registry value type: {valueType}.");
-			}
-		}
-
-		private static byte[] EncodeString(string value)
-		{
-			return Encoding.Unicode.GetBytes(value + '\0');
-		}
-
-		private static byte[] EncodeMultiString(IReadOnlyList<string> values)
-		{
-			StringBuilder sb = new StringBuilder();
-			foreach (var item in values)
-			{
-				sb.Append(item);
-				sb.Append('\0');
-			}
-
-			sb.Append('\0');
-			return Encoding.Unicode.GetBytes(sb.ToString());
-		}
-
-		private static IReadOnlyList<string> ResolveStringList(object? value)
-		{
-			if (value == null)
-				throw new ArgumentException("MultiString registry values must be provided as a string array.");
-
-			if (value is string[] array)
-				return array;
-			if (value is IEnumerable<string> enumerable)
-				return new List<string>(enumerable);
-			if (value is string single)
-				return new[] { single };
-
-			throw new ArgumentException("MultiString registry values must be provided as a string array.");
-		}
-
-		private static byte[] EncodeUInt32(uint value, bool littleEndian)
-		{
-			var data = BitConverter.GetBytes(value);
-			if (BitConverter.IsLittleEndian != littleEndian)
-				Array.Reverse(data);
-			return data;
-		}
-
-		private static byte[] EncodeUInt64(ulong value)
-		{
-			var data = BitConverter.GetBytes(value);
-			if (!BitConverter.IsLittleEndian)
-				Array.Reverse(data);
-			return data;
 		}
 	}
 

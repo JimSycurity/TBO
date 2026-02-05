@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Management.Automation;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
@@ -129,8 +127,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	public abstract class TboRegCmdlet : SmbCmdlet
 	{
-		private const RegistryKeyOptions BackupOptions = RegistryKeyOptions.BackupRestore;
-
 		[Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
 		public string ServerName { get; set; } = string.Empty;
 
@@ -177,23 +173,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			RegistryAccessRights? rootAccess,
 			CancellationToken cancellationToken)
 		{
-			var baseAccess = rootAccess ?? (path.IsRoot ? access : RegistryAccessRights.EnumerateSubkeys | access);
-			var rootKey = client.OpenRootKey(path.RootKey, baseAccess, cancellationToken).GetAwaiter().GetResult();
-			if (path.IsRoot)
-				return rootKey;
-
-			var subkeyPath = path.SubkeyPath ?? string.Empty;
-			try
-			{
-				var key = rootKey.OpenSubkey(subkeyPath, access, BackupOptions, cancellationToken).GetAwaiter().GetResult();
-				rootKey.Dispose();
-				return key;
-			}
-			catch
-			{
-				rootKey.Dispose();
-				throw;
-			}
+			return RegistryHelpers.OpenRegistryKey(client, path, access, rootAccess, cancellationToken);
 		}
 
 		protected IRegistryKey OpenRegistryKey(
@@ -201,59 +181,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			RegistryPathSpec path,
 			RegistryAccessRights access,
 			CancellationToken cancellationToken)
-			=> OpenRegistryKey(client, path, access, null, cancellationToken);
+			=> RegistryHelpers.OpenRegistryKey(client, path, access, cancellationToken);
 
 		protected static List<RegistrySubkeyInfo> CollectSubkeys(IRegistryKey key, CancellationToken cancellationToken)
-		{
-			var subkeys = new List<RegistrySubkeyInfo>();
-			var enumerator = key.GetSubkeyNames(cancellationToken).GetAsyncEnumerator();
-			try
-			{
-				while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
-				{
-					subkeys.Add(enumerator.Current);
-				}
-			}
-			finally
-			{
-				try
-				{
-					enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-				}
-				catch (NotSupportedException)
-				{
-					// Some async-iterator DisposeAsync implementations throw when forced sync.
-				}
-			}
-
-			return subkeys;
-		}
+			=> RegistryHelpers.CollectSubkeys(key, cancellationToken);
 
 		protected static List<RegistryValueInfo> CollectValues(IRegistryKey key, bool includeData, CancellationToken cancellationToken)
-		{
-			var values = new List<RegistryValueInfo>();
-			var enumerator = key.GetValues(includeData, cancellationToken).GetAsyncEnumerator();
-			try
-			{
-				while (enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult())
-				{
-					values.Add(enumerator.Current);
-				}
-			}
-			finally
-			{
-				try
-				{
-					enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-				}
-				catch (NotSupportedException)
-				{
-					// Some async-iterator DisposeAsync implementations throw when forced sync.
-				}
-			}
-
-			return values;
-		}
+			=> RegistryHelpers.CollectValues(key, includeData, cancellationToken);
 	}
 
 	[Cmdlet(VerbsCommon.Get, "TBORegSessions")]
@@ -287,7 +221,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (Exception ex)
 				{
-					smb.LogException("Get-TBORegSessions failed to enumerate HKEY_USERS", ex);
+					this.LogException(smb, "Get-TBORegSessions failed to enumerate HKEY_USERS", ex);
 					throw;
 				}
 
@@ -364,7 +298,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					cancellationToken);
 
 				var createAccess = RegistryAccessRights.CreateSubkey | RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys;
-				using var created = parentKey.CreateSubkey(subkeyName, createAccess, RegistryKeyOptions.BackupRestore, cancellationToken).GetAwaiter().GetResult();
+				using var created = parentKey.CreateSubkey(subkeyName, createAccess, RegistryHelpers.BackupOptions, cancellationToken).GetAwaiter().GetResult();
 				this.WriteObject(new TboRegistryKeyInfo(this.ServerName, parsedPath.KeyPath, created.QueryInfo(cancellationToken).GetAwaiter().GetResult()));
 			});
 		}
@@ -441,7 +375,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (NotSupportedException ex)
 				{
-					smb.LogException("Get-TBORegValue failed to enumerate values with data", ex);
+					this.LogException(smb, "Get-TBORegValue failed to enumerate values with data", ex);
 					values = CollectValues(key, includeData: false, cancellationToken);
 					foreach (var valueInfo in values)
 					{
@@ -452,7 +386,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (Exception ex)
 				{
-					smb.LogException("Get-TBORegValue failed to enumerate values", ex);
+					this.LogException(smb, "Get-TBORegValue failed to enumerate values", ex);
 					throw;
 				}
 
@@ -512,7 +446,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					}
 					catch (Exception ex)
 					{
-						smb.LogException("Get-TBORegChildItem failed to enumerate subkeys", ex);
+						this.LogException(smb, "Get-TBORegChildItem failed to enumerate subkeys", ex);
 						throw;
 					}
 
@@ -531,7 +465,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					}
 					catch (NotSupportedException ex)
 					{
-						smb.LogException("Get-TBORegChildItem failed to enumerate values with data", ex);
+						this.LogException(smb, "Get-TBORegChildItem failed to enumerate values with data", ex);
 						values = CollectValues(key, includeData: false, cancellationToken);
 						foreach (var valueInfo in values)
 						{
@@ -542,7 +476,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					}
 					catch (Exception ex)
 					{
-						smb.LogException("Get-TBORegChildItem failed to enumerate values", ex);
+						this.LogException(smb, "Get-TBORegChildItem failed to enumerate values", ex);
 						throw;
 					}
 
@@ -574,8 +508,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-			var valueType = ResolveValueType(this.Value, this.Type);
-			var data = EncodeValue(valueType, this.Value);
+			var valueType = RegistryHelpers.ResolveValueType(this.Value, this.Type);
+			var data = RegistryHelpers.EncodeValue(valueType, this.Value);
 
 			var target = $"{this.ServerName}\\{parsedPath.KeyPath}\\{this.Name}";
 			if (!this.ShouldProcess(target, "Set registry value"))
@@ -594,97 +528,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private static RegistryValueType ResolveValueType(object value, RegistryValueType? type)
-		{
-			if (type.HasValue)
-				return type.Value;
-
-			if (value is string)
-				return RegistryValueType.String;
-			if (value is string[] or IEnumerable<string>)
-				return RegistryValueType.MultiString;
-			if (value is byte[])
-				return RegistryValueType.Binary;
-			if (value is int or uint or short or ushort or byte or sbyte)
-				return RegistryValueType.DwordLE;
-			if (value is long or ulong)
-				return RegistryValueType.Qword;
-
-			throw new ArgumentException("Unable to infer registry value type. Specify -Type explicitly.");
-		}
-
-		private static byte[] EncodeValue(RegistryValueType valueType, object value)
-		{
-			if (valueType == RegistryValueType.None)
-				return Array.Empty<byte>();
-
-			switch (valueType)
-			{
-				case RegistryValueType.String:
-				case RegistryValueType.ExpandString:
-					return EncodeString(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
-				case RegistryValueType.MultiString:
-					return EncodeMultiString(ResolveStringList(value));
-				case RegistryValueType.DwordLE:
-					return EncodeUInt32(Convert.ToUInt32(value, CultureInfo.InvariantCulture), littleEndian: true);
-				case RegistryValueType.DwordBE:
-					return EncodeUInt32(Convert.ToUInt32(value, CultureInfo.InvariantCulture), littleEndian: false);
-				case RegistryValueType.Qword:
-					return EncodeUInt64(Convert.ToUInt64(value, CultureInfo.InvariantCulture));
-				case RegistryValueType.Binary:
-					if (value is byte[] bytes)
-						return bytes;
-					throw new ArgumentException("Binary registry values must be provided as a byte array.");
-				default:
-					throw new ArgumentException($"Unsupported registry value type: {valueType}.");
-			}
-		}
-
-		private static byte[] EncodeString(string value)
-		{
-			return Encoding.Unicode.GetBytes(value + '\0');
-		}
-
-		private static byte[] EncodeMultiString(IReadOnlyList<string> values)
-		{
-			StringBuilder sb = new StringBuilder();
-			foreach (var item in values)
-			{
-				sb.Append(item);
-				sb.Append('\0');
-			}
-
-			sb.Append('\0');
-			return Encoding.Unicode.GetBytes(sb.ToString());
-		}
-
-		private static IReadOnlyList<string> ResolveStringList(object value)
-		{
-			if (value is string[] array)
-				return array;
-			if (value is IEnumerable<string> enumerable)
-				return new List<string>(enumerable);
-			if (value is string single)
-				return new[] { single };
-
-			throw new ArgumentException("MultiString registry values must be provided as a string array.");
-		}
-
-		private static byte[] EncodeUInt32(uint value, bool littleEndian)
-		{
-			var data = BitConverter.GetBytes(value);
-			if (BitConverter.IsLittleEndian != littleEndian)
-				Array.Reverse(data);
-			return data;
-		}
-
-		private static byte[] EncodeUInt64(ulong value)
-		{
-			var data = BitConverter.GetBytes(value);
-			if (!BitConverter.IsLittleEndian)
-				Array.Reverse(data);
-			return data;
-		}
 	}
 
 	[Cmdlet(VerbsCommon.Remove, "TBORegValue", SupportsShouldProcess = true, ConfirmImpact = ConfirmImpact.High)]
