@@ -56,11 +56,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this._cancelSource ??= new CancellationTokenSource();
 			var cancellationToken = this._cancelSource.Token;
 
-			var serverName = NormalizeServerName(this.ServerName);
+			var serverName = DpapiHelpers.NormalizeServerName(this.ServerName);
 			if (string.IsNullOrWhiteSpace(serverName))
 				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
 
-			var shareName = NormalizeShareName(this.ShareName);
+			var shareName = DpapiHelpers.NormalizeShareName(this.ShareName);
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
@@ -101,22 +101,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			base.StopProcessing();
 		}
 
-		private static string NormalizeServerName(string? serverName)
-		{
-			return string.IsNullOrWhiteSpace(serverName)
-				? string.Empty
-				: serverName.TrimStart('\\');
-		}
-
-		private static string NormalizeShareName(string? shareName)
-		{
-			if (string.IsNullOrWhiteSpace(shareName))
-				return string.Empty;
-
-			var trimmed = shareName.Trim();
-			trimmed = trimmed.Trim('\\');
-			return trimmed;
-		}
 	}
 
 	internal static class DpapiMasterKeyLocator

@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Management.Automation;
 using System.Threading;
 using Titanis;
@@ -52,11 +51,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this._cancelSource ??= new CancellationTokenSource();
 			var cancellationToken = this._cancelSource.Token;
 
-			var serverName = NormalizeServerName(this.ServerName);
+			var serverName = DpapiHelpers.NormalizeServerName(this.ServerName);
 			if (string.IsNullOrWhiteSpace(serverName))
 				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
 
-			var shareName = NormalizeShareName(this.ShareName);
+			var shareName = DpapiHelpers.NormalizeShareName(this.ShareName);
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
@@ -100,10 +99,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				byte[]? rawFile = null;
 				try
 				{
-					rawFile = ReadFileBytes(smb, UncPath.Parse(location.KeyPath), cancellationToken);
+					rawFile = DpapiHelpers.ReadFileBytes(smb, UncPath.Parse(location.KeyPath), cancellationToken);
 				}
 				catch (Exception ex)
 				{
+					this.LogException(smb, $"Get-TBODpapiMasterKeys failed to read {location.KeyPath}", ex, emitWarning: false);
 					this.WriteObject(new TboDpapiMasterKeyInfo
 					{
 						ServerName = this.ServerName,
@@ -124,6 +124,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (Exception ex)
 				{
+					this.LogException(smb, $"Get-TBODpapiMasterKeys failed to parse {location.KeyPath}", ex, emitWarning: false);
 					this.WriteObject(new TboDpapiMasterKeyInfo
 					{
 						ServerName = this.ServerName,
@@ -238,36 +239,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return (machineKey, userKey);
 		}
 
-		private static byte[] ReadFileBytes(ISmbProviderInfo smb, UncPath path, CancellationToken cancellationToken)
-		{
-			var fileSystem = ResolveFileSystem(smb);
-			using var file = fileSystem.OpenFileRead(path, cancellationToken);
-			using var stream = file.OpenRead();
-			using var memory = new MemoryStream();
-			stream.CopyTo(memory);
-			return memory.ToArray();
-		}
-
-		private static ISmbFileSystem ResolveFileSystem(ISmbProviderInfo smb)
-		{
-			return SmbFileSystemResolver.Resolve(smb);
-		}
-
-		private static string NormalizeServerName(string? serverName)
-		{
-			return string.IsNullOrWhiteSpace(serverName)
-				? string.Empty
-				: serverName.TrimStart('\\');
-		}
-
-		private static string NormalizeShareName(string? shareName)
-		{
-			if (string.IsNullOrWhiteSpace(shareName))
-				return string.Empty;
-
-			var trimmed = shareName.Trim();
-			trimmed = trimmed.Trim('\\');
-			return trimmed;
-		}
 	}
 }
