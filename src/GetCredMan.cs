@@ -177,6 +177,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const int MinFragmentLength = 6;
 		private const int MaxFragmentLength = 256;
 		private const int MaxFragments = 12;
+		private const int MaxCredentialStringBytes = 8192;
 
 		private const string TaskSchedulerMarker = "Domain:batch=TaskScheduler:Task:";
 
@@ -599,6 +600,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (TryDecodeTaskSchedulerCleartext(payload, out var taskText))
 				return taskText;
 
+			if (TryDecodeCredentialCleartext(payload, out var credentialText))
+				return credentialText;
+
+			if (TryDecodeVaultPolicyCleartext(payload, out var vaultText))
+				return vaultText;
+
 			if (payload.Length % 2 == 0)
 			{
 				try
@@ -623,6 +630,360 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return TryExtractReadableCleartext(payload);
+		}
+
+		private static bool TryDecodeCredentialCleartext(byte[] payload, out string? text)
+		{
+			text = null;
+			var offset = 0;
+
+			if (!TryReadUInt32Value(payload, ref offset, out var credFlags))
+				return false;
+			if (!TryReadUInt32Value(payload, ref offset, out var credSize))
+				return false;
+			if (credSize > payload.Length)
+				return false;
+			if (!TryReadUInt32Value(payload, ref offset, out var credUnk0))
+				return false;
+			if (!TryReadUInt32Value(payload, ref offset, out var type))
+				return false;
+			if (!TryReadUInt32Value(payload, ref offset, out var flags))
+				return false;
+			if (!TryReadInt64Value(payload, ref offset, out var lastWritten))
+				return false;
+
+			if (!IsPlausibleFileTime(lastWritten))
+				return false;
+
+			if (!TryReadUInt32Value(payload, ref offset, out var unkFlagsOrSize))
+				return false;
+			if (!TryReadUInt32Value(payload, ref offset, out var persist))
+				return false;
+			if (!TryReadUInt32Value(payload, ref offset, out var attributeCount))
+				return false;
+			if (!TryReadUInt32Value(payload, ref offset, out var unk0))
+				return false;
+			if (!TryReadUInt32Value(payload, ref offset, out var unk1))
+				return false;
+
+			if (!TryReadUnicodeWithLength(payload, ref offset, out var targetName))
+				return false;
+			if (!TryReadUnicodeWithLength(payload, ref offset, out var targetAlias))
+				return false;
+			if (!TryReadUnicodeWithLength(payload, ref offset, out var comment))
+				return false;
+			if (!TryReadUnicodeWithLength(payload, ref offset, out var unkData))
+				return false;
+			if (!TryReadUnicodeWithLength(payload, ref offset, out var userName))
+				return false;
+
+			if (!TryReadInt32Value(payload, ref offset, out var credBlobLen))
+				return false;
+			if (credBlobLen < 0 || credBlobLen > payload.Length - offset)
+				return false;
+			if (!TryReadBytes(payload, ref offset, credBlobLen, out var credBlobBytes))
+				return false;
+
+			var lines = new List<string>();
+			var hasFields = false;
+
+			hasFields |= AddField(lines, "TargetName", targetName, requireLetters: true);
+			hasFields |= AddField(lines, "TargetAlias", targetAlias, requireLetters: true);
+			hasFields |= AddField(lines, "Comment", comment, requireLetters: false);
+			hasFields |= AddField(lines, "UserName", userName, requireLetters: true);
+
+			if (TryDecodeCredentialValue(credBlobBytes, out var credentialValue, out var credentialHex))
+			{
+				if (!string.IsNullOrWhiteSpace(credentialValue))
+				{
+					lines.Add($"Credential: {credentialValue}");
+					hasFields = true;
+				}
+				else if (!string.IsNullOrWhiteSpace(credentialHex))
+				{
+					lines.Add($"CredentialHex: {credentialHex}");
+					hasFields = true;
+				}
+			}
+
+			if (!hasFields)
+				return false;
+
+			if (TryGetFileTimeUtc(lastWritten, out var lastWrittenTime))
+				lines.Insert(0, $"LastWritten: {lastWrittenTime:O}");
+
+			text = string.Join(Environment.NewLine, lines);
+			return true;
+		}
+
+		private static bool TryDecodeVaultPolicyCleartext(byte[] payload, out string? text)
+		{
+			text = null;
+
+			if (payload.Length < 24)
+				return false;
+
+			if (TryParseVaultPolicyKdbm(payload, out var aes128Key, out var aes256Key) ||
+				TryParseVaultPolicyKssm(payload, out aes128Key, out aes256Key))
+			{
+				var lines = new List<string>();
+				if (aes128Key != null && aes128Key.Length > 0)
+					lines.Add($"VaultAES128: {aes128Key.ToHexString()}");
+				if (aes256Key != null && aes256Key.Length > 0)
+					lines.Add($"VaultAES256: {aes256Key.ToHexString()}");
+
+				if (lines.Count == 0)
+					return false;
+
+				text = string.Join(Environment.NewLine, lines);
+				return true;
+			}
+
+			return false;
+		}
+
+		private static bool TryParseVaultPolicyKdbm(byte[] payload, out byte[]? aes128Key, out byte[]? aes256Key)
+		{
+			aes128Key = null;
+			aes256Key = null;
+
+			if (payload.Length < 40)
+				return false;
+
+			var marker = System.Text.Encoding.ASCII.GetString(payload, 12, 4);
+			if (!marker.Equals("KDBM", StringComparison.Ordinal))
+				return false;
+
+			var offset = 20;
+			if (!TryReadInt32Value(payload, ref offset, out var aes128Len))
+				return false;
+			if (aes128Len != 16 || !TryReadBytes(payload, ref offset, aes128Len, out aes128Key))
+				return false;
+
+			offset += 20;
+			if (!TryReadInt32Value(payload, ref offset, out var aes256Len))
+				return false;
+			if (aes256Len != 32 || !TryReadBytes(payload, ref offset, aes256Len, out aes256Key))
+				return false;
+
+			return true;
+		}
+
+		private static bool TryParseVaultPolicyKssm(byte[] payload, out byte[]? aes128Key, out byte[]? aes256Key)
+		{
+			aes128Key = null;
+			aes256Key = null;
+
+			if (payload.Length < 48)
+				return false;
+
+			var marker = System.Text.Encoding.ASCII.GetString(payload, 16, 4);
+			if (!marker.Equals("KSSM", StringComparison.Ordinal))
+				return false;
+
+			var offset = 16 + 16;
+			if (!TryReadInt32Value(payload, ref offset, out var aes128Len))
+				return false;
+			if (aes128Len != 16 || !TryReadBytes(payload, ref offset, aes128Len, out aes128Key))
+				return false;
+
+			var pattern = new byte[] { 0x4b, 0x53, 0x53, 0x4d, 0x02, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00 };
+			var index = IndexOfSequence(payload, pattern, offset);
+			if (index < 0)
+				return false;
+
+			offset = index + 20;
+			if (!TryReadInt32Value(payload, ref offset, out var aes256Len))
+				return false;
+			if (aes256Len != 32 || !TryReadBytes(payload, ref offset, aes256Len, out aes256Key))
+				return false;
+
+			return true;
+		}
+
+		private static int IndexOfSequence(byte[] payload, byte[] pattern, int start)
+		{
+			if (pattern.Length == 0 || payload.Length < pattern.Length)
+				return -1;
+
+			for (var i = Math.Max(0, start); i <= payload.Length - pattern.Length; i++)
+			{
+				var match = true;
+				for (var j = 0; j < pattern.Length; j++)
+				{
+					if (payload[i + j] != pattern[j])
+					{
+						match = false;
+						break;
+					}
+				}
+
+				if (match)
+					return i;
+			}
+
+			return -1;
+		}
+
+		private static bool AddField(List<string> lines, string label, string? value, bool requireLetters)
+		{
+			if (string.IsNullOrWhiteSpace(value))
+				return false;
+
+			var trimmed = value.Trim();
+			if (trimmed.Length == 0)
+				return false;
+
+			if (!IsMostlyPrintable(trimmed))
+				return false;
+
+			if (requireLetters && !HasLetterOrDigit(trimmed))
+				return false;
+
+			lines.Add($"{label}: {trimmed}");
+			return true;
+		}
+
+		private static bool TryDecodeCredentialValue(byte[]? credentialBytes, out string? value, out string? hex)
+		{
+			value = null;
+			hex = null;
+
+			if (credentialBytes == null || credentialBytes.Length == 0)
+				return false;
+
+			if (credentialBytes.Length % 2 == 0)
+			{
+				try
+				{
+					var unicode = System.Text.Encoding.Unicode.GetString(credentialBytes).TrimEnd('\0');
+					if (IsMostlyPrintable(unicode))
+					{
+						value = unicode.Trim();
+						return true;
+					}
+				}
+				catch
+				{
+				}
+			}
+
+			try
+			{
+				var utf8 = System.Text.Encoding.UTF8.GetString(credentialBytes).TrimEnd('\0');
+				if (IsMostlyPrintable(utf8))
+				{
+					value = utf8.Trim();
+					return true;
+				}
+			}
+			catch
+			{
+			}
+
+			hex = credentialBytes.ToHexString();
+			return true;
+		}
+
+		private static bool IsPlausibleFileTime(long fileTime)
+		{
+			if (fileTime <= 0)
+				return false;
+
+			if (!TryGetFileTimeUtc(fileTime, out var utc))
+				return false;
+
+			var now = DateTime.UtcNow;
+			return utc > now.AddYears(-20) && utc < now.AddYears(1);
+		}
+
+		private static bool TryGetFileTimeUtc(long fileTime, out DateTime utc)
+		{
+			utc = default;
+			try
+			{
+				utc = DateTime.FromFileTimeUtc(fileTime);
+				return true;
+			}
+			catch
+			{
+				return false;
+			}
+		}
+
+		private static bool TryReadUInt32Value(byte[] payload, ref int offset, out uint value)
+		{
+			value = 0;
+			if (offset < 0 || offset + sizeof(uint) > payload.Length)
+				return false;
+
+			value = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(offset, sizeof(uint)));
+			offset += sizeof(uint);
+			return true;
+		}
+
+		private static bool TryReadInt32Value(byte[] payload, ref int offset, out int value)
+		{
+			value = 0;
+			if (offset < 0 || offset + sizeof(int) > payload.Length)
+				return false;
+
+			value = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(offset, sizeof(int)));
+			offset += sizeof(int);
+			return true;
+		}
+
+		private static bool TryReadInt64Value(byte[] payload, ref int offset, out long value)
+		{
+			value = 0;
+			if (offset < 0 || offset + sizeof(long) > payload.Length)
+				return false;
+
+			value = BinaryPrimitives.ReadInt64LittleEndian(payload.AsSpan(offset, sizeof(long)));
+			offset += sizeof(long);
+			return true;
+		}
+
+		private static bool TryReadBytes(byte[] payload, ref int offset, int length, out byte[] bytes)
+		{
+			bytes = Array.Empty<byte>();
+			if (length < 0 || offset < 0 || offset + length > payload.Length)
+				return false;
+
+			if (length == 0)
+			{
+				bytes = Array.Empty<byte>();
+				return true;
+			}
+
+			bytes = new byte[length];
+			Array.Copy(payload, offset, bytes, 0, length);
+			offset += length;
+			return true;
+		}
+
+		private static bool TryReadUnicodeWithLength(byte[] payload, ref int offset, out string value)
+		{
+			value = string.Empty;
+
+			if (!TryReadInt32Value(payload, ref offset, out var length))
+				return false;
+			if (length < 0 || length > MaxCredentialStringBytes)
+				return false;
+			if (offset < 0 || offset + length > payload.Length)
+				return false;
+
+			try
+			{
+				value = System.Text.Encoding.Unicode.GetString(payload, offset, length).TrimEnd('\0');
+			}
+			catch
+			{
+				return false;
+			}
+
+			offset += length;
+			return true;
 		}
 
 		private static string? TryExtractReadableCleartext(byte[] payload)
@@ -923,6 +1284,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return false;
 
 			return true;
+		}
+
+		private static bool IsMostlyPrintable(string text)
+		{
+			if (string.IsNullOrEmpty(text))
+				return false;
+
+			var printable = 0;
+			foreach (var ch in text)
+			{
+				if (!char.IsControl(ch) || ch == '\r' || ch == '\n' || ch == '\t')
+					printable++;
+			}
+
+			return printable >= Math.Max(1, text.Length * 0.8);
+		}
+
+		private static bool HasLetterOrDigit(string text)
+		{
+			foreach (var ch in text)
+			{
+				if (char.IsLetterOrDigit(ch))
+					return true;
+			}
+
+			return false;
 		}
 
 		private sealed class CredManDecryptResult
