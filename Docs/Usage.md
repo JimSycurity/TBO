@@ -681,6 +681,15 @@ Set `TITANIS_TBO_LOG` to enable provider logging. Supported formats:
 
 Levels: `Info`, `Verbose`, `Diagnostic`, `Debug`, `Warning`, `Error`.
 
+The log level is the minimum severity that will be written (lower/less severe levels are filtered out). From least to most verbose:
+
+- `Error`: Only errors are logged.
+- `Warning`: Warnings and errors.
+- `Info`: High-level info plus warnings/errors (currently minimal beyond the "logging enabled" banner).
+- `Verbose`: Adds higher-level flow and progress messages.
+- `Diagnostic`: Adds low-level protocol/registry retry/cache details.
+- `Debug`: Most verbose; includes diagnostic-level traces and extra debugging chatter.
+
 ## Build
 
 ```powershell
