@@ -54,11 +54,12 @@ On Windows, `Get-Acl` and `Set-Acl` work with `tbo:\` and provider-qualified UNC
 
 ## Provider (TBO.Reg) (Preview)
 
-The `TBO.Reg` provider exposes the remote registry through a per-server PSDrive. The drive root is the server name, and the top-level items are hives (HKLM, HKCU, HKU, etc). Keys enumerate subkeys by default; use `-IncludeValues` (or `-IncludeData`) to include values. The default value is shown as `(Default)`.
+The `TBO.Reg` provider exposes the remote registry through a per-server PSDrive. The drive root is the server name, and the top-level items are hives (HKLM, HKCU, HKU, etc). Keys enumerate subkeys by default; use `-IncludeProperties` to populate per-subkey value names in the Property column and `-IncludeValues` (or `-IncludeData`) to include values. The default value is shown as `(Default)`.
 
 ```powershell
 New-PSDrive -Name tbo-reg -PSProvider 'TBO.Reg' -Root corp1-web01.corp1.lab.home-labs.lol
 Get-ChildItem tbo-reg:\
+Get-ChildItem tbo-reg:\HKLM\SOFTWARE -IncludeProperties
 Get-ChildItem tbo-reg:\HKLM\SOFTWARE -IncludeValues
 ```
 

@@ -245,27 +245,36 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var parsed = RegistryPathParser.Parse(providerPath, nameof(path));
 				ExecuteRegistryOperation(drive.ServerName, token, session =>
 				{
-					using var key = OpenRegistryKey(session.Client, parsed, RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue, token);
 					var childParams = this.DynamicParameters as TboRegGetChildItemParams;
 					var includeValues = childParams?.IncludeValues.IsPresent ?? false;
 					var includeData = childParams?.IncludeData.IsPresent ?? false;
+					var includeProperties = childParams?.IncludeProperties.IsPresent ?? false;
 					if (includeData)
 						includeValues = true;
+
+					var access = RegistryAccessRights.EnumerateSubkeys;
+					if (includeValues)
+						access |= RegistryAccessRights.QueryValue;
+
+					using var key = OpenRegistryKey(session.Client, parsed, access, token);
 
 					foreach (var subkey in EnumerateSubkeys(key, token))
 					{
 						var propertyNames = Array.Empty<string>();
-						try
+						if (includeProperties)
 						{
-							using var subkeyHandle = key.OpenSubkey(subkey.KeyName, RegistryAccessRights.QueryValue, BackupOptions, token).GetAwaiter().GetResult();
-							propertyNames = CollectValueNames(subkeyHandle, token);
-						}
-						catch (OperationCanceledException)
-						{
-							throw;
-						}
-						catch
-						{
+							try
+							{
+								using var subkeyHandle = key.OpenSubkey(subkey.KeyName, RegistryAccessRights.QueryValue, BackupOptions, token).GetAwaiter().GetResult();
+								propertyNames = CollectValueNames(subkeyHandle, token);
+							}
+							catch (OperationCanceledException)
+							{
+								throw;
+							}
+							catch
+							{
+							}
 						}
 
 						var item = new TboRegistrySubkeyInfo(drive.ServerName, parsed.KeyPath, subkey, propertyNames);
@@ -1020,6 +1029,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		[Parameter]
 		public SwitchParameter IncludeValues { get; set; }
+
+		[Parameter]
+		public SwitchParameter IncludeProperties { get; set; }
 
 		[Parameter]
 		public SwitchParameter IncludeData { get; set; }
