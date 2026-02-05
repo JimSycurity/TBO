@@ -296,6 +296,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var decryptResult = TryDecryptBlob(buffer.AsSpan(0, bytesRead), offset, masterKey, masterKeySet, entropy);
 			var cleartextBytes = decryptResult.Cleartext;
 			var cleartextText = cleartextBytes != null ? TryDecodeCleartext(cleartextBytes) : null;
+			if (cleartextText == null)
+			{
+				cleartextText = TryDecodeVaultCredentialFile(
+					smb,
+					fileSystem,
+					path,
+					buffer.AsSpan(0, bytesRead),
+					this.MaxBytes,
+					masterKey,
+					masterKeySet,
+					entropy);
+			}
 			this.WriteObject(new TboCredManEntryInfo
 			{
 				ServerName = input?.ServerName ?? path.ServerName,
@@ -632,6 +644,317 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return TryExtractReadableCleartext(payload);
 		}
 
+		private static string? TryDecodeVaultCredentialFile(
+			ISmbProviderInfo smb,
+			ISmbFileSystem fileSystem,
+			UncPath path,
+			ReadOnlySpan<byte> fileBytes,
+			int maxBytes,
+			byte[]? masterKey,
+			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
+			byte[]? entropy)
+		{
+			var fileName = path.GetFileName();
+			if (string.IsNullOrWhiteSpace(fileName))
+				return null;
+
+			var extension = System.IO.Path.GetExtension(fileName);
+			if (!extension.Equals(".vcrd", StringComparison.OrdinalIgnoreCase)
+				&& !extension.Equals(".vsch", StringComparison.OrdinalIgnoreCase))
+				return null;
+
+			if ((masterKey == null || masterKey.Length == 0) && (masterKeySet == null || masterKeySet.Count == 0))
+				return null;
+
+			var policyPath = path.GetDirectoryPath().Append("Policy.vpol");
+			if (!TryReadFileBytes(fileSystem, policyPath, maxBytes, out var policyBytes, out var policyLength))
+				return null;
+
+			var policySpan = policyBytes.AsSpan(0, policyLength);
+			var policyOffset = FindDpapiOffset(policySpan);
+			var policyDecrypt = TryDecryptBlob(policySpan, policyOffset, masterKey, masterKeySet, entropy);
+			if (policyDecrypt.Cleartext == null || policyDecrypt.Cleartext.Length == 0)
+				return null;
+
+			if (!TryParseVaultPolicyKeys(policyDecrypt.Cleartext, out var aes128Key, out var aes256Key))
+				return null;
+
+			aes128Key ??= Array.Empty<byte>();
+			if (aes256Key == null || aes256Key.Length == 0)
+				return null;
+
+			return TryParseVaultCredential(fileBytes, aes128Key, aes256Key, out var text) ? text : null;
+		}
+
+		private static bool TryReadFileBytes(
+			ISmbFileSystem fileSystem,
+			UncPath path,
+			int maxBytes,
+			out byte[] buffer,
+			out int bytesRead)
+		{
+			buffer = Array.Empty<byte>();
+			bytesRead = 0;
+
+			try
+			{
+				using var file = fileSystem.OpenFileRead(path, CancellationToken.None);
+				var length = file.Length;
+				var scanLength = (int)Math.Min(length, maxBytes);
+				if (scanLength < 0)
+					scanLength = maxBytes;
+
+				buffer = scanLength == 0 ? Array.Empty<byte>() : new byte[scanLength];
+				using var stream = file.OpenRead();
+				bytesRead = ReadPrefix(stream, buffer);
+				return true;
+			}
+			catch (NtstatusException ex) when (IsMissingPath(ex))
+			{
+				return false;
+			}
+			catch (NtstatusException ex) when (IsAccessDenied(ex))
+			{
+				return false;
+			}
+			catch
+			{
+				return false;
+			}
+		}
+
+		private static bool TryParseVaultPolicyKeys(byte[] payload, out byte[]? aes128Key, out byte[]? aes256Key)
+		{
+			return TryParseVaultPolicyKdbm(payload, out aes128Key, out aes256Key)
+				|| TryParseVaultPolicyKssm(payload, out aes128Key, out aes256Key);
+		}
+
+		private static bool TryParseVaultCredential(
+			ReadOnlySpan<byte> vaultBytes,
+			byte[] aes128Key,
+			byte[] aes256Key,
+			out string? text)
+		{
+			text = null;
+
+			if (vaultBytes.Length < 40)
+				return false;
+
+			var lines = new List<string>();
+			var offset = 0;
+			var finalAttributeOffset = 0;
+
+			offset += 16; // schema guid
+			if (!TryReadInt32Value(vaultBytes, ref offset, out var unk0))
+				return false;
+			if (!TryReadInt64Value(vaultBytes, ref offset, out var lastWritten))
+				return false;
+			offset += 8; // unk1 + unk2
+
+			if (!TryReadInt32Value(vaultBytes, ref offset, out var friendlyNameLen))
+				return false;
+			if (!TryReadUnicodeString(vaultBytes, ref offset, friendlyNameLen, out var friendlyName))
+				return false;
+
+			if (TryGetFileTimeUtc(lastWritten, out var lastWrittenTime))
+				lines.Add($"LastWritten: {lastWrittenTime:O}");
+			AddField(lines, "FriendlyName", friendlyName, requireLetters: false);
+
+			if (!TryReadInt32Value(vaultBytes, ref offset, out var attributeMapLen))
+				return false;
+			if (attributeMapLen < 0 || attributeMapLen > vaultBytes.Length - offset)
+				return false;
+
+			var numberOfAttributes = attributeMapLen / 12;
+			var attributeMap = new Dictionary<int, int>();
+
+			for (var i = 0; i < numberOfAttributes; i++)
+			{
+				if (!TryReadInt32Value(vaultBytes, ref offset, out var attributeNum))
+					return false;
+				if (!TryReadInt32Value(vaultBytes, ref offset, out var attributeOffset))
+					return false;
+				offset += 8; // skip unk
+
+				if (attributeOffset >= 0 && attributeOffset < vaultBytes.Length)
+					attributeMap[attributeNum] = attributeOffset;
+			}
+
+			var itemLines = new List<string>();
+			foreach (var attribute in attributeMap)
+			{
+				var attributeOffset = attribute.Value;
+				attributeOffset += 16;
+
+				if (attribute.Key >= 100)
+					attributeOffset += 4;
+
+				if (!TryReadInt32Value(vaultBytes, ref attributeOffset, out var dataLen))
+					continue;
+				if (dataLen <= 0 || dataLen > vaultBytes.Length - attributeOffset)
+					continue;
+
+				if (attributeOffset >= vaultBytes.Length)
+					continue;
+
+				var ivPresent = vaultBytes[attributeOffset] != 0;
+				attributeOffset += 1;
+				finalAttributeOffset = attributeOffset;
+
+				if (!ivPresent)
+				{
+					attributeOffset += Math.Max(0, dataLen - 1);
+					finalAttributeOffset = attributeOffset;
+					continue;
+				}
+
+				if (!TryReadInt32Value(vaultBytes, ref attributeOffset, out var ivLen))
+					continue;
+				if (ivLen <= 0 || ivLen > vaultBytes.Length - attributeOffset)
+					continue;
+
+				if (!TryReadBytes(vaultBytes, ref attributeOffset, ivLen, out var ivBytes))
+					continue;
+
+				var dataBytesLen = dataLen - 1 - 4 - ivLen;
+				if (dataBytesLen <= 0 || dataBytesLen > vaultBytes.Length - attributeOffset)
+					continue;
+
+				if (!TryReadBytes(vaultBytes, ref attributeOffset, dataBytesLen, out var dataBytes))
+					continue;
+
+				finalAttributeOffset = attributeOffset;
+
+				var decrypted = DecryptVaultData(aes256Key, ivBytes, dataBytes);
+				if (decrypted.Length > 0)
+					TryParseVaultItem(decrypted, itemLines);
+			}
+
+			if (numberOfAttributes > 0 && unk0 < 4 && finalAttributeOffset > 2)
+			{
+				var clearOffset = finalAttributeOffset - 2;
+				if (clearOffset >= 0 && clearOffset < vaultBytes.Length)
+				{
+					var clearSpan = vaultBytes.Slice(clearOffset);
+					var clearOffset2 = 0;
+					if (TryReadInt32Value(clearSpan, ref clearOffset2, out var clearId))
+					{
+						if (TryReadInt32Value(clearSpan, ref clearOffset2, out var clearLen))
+						{
+							if (clearLen > 0 && clearLen <= 2000 && clearOffset2 < clearSpan.Length)
+							{
+								var ivPresent = clearSpan[clearOffset2] != 0;
+								clearOffset2 += 1;
+								if (ivPresent)
+								{
+									if (TryReadInt32Value(clearSpan, ref clearOffset2, out var ivLen))
+									{
+										if (ivLen > 0 && ivLen <= clearSpan.Length - clearOffset2)
+										{
+											if (TryReadBytes(clearSpan, ref clearOffset2, ivLen, out var ivBytes))
+											{
+												var dataBytesLen = clearLen - 1 - 4 - ivLen;
+												if (dataBytesLen > 0 && dataBytesLen <= clearSpan.Length - clearOffset2)
+												{
+													if (TryReadBytes(clearSpan, ref clearOffset2, dataBytesLen, out var dataBytes))
+													{
+														var decrypted = DecryptVaultData(aes256Key, ivBytes, dataBytes);
+														if (decrypted.Length > 0)
+															TryParseVaultItem(decrypted, itemLines);
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if (itemLines.Count == 0 && lines.Count == 0)
+				return false;
+
+			lines.AddRange(itemLines);
+			text = string.Join(Environment.NewLine, lines);
+			return true;
+		}
+
+		private static void TryParseVaultItem(byte[] vaultItemBytes, List<string> lines)
+		{
+			if (vaultItemBytes.Length < 12)
+				return;
+
+			var offset = 0;
+			if (!TryReadInt32Value(vaultItemBytes, ref offset, out var version))
+				return;
+			if (!TryReadInt32Value(vaultItemBytes, ref offset, out var count))
+				return;
+			offset += 4; // skip unk
+
+			for (var i = 0; i < count; i++)
+			{
+				if (!TryReadInt32Value(vaultItemBytes, ref offset, out var id))
+					return;
+				if (!TryReadInt32Value(vaultItemBytes, ref offset, out var size))
+					return;
+				if (size < 0 || size > vaultItemBytes.Length - offset)
+					return;
+
+				var entryData = vaultItemBytes.AsSpan(offset, size).ToArray();
+				offset += size;
+
+				var entryString = string.Empty;
+				if (size > 0 && size <= MaxCredentialStringBytes)
+				{
+					try
+					{
+						entryString = System.Text.Encoding.Unicode.GetString(entryData).TrimEnd('\0');
+					}
+					catch
+					{
+						entryString = string.Empty;
+					}
+				}
+
+				switch (id)
+				{
+					case 1:
+						AddField(lines, "Resource", entryString, requireLetters: true);
+						break;
+					case 2:
+						AddField(lines, "Identity", entryString, requireLetters: true);
+						break;
+					case 3:
+						AddField(lines, "Authenticator", entryString, requireLetters: false);
+						break;
+					default:
+						if (IsMostlyPrintable(entryString))
+						{
+							lines.Add($"Property {id}: {entryString.Trim()}");
+						}
+						else
+						{
+							lines.Add($"Property {id}Hex: {entryData.ToHexString()}");
+						}
+						break;
+				}
+			}
+		}
+
+		private static byte[] DecryptVaultData(byte[] key, byte[] iv, byte[] data)
+		{
+			using var aes = System.Security.Cryptography.Aes.Create();
+			aes.Key = key;
+			if (iv.Length > 0)
+				aes.IV = iv;
+			aes.Mode = System.Security.Cryptography.CipherMode.CBC;
+
+			using var decryptor = aes.CreateDecryptor();
+			return decryptor.TransformFinalBlock(data, 0, data.Length);
+		}
+
 		private static bool TryDecodeCredentialCleartext(byte[] payload, out string? text)
 		{
 			text = null;
@@ -958,6 +1281,67 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			bytes = new byte[length];
 			Array.Copy(payload, offset, bytes, 0, length);
+			offset += length;
+			return true;
+		}
+
+		private static bool TryReadInt32Value(ReadOnlySpan<byte> payload, ref int offset, out int value)
+		{
+			value = 0;
+			if (offset < 0 || offset + sizeof(int) > payload.Length)
+				return false;
+
+			value = BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(offset, sizeof(int)));
+			offset += sizeof(int);
+			return true;
+		}
+
+		private static bool TryReadInt64Value(ReadOnlySpan<byte> payload, ref int offset, out long value)
+		{
+			value = 0;
+			if (offset < 0 || offset + sizeof(long) > payload.Length)
+				return false;
+
+			value = BinaryPrimitives.ReadInt64LittleEndian(payload.Slice(offset, sizeof(long)));
+			offset += sizeof(long);
+			return true;
+		}
+
+		private static bool TryReadBytes(ReadOnlySpan<byte> payload, ref int offset, int length, out byte[] bytes)
+		{
+			bytes = Array.Empty<byte>();
+			if (length < 0 || offset < 0 || offset + length > payload.Length)
+				return false;
+
+			if (length == 0)
+			{
+				bytes = Array.Empty<byte>();
+				return true;
+			}
+
+			bytes = payload.Slice(offset, length).ToArray();
+			offset += length;
+			return true;
+		}
+
+		private static bool TryReadUnicodeString(ReadOnlySpan<byte> payload, ref int offset, int length, out string value)
+		{
+			value = string.Empty;
+
+			if (length < 0 || length > MaxCredentialStringBytes)
+				return false;
+			if (offset < 0 || offset + length > payload.Length)
+				return false;
+
+			try
+			{
+				value = System.Text.Encoding.Unicode.GetString(payload.Slice(offset, length)).TrimEnd('\0');
+			}
+			catch
+			{
+				return false;
+			}
+
 			offset += length;
 			return true;
 		}
