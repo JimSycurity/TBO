@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Management.Automation;
 using System.Threading;
 using Titanis;
@@ -44,6 +46,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public byte[]? DpapiUserKeyBytes { get; set; }
 
+		[Parameter]
+		public string? UserPassword { get; set; }
+
+		[Parameter]
+		public string? UserNtlmHash { get; set; }
+
 		private CancellationTokenSource? _cancelSource;
 
 		protected override void ProcessRecord(ISmbProviderInfo smb)
@@ -59,18 +67,59 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
-			var keys = ResolveDpapiKeys();
-			if (keys.MachineKey == null && keys.UserKey == null)
+			var dpapiSystemKeys = ResolveDpapiKeys();
+			var hasUserMaterial = !string.IsNullOrWhiteSpace(this.UserPassword) || !string.IsNullOrWhiteSpace(this.UserNtlmHash);
+			var hasDpapiSystemMaterial = dpapiSystemKeys.MachineKey != null || dpapiSystemKeys.UserKey != null;
+
+			var effectiveScope = this.Scope;
+			if (effectiveScope.HasFlag(DpapiMasterKeyScope.Machine) && !hasDpapiSystemMaterial)
 			{
-				this.WriteWarning("Get-TBODpapiMasterKeys did not receive DPAPI_SYSTEM key material. Supply DpapiMachineKey/DpapiUserKey or pipe Get-TBORegLsaSecrets.");
+				this.WriteWarning("Get-TBODpapiMasterKeys cannot decrypt machine master keys without DPAPI_SYSTEM. Supply DpapiMachineKey/DpapiUserKey (or pipe Get-TBORegLsaSecrets -Name DPAPI_SYSTEM).");
+				effectiveScope &= ~DpapiMasterKeyScope.Machine;
+			}
+
+			if (effectiveScope.HasFlag(DpapiMasterKeyScope.User) && !hasDpapiSystemMaterial && !hasUserMaterial)
+			{
+				this.WriteWarning("Get-TBODpapiMasterKeys cannot decrypt user profile master keys without UserPassword/UserNtlmHash (or DPAPI_SYSTEM).");
+				effectiveScope &= ~DpapiMasterKeyScope.User;
+			}
+
+			if (effectiveScope == DpapiMasterKeyScope.None)
 				return;
+
+			byte[]? userNtHash = null;
+			if (!string.IsNullOrWhiteSpace(this.UserNtlmHash))
+			{
+				try
+				{
+					userNtHash = NtlmHashInput.Parse(this.UserNtlmHash).NtHash;
+				}
+				catch (Exception ex)
+				{
+					throw new ArgumentException($"UserNtlmHash was invalid: {ex.Message}", nameof(this.UserNtlmHash), ex);
+				}
+			}
+
+			var userKeyCache = new Dictionary<string, IReadOnlyList<DpapiKeyMaterialCandidate>>(StringComparer.OrdinalIgnoreCase);
+			IReadOnlyList<DpapiKeyMaterialCandidate> ResolveUserCandidates(string sid)
+			{
+				if (userKeyCache.TryGetValue(sid, out var cached))
+					return cached;
+
+				var derived = DpapiUserKeyDerivation.DerivePreKeyCandidates(
+					sid,
+					this.UserPassword,
+					userNtHash);
+
+				userKeyCache[sid] = derived;
+				return derived;
 			}
 
 			var locations = DpapiMasterKeyLocator.Enumerate(
 				smb,
 				serverName,
 				shareName,
-				this.Scope,
+				effectiveScope,
 				message => this.WriteWarning(message),
 				null,
 				message => this.WriteVerbose(message),
@@ -78,11 +127,70 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			foreach (var location in locations)
 			{
-				var keyMaterial = location.Scope.Equals("Machine", StringComparison.OrdinalIgnoreCase)
-					? keys.MachineKey
-					: keys.UserKey;
-				if (keyMaterial == null)
+				var keyCandidates = new List<DpapiKeyMaterialCandidate>();
+				var isUserScope = location.Scope.Equals("User", StringComparison.OrdinalIgnoreCase);
+				var isMachineScope = location.Scope.Equals("Machine", StringComparison.OrdinalIgnoreCase);
+
+				if (isUserScope && hasUserMaterial && !string.IsNullOrWhiteSpace(location.UserSid))
+					keyCandidates.AddRange(ResolveUserCandidates(location.UserSid));
+
+				if (isMachineScope)
 				{
+					if (dpapiSystemKeys.MachineKey != null && dpapiSystemKeys.MachineKey.Length > 0)
+					{
+						keyCandidates.Add(new DpapiKeyMaterialCandidate
+						{
+							Label = "DPAPI_SYSTEM: machine key",
+							KeyMaterial = dpapiSystemKeys.MachineKey,
+							Confidence = 1.0
+						});
+					}
+
+					if (dpapiSystemKeys.UserKey != null && dpapiSystemKeys.UserKey.Length > 0)
+					{
+						keyCandidates.Add(new DpapiKeyMaterialCandidate
+						{
+							Label = "DPAPI_SYSTEM: user key",
+							KeyMaterial = dpapiSystemKeys.UserKey,
+							Confidence = 1.0
+						});
+					}
+				}
+				else
+				{
+					if (dpapiSystemKeys.UserKey != null && dpapiSystemKeys.UserKey.Length > 0)
+					{
+						keyCandidates.Add(new DpapiKeyMaterialCandidate
+						{
+							Label = "DPAPI_SYSTEM: user key",
+							KeyMaterial = dpapiSystemKeys.UserKey,
+							Confidence = 1.0
+						});
+					}
+
+					if (dpapiSystemKeys.MachineKey != null && dpapiSystemKeys.MachineKey.Length > 0)
+					{
+						keyCandidates.Add(new DpapiKeyMaterialCandidate
+						{
+							Label = "DPAPI_SYSTEM: machine key",
+							KeyMaterial = dpapiSystemKeys.MachineKey,
+							Confidence = 1.0
+						});
+					}
+				}
+
+				keyCandidates = keyCandidates
+					.Where(c => c.KeyMaterial != null && c.KeyMaterial.Length > 0)
+					.GroupBy(c => Convert.ToHexString(c.KeyMaterial), StringComparer.OrdinalIgnoreCase)
+					.Select(g => g.First())
+					.ToList();
+
+				if (keyCandidates.Count == 0)
+				{
+					var missingReason = isUserScope
+						? "No key material available for user master keys. Supply UserPassword/UserNtlmHash (or DPAPI_SYSTEM)."
+						: "No key material available for machine master keys. Supply DPAPI_SYSTEM (DpapiMachineKey/DpapiUserKey).";
+
 					this.WriteObject(new TboDpapiMasterKeyInfo
 					{
 						ServerName = this.ServerName,
@@ -91,7 +199,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						KeyPath = location.KeyPath,
 						MasterKeyGuid = location.MasterKeyGuid,
 						IsPreferred = location.IsPreferred,
-						FailureReason = "No DPAPI_SYSTEM key material available for this scope."
+						FailureReason = missingReason
 					});
 					continue;
 				}
@@ -151,36 +259,30 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					this.WriteVerbose($"Get-TBODpapiMasterKeys detected header GUID {masterKeyGuid} for {location.KeyPath} (path GUID {location.MasterKeyGuid}).");
 				}
 
-				var decryptResult = masterKeyFile.DecryptWithKey(keyMaterial);
-				var bestResult = decryptResult.MasterKeyResult?.Success == true
-					? decryptResult.MasterKeyResult
-					: decryptResult.BackupKeyResult;
-				var usedAlternateKey = false;
+				DpapiMasterKeyFileDecryptionResult? decryptResult = null;
+				DpapiMasterKeyDecryptionResult? bestResult = null;
+				string? usedKeyLabel = null;
 
-				if (bestResult?.Success != true)
+				foreach (var candidate in keyCandidates)
 				{
-					var alternateKey = location.Scope.Equals("Machine", StringComparison.OrdinalIgnoreCase)
-						? keys.UserKey
-						: keys.MachineKey;
-					if (alternateKey != null && alternateKey.Length > 0)
-					{
-						var alternateResult = masterKeyFile.DecryptWithKey(alternateKey);
-						var alternateBest = alternateResult.MasterKeyResult?.Success == true
-							? alternateResult.MasterKeyResult
-							: alternateResult.BackupKeyResult;
+					var candidateResult = masterKeyFile.DecryptWithKey(candidate.KeyMaterial);
+					var candidateBest = candidateResult.MasterKeyResult?.Success == true
+						? candidateResult.MasterKeyResult
+						: candidateResult.BackupKeyResult;
 
-						if (alternateBest?.Success == true)
-						{
-							decryptResult = alternateResult;
-							bestResult = alternateBest;
-							usedAlternateKey = true;
-							this.WriteVerbose($"Get-TBODpapiMasterKeys decrypted {location.KeyPath} using the alternate DPAPI_SYSTEM key.");
-						}
-					}
+					decryptResult = candidateResult;
+					bestResult = candidateBest;
+					usedKeyLabel = candidate.Label;
+
+					if (candidateBest?.Success == true)
+						break;
 				}
 
 				if (bestResult != null && bestResult.Success && bestResult.MasterKey != null)
 				{
+					if (!string.IsNullOrWhiteSpace(usedKeyLabel))
+						this.WriteVerbose($"Get-TBODpapiMasterKeys decrypted {location.KeyPath} using {usedKeyLabel}.");
+
 					this.WriteObject(new TboDpapiMasterKeyInfo
 					{
 						ServerName = this.ServerName,
@@ -195,9 +297,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				else
 				{
-					var masterReason = decryptResult.MasterKeyResult?.FailureReason;
-					var backupReason = decryptResult.BackupKeyResult?.FailureReason;
-					var reason = bestResult?.FailureReason ?? decryptResult.FailureReason ?? "Failed to decrypt master key.";
+					var masterReason = decryptResult?.MasterKeyResult?.FailureReason;
+					var backupReason = decryptResult?.BackupKeyResult?.FailureReason;
+					var reason = bestResult?.FailureReason ?? decryptResult?.FailureReason ?? "Failed to decrypt master key.";
 					if (!string.IsNullOrWhiteSpace(masterReason) || !string.IsNullOrWhiteSpace(backupReason))
 					{
 						reason = $"MasterKey: {masterReason ?? "n/a"}; BackupKey: {backupReason ?? "n/a"}";

@@ -149,7 +149,8 @@
       <command:verb>Get</command:verb>
       <command:noun>TBODpapiMasterKeys</command:noun>
       <maml:description>
-        <maml:para>Decrypts DPAPI master keys using DPAPI_SYSTEM from LSA secrets.</maml:para>
+        <maml:para>Decrypts DPAPI master keys.</maml:para>
+        <maml:para>Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decrypted via user SID plus password or NT hash.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -182,6 +183,14 @@
         <command:parameter required="false">
           <maml:name>DpapiUserKeyBytes</maml:name>
           <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserPassword</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserNtlmHash</maml:name>
+          <command:parameterValue>String</command:parameterValue>
         </command:parameter>
       </command:syntaxItem>
     </command:syntax>
@@ -235,6 +244,20 @@
         </maml:description>
         <command:parameterValue>Byte[]</command:parameterValue>
       </command:parameter>
+      <command:parameter>
+        <maml:name>UserPassword</maml:name>
+        <maml:description>
+          <maml:para>Password used to derive user-scoped DPAPI key material (SID + password).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserNtlmHash</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded NT hash (or LM:NT string) used to derive user-scoped DPAPI key material (SID + NTHash). Only the NT portion is used.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -256,6 +279,20 @@
         <maml:code>Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine -ShareName C$</maml:code>
         <maml:remarks>
           <maml:para>Decrypts only machine master keys from the specified share.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts user profile master keys using SID + password-derived key material.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 5 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserNtlmHash '0123456789abcdef0123456789abcdef'</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts user profile master keys using SID + NT hash-derived key material.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

