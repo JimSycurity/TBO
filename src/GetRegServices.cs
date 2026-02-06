@@ -55,12 +55,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	[Cmdlet(VerbsCommon.Get, "TBORegServices")]
 	[OutputType(typeof(TboRegServiceInfo))]
-	public sealed class GetTBORegServices : TboRegCmdlet
+	public sealed class GetTBORegServices : ServiceRegistryCmdletBase
 	{
-		private const string DefaultServicesPath = @"HKLM\SYSTEM\CurrentControlSet\Services";
-		private const string SecuritySubkeyName = "Security";
-		private const string SecurityValueName = "Security";
-
 		[Parameter(Position = 1)]
 		public string Path { get; set; } = DefaultServicesPath;
 
@@ -154,7 +150,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			if (!wildcardMatched)
-				this.WriteWarning($"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
+				this.LogWarning(smb, $"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
 		}
 
 		private List<RegistrySubkeyInfo> LoadServiceSubkeys(
@@ -175,16 +171,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						cancellationToken);
 
 					var keyInfo = servicesKey.QueryInfo(cancellationToken).GetAwaiter().GetResult();
-					List<RegistrySubkeyInfo> subkeys;
-					try
-					{
-						subkeys = CollectSubkeys(servicesKey, cancellationToken);
-					}
-					catch (Exception ex)
-					{
-						smb.LogException("Get-TBORegServices failed to enumerate service keys", ex);
-						throw;
-					}
+					var subkeys = CollectServiceSubkeys(
+						smb,
+						servicesKey,
+						keyInfo,
+						servicesPath,
+						cancellationToken,
+						"Get-TBORegServices");
 
 					return (keyInfo, subkeys);
 				});
@@ -192,28 +185,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			servicesInfo = result.keyInfo;
 			var subkeys = result.subkeys;
 
-			if (servicesInfo.SubkeyCount > 0 && subkeys.Count != servicesInfo.SubkeyCount)
-			{
-				this.WriteWarning(
-					$"Get-TBORegServices enumerated {subkeys.Count} of {servicesInfo.SubkeyCount} subkeys under {servicesPath.KeyPath}. Some services may be missing.");
-			}
-
 			return subkeys;
-		}
-
-		private static List<string> FilterNames(string[]? names)
-		{
-			if (names == null || names.Length == 0)
-				return new List<string>();
-
-			var filtered = new List<string>(names.Length);
-			foreach (var name in names)
-			{
-				if (!string.IsNullOrWhiteSpace(name))
-					filtered.Add(name.Trim());
-			}
-
-			return filtered;
 		}
 
 		private bool TryWriteServiceInfo(
@@ -238,12 +210,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
 				if (warnOnMissing)
-					this.WriteWarning($"Service key not found: {basePath.KeyPath}\\{serviceName}");
+					this.LogWarning(smb, $"Service key not found: {basePath.KeyPath}\\{serviceName}");
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegServices failed to read service '{serviceName}'", ex);
-				this.WriteWarning($"Get-TBORegServices failed to read service '{serviceName}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegServices failed to read service '{serviceName}'", ex);
+				this.LogWarning(smb, $"Get-TBORegServices failed to read service '{serviceName}': {ex.Message}");
 			}
 
 			return false;
@@ -301,17 +273,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				sdBytes));
 		}
 
-		private static bool MatchesAnyPattern(IReadOnlyList<WildcardPattern> patterns, string value)
-		{
-			foreach (var pattern in patterns)
-			{
-				if (pattern.IsMatch(value))
-					return true;
-			}
-
-			return false;
-		}
-
 		private static bool IsMissingKey(Win32Exception ex)
 		{
 			return ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
@@ -358,7 +319,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				else
 				{
-					sd = TBOSD.FromRegistryBinary(sdBytes);
+					try
+					{
+						sd = TBOSD.FromRegistryBinary(sdBytes);
+					}
+					catch (ArgumentException) when (OperatingSystem.IsWindows())
+					{
+						// Some service security descriptors are valid Windows SDs but include ACE types
+						// not currently supported by Titanis.Winterop.Security.SecurityDescriptor.
+						sd = TBOSD.FromRegistryBinaryAsWindows(sdBytes);
+					}
 				}
 			}
 			catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND
@@ -368,8 +338,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegServices failed to read security descriptor for '{serviceSpec.KeyPath}'", ex);
-				this.WriteWarning($"Get-TBORegServices failed to read security descriptor for '{serviceSpec.KeyPath}'. SecurityDescriptorBytes is available; try -AsWindows or -AsSddl for raw output.");
+				this.LogException(smb, $"Get-TBORegServices failed to read security descriptor for '{serviceSpec.KeyPath}'", ex);
+				this.LogWarning(smb, $"Get-TBORegServices failed to read security descriptor for '{serviceSpec.KeyPath}'. SecurityDescriptorBytes is available; try -AsWindows or -AsSddl for raw output.");
 			}
 		}
 

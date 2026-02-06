@@ -36,10 +36,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				var lsaKey = ResolveLsaKey(smb, session.Client, cancellationToken, out _);
+				var lsaKey = ResolveLsaKey(
+					smb,
+					session,
+					cancellationToken,
+					this.LsaKeyBytes,
+					this.LsaKey,
+					nameof(this.LsaKey),
+					out _);
 				if (lsaKey == null || lsaKey.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegMachineAccount failed to derive the LSA key.");
+					this.LogWarning(smb, "Get-TBORegMachineAccount failed to derive the LSA key.");
 					return;
 				}
 
@@ -47,14 +54,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var secretBlob = TryReadSecretValue(session.Client, MachineSecretName, "CurrVal", cancellationToken, out lastWriteTime);
 				if (secretBlob == null || secretBlob.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegMachineAccount failed to read $MACHINE.ACC: value is empty.");
+					this.LogWarning(smb, "Get-TBORegMachineAccount failed to read $MACHINE.ACC: value is empty.");
 					return;
 				}
 
 				var decrypted = DecryptLsaSecret(secretBlob, lsaKey);
 				if (decrypted == null || decrypted.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegMachineAccount failed to decrypt $MACHINE.ACC: data was empty.");
+					this.LogWarning(smb, "Get-TBORegMachineAccount failed to decrypt $MACHINE.ACC: data was empty.");
 					return;
 				}
 
@@ -94,30 +101,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private byte[]? ResolveLsaKey(
-			ISmbProviderInfo smb,
-			IRegistryClient client,
-			CancellationToken cancellationToken,
-			out string? lsaKeySource)
-		{
-			lsaKeySource = null;
-			if (this.LsaKeyBytes != null && this.LsaKeyBytes.Length > 0)
-				return this.LsaKeyBytes;
-
-			if (!string.IsNullOrWhiteSpace(this.LsaKey))
-			{
-				try
-				{
-					return Titanis.BinaryHelper.ParseHexString(this.LsaKey.AsSpan());
-				}
-				catch (Exception ex)
-				{
-					throw new ArgumentException($"Invalid LSA key value: {ex.Message}", nameof(this.LsaKey), ex);
-				}
-			}
-
-			var bootKey = ExtractBootKey(client, cancellationToken);
-			return ExtractLsaKey(smb, client, bootKey, cancellationToken, out lsaKeySource);
-		}
 	}
 }

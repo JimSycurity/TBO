@@ -14,6 +14,41 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		protected abstract void ProcessRecord(ISmbProviderInfo smb);
+
+		protected void LogVerbose(ISmbProviderInfo smb, string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return;
+
+			this.WriteVerbose(message);
+			if (smb is SmbProviderInfo provider)
+				provider.LogVerbose(message);
+		}
+
+		protected void LogWarning(ISmbProviderInfo smb, string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return;
+
+			this.WriteWarning(message);
+			if (smb is SmbProviderInfo provider)
+				provider.LogWarning(message, emitToConsole: false);
+		}
+
+		protected void LogException(ISmbProviderInfo smb, string context, Exception ex, bool emitWarning = true)
+		{
+			if (string.IsNullOrWhiteSpace(context) || ex == null)
+				return;
+
+			smb.LogException(context, ex);
+			if (!emitWarning)
+				return;
+
+			var message = $"{context}: {ex.Message}";
+			this.WriteWarning(message);
+			if (smb is SmbProviderInfo provider)
+				provider.LogWarning(message, emitToConsole: false);
+		}
 	}
 
 	public abstract class SetTBOConnectOptionsBase : SmbCmdlet, IDynamicParameters
@@ -29,28 +64,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			if (string.IsNullOrEmpty(this.ServerName))
 			{
-				this.WriteVerbose(this.DefaultScopeMessage);
-				var baseParams = GetDefaultConnectParameters(smb);
-				smb.DefaultConnectParameters = this._parms.MergeOnto(baseParams);
+				this.LogVerbose(smb, this.DefaultScopeMessage);
+				smb.DefaultConnectParameters = SmbConnectionParameters.MergeDefaults(smb, this._parms);
 				return;
 			}
 
-			var baseServerParams = GetServerConnectParameters(smb, this.ServerName);
-			var parms = this._parms.MergeOnto(baseServerParams);
+			var parms = SmbConnectionParameters.MergeForServer(smb, this.ServerName, this._parms);
 			smb.SetConnectParameters(this.ServerName, parms);
 		}
 
 		protected virtual string DefaultScopeMessage
 			=> "Setting default connection parameters (no server specified)";
-
-		private static SmbConnectionParameters GetDefaultConnectParameters(ISmbProviderInfo smb)
-			=> smb.DefaultConnectParameters as SmbConnectionParameters ?? SmbConnectionParameters.GetDefault();
-
-		private static SmbConnectionParameters GetServerConnectParameters(ISmbProviderInfo smb, string serverName)
-		{
-			var existing = smb.GetConnectParametersFor(serverName, false) as SmbConnectionParameters;
-			return existing ?? GetDefaultConnectParameters(smb);
-		}
 	}
 
 	[Cmdlet(VerbsCommon.Set, "TBOConnectOptions")]

@@ -1,0 +1,71 @@
+using System;
+using System.IO;
+using System.Threading;
+using Titanis.Net;
+
+namespace Titanis.Tbo.Smb2.PowerShell
+{
+	internal static class DpapiHelpers
+	{
+		private static readonly SecretDecodeOptions CleartextDecodeOptions = new SecretDecodeOptions
+		{
+			MinTextLength = 1,
+			MinAsciiCount = 1,
+			MinAsciiRatio = 0.6,
+			MinPrintableRatio = 0.0,
+			MaxNonAsciiRatio = 1.0,
+			RejectReplacementChar = true,
+			AllowControlChars = false
+		};
+
+		internal static readonly byte[] DpapiMagic = new byte[]
+		{
+			0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF, 0x01, 0x15,
+			0xD1, 0x11, 0x8C, 0x7A, 0x00, 0xC0, 0x4F, 0xC2, 0x97, 0xEB
+		};
+
+		internal static int FindMagicOffset(ReadOnlySpan<byte> buffer)
+		{
+			if (buffer.Length < DpapiMagic.Length)
+				return -1;
+
+			return buffer.IndexOf(DpapiMagic);
+		}
+
+		internal static string NormalizeServerName(string? serverName)
+		{
+			return string.IsNullOrWhiteSpace(serverName)
+				? string.Empty
+				: serverName.TrimStart('\\');
+		}
+
+		internal static string NormalizeShareName(string? shareName)
+		{
+			if (string.IsNullOrWhiteSpace(shareName))
+				return string.Empty;
+
+			var trimmed = shareName.Trim();
+			trimmed = trimmed.Trim('\\');
+			return trimmed;
+		}
+
+		internal static byte[] ReadFileBytes(ISmbProviderInfo smb, UncPath path, CancellationToken cancellationToken)
+		{
+			var fileSystem = SmbFileSystemResolver.Resolve(smb);
+			using var file = fileSystem.OpenFileRead(path, cancellationToken);
+			using var stream = file.OpenRead();
+			using var memory = new MemoryStream();
+			stream.CopyTo(memory);
+			return memory.ToArray();
+		}
+
+		internal static string? TryDecodeCleartext(byte[] payload)
+		{
+			if (payload.Length == 0)
+				return null;
+
+			var result = SecretDecoding.TryDecode(payload, CleartextDecodeOptions);
+			return result.Text;
+		}
+	}
+}

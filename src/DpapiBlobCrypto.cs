@@ -299,6 +299,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return HashAlgorithms.TryGetValue(hashAlgo, out info);
 		}
 
+		internal static string ResolveHashAlgorithmName(uint hashAlgo, uint hashAlgoLen)
+		{
+			return TryResolveHashAlgorithm(hashAlgo, hashAlgoLen, out var info)
+				? info.Name
+				: $"0x{hashAlgo:x}";
+		}
+
 		private static bool TryResolveCipherAlgorithm(uint cryptAlgo, uint cryptAlgoLen, out CipherAlgorithmInfo info)
 		{
 			if (!CipherAlgorithms.TryGetValue(cryptAlgo, out info))
@@ -315,6 +322,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return true;
+		}
+
+		internal static string ResolveCipherAlgorithmName(uint cryptAlgo, uint cryptAlgoLen)
+		{
+			return TryResolveCipherAlgorithm(cryptAlgo, cryptAlgoLen, out var info)
+				? info.Name
+				: $"0x{cryptAlgo:x}";
 		}
 
 		private static byte[] DeriveKey(byte[] sessionKey, CipherAlgorithmInfo cipherAlgo, HashAlgorithmInfo hashAlgo)

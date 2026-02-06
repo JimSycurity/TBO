@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Management.Automation;
 using System.Threading;
-using Titanis;
 using Titanis.Msrpc.Msrrp;
 
 namespace Titanis.Tbo.Smb2.PowerShell
@@ -39,10 +38,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				var lsaKey = ResolveLsaKey(smb, session.Client, cancellationToken, out _);
+				var lsaKey = ResolveLsaKey(
+					smb,
+					session,
+					cancellationToken,
+					this.LsaKeyBytes,
+					this.LsaKey,
+					nameof(this.LsaKey),
+					out _);
 				if (lsaKey == null || lsaKey.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegLsaSecrets failed to derive the LSA key.");
+					this.LogWarning(smb, "Get-TBORegLsaSecrets failed to derive the LSA key.");
 					return;
 				}
 
@@ -50,7 +56,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (names.Count == 0)
 					return;
 
-				var filters = BuildNameFilters();
+				var filters = BuildNameFilters(this.Name);
 				foreach (var name in names)
 				{
 					if (!MatchesAny(filters, name))
@@ -60,14 +66,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					var secretBlob = TryReadSecretValue(session.Client, name, "CurrVal", cancellationToken, out lastWriteTime);
 					if (secretBlob == null || secretBlob.Length == 0)
 					{
-						this.WriteWarning($"Get-TBORegLsaSecrets failed to read secret '{name}': value is empty.");
+						this.LogWarning(smb, $"Get-TBORegLsaSecrets failed to read secret '{name}': value is empty.");
 						continue;
 					}
 
 					var decrypted = DecryptLsaSecret(secretBlob, lsaKey);
 					if (decrypted == null || decrypted.Length == 0)
 					{
-						this.WriteWarning($"Get-TBORegLsaSecrets failed to decrypt secret '{name}': data was empty.");
+						this.LogWarning(smb, $"Get-TBORegLsaSecrets failed to decrypt secret '{name}': data was empty.");
 						continue;
 					}
 
@@ -104,32 +110,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			});
 		}
 
-		private byte[]? ResolveLsaKey(
-			ISmbProviderInfo smb,
-			IRegistryClient client,
-			CancellationToken cancellationToken,
-			out string? lsaKeySource)
-		{
-			lsaKeySource = null;
-			if (this.LsaKeyBytes != null && this.LsaKeyBytes.Length > 0)
-				return this.LsaKeyBytes;
-
-			if (!string.IsNullOrWhiteSpace(this.LsaKey))
-			{
-				try
-				{
-					return BinaryHelper.ParseHexString(this.LsaKey.AsSpan());
-				}
-				catch (Exception ex)
-				{
-					throw new ArgumentException($"Invalid LSA key value: {ex.Message}", nameof(this.LsaKey), ex);
-				}
-			}
-
-			var bootKey = ExtractBootKey(client, cancellationToken);
-			return ExtractLsaKey(smb, client, bootKey, cancellationToken, out lsaKeySource);
-		}
-
 		private List<string> ResolveSecretNames(IRegistryClient client, CancellationToken cancellationToken)
 		{
 			if (this.Name != null && this.Name.Length > 0 && this.Name.All(n => !string.IsNullOrWhiteSpace(n)) && !HasWildcardNames())
@@ -161,39 +141,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return false;
 		}
 
-		private static List<WildcardPattern> BuildNameFilters(IEnumerable<string>? names = null)
-		{
-			var filters = new List<WildcardPattern>();
-			if (names == null)
-				return filters;
-
-			foreach (var name in names)
-			{
-				if (string.IsNullOrWhiteSpace(name))
-					continue;
-				filters.Add(new WildcardPattern(name, WildcardOptions.IgnoreCase));
-			}
-
-			return filters;
-		}
-
-		private List<WildcardPattern> BuildNameFilters()
-		{
-			return BuildNameFilters(this.Name);
-		}
-
-		private static bool MatchesAny(List<WildcardPattern> filters, string name)
-		{
-			if (filters.Count == 0)
-				return true;
-
-			foreach (var filter in filters)
-			{
-				if (filter.IsMatch(name))
-					return true;
-			}
-
-			return false;
-		}
 	}
 }

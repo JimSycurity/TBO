@@ -220,6 +220,32 @@ Describe 'TBO registry cmdlets (mocked)' {
 		$script:sessionCalled | Should -BeFalse
 	}
 
+	It 'Find-TBORegWeakServices can parse service Security SD bytes that include custom ACEs' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$sdBase64 = @'
+AQAUgAwBAAAYAQAAFAAAAEgAAAACADQAAgAAAAKAFAD/AQ8AAQEAAAAAAAEAAAAAFAAYAJ0BAgABAgAAAAAAEwACAAAABgAAAgDEAAcAAAAAABgAnQECAAECAAAAAAAFIAAAACECAAAAABQAnQECAAEBAAAAAAAFEgAAAAAAGACdAQIAAQIAAAAAAAUgAAAAIAIAAAAAFACdAQIAAQEAAAAAAAUEAAAAAAAUAJ0BAgABAQAAAAAABQYAAAAAACgA/wEPAAEGAAAAAAAFUAAAAL9VCHI74CjQiXlL+JGJbnxAJez0AAAoAP8BDwABBgAAAAAABVAAAACcLNIBSon7eJu+XdtzpkmLiIw0HwEBAAAAAAAFEgAAAAEBAAAAAAAFEgAAAA==
+'@ -replace '\s', ''
+		$sdBytes = [Convert]::FromBase64String($sdBase64)
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey('HKLM\SYSTEM\CurrentControlSet\Services\MDCoreSvc') | Out-Null
+		$store.AddKey('HKLM\SYSTEM\CurrentControlSet\Services\MDCoreSvc\Security') | Out-Null
+		$store.SetBinaryValue('HKLM\SYSTEM\CurrentControlSet\Services\MDCoreSvc\Security', 'Security', $sdBytes) | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			$warnings = @()
+			{ Find-TBORegWeakServices -ServerName 'server' -Name 'MDCoreSvc' -WarningVariable warnings -WarningAction Continue | Out-Null } | Should -Not -Throw
+			$warnings.Count | Should -Be 0
+		}
+	}
+
 	It 'Get-TBORegValue reads from fake registry store' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'

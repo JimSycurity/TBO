@@ -45,10 +45,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				var lsaKey = ResolveLsaKey(smb, session.Client, cancellationToken, out var lsaKeySource);
+				var lsaKey = ResolveLsaKey(
+					smb,
+					session,
+					cancellationToken,
+					this.LsaKeyBytes,
+					this.LsaKey,
+					nameof(this.LsaKey),
+					out var lsaKeySource);
 				if (lsaKey == null || lsaKey.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegCachedCredentials failed to derive the LSA key.");
+					this.LogWarning(smb, "Get-TBORegCachedCredentials failed to derive the LSA key.");
 					return;
 				}
 
@@ -56,7 +63,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var nlkm = ResolveNlkmSecret(session.Client, lsaKey, vistaOrLater, cancellationToken);
 				if (nlkm == null || nlkm.Length == 0)
 				{
-					this.WriteWarning("Get-TBORegCachedCredentials failed to derive the NL$KM secret.");
+					this.LogWarning(smb, "Get-TBORegCachedCredentials failed to derive the NL$KM secret.");
 					return;
 				}
 
@@ -75,7 +82,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (Exception ex)
 				{
-					smb.LogException("Get-TBORegCachedCredentials failed to enumerate cache values", ex);
+					this.LogException(smb, "Get-TBORegCachedCredentials failed to enumerate cache values", ex);
 					throw;
 				}
 
@@ -116,32 +123,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					});
 				}
 			});
-		}
-
-		private byte[]? ResolveLsaKey(
-			ISmbProviderInfo smb,
-			IRegistryClient client,
-			CancellationToken cancellationToken,
-			out string? lsaKeySource)
-		{
-			lsaKeySource = null;
-			if (this.LsaKeyBytes != null && this.LsaKeyBytes.Length > 0)
-				return this.LsaKeyBytes;
-
-			if (!string.IsNullOrWhiteSpace(this.LsaKey))
-			{
-				try
-				{
-					return BinaryHelper.ParseHexString(this.LsaKey.AsSpan());
-				}
-				catch (Exception ex)
-				{
-					throw new ArgumentException($"Invalid LSA key value: {ex.Message}", nameof(this.LsaKey), ex);
-				}
-			}
-
-			var bootKey = ExtractBootKey(client, cancellationToken);
-			return ExtractLsaKey(smb, client, bootKey, cancellationToken, out lsaKeySource);
 		}
 
 		private static bool IsVistaOrLaterCache(string? lsaKeySource, byte[]? nlkm)
@@ -330,34 +311,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return true;
 		}
 
-		private static List<WildcardPattern> BuildNameFilters(string[]? names)
-		{
-			var filters = new List<WildcardPattern>();
-			if (names == null)
-				return filters;
-
-			foreach (var name in names)
-			{
-				if (string.IsNullOrWhiteSpace(name))
-					continue;
-				filters.Add(new WildcardPattern(name, WildcardOptions.IgnoreCase));
-			}
-
-			return filters;
-		}
-
-		private static bool MatchesAny(List<WildcardPattern> filters, string name)
-		{
-			if (filters.Count == 0)
-				return true;
-
-			foreach (var filter in filters)
-			{
-				if (filter.IsMatch(name))
-					return true;
-			}
-
-			return false;
-		}
 	}
 }

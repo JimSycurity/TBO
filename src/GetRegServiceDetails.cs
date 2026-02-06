@@ -153,13 +153,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	[Cmdlet(VerbsCommon.Get, "TBORegServiceDetails")]
 	[OutputType(typeof(TboRegServiceDetailsInfo))]
-	public sealed class GetTBORegServiceDetails : TboRegCmdlet
+	public sealed class GetTBORegServiceDetails : ServiceRegistryCmdletBase
 	{
-		private const string DefaultServicesPath = @"HKLM\SYSTEM\CurrentControlSet\Services";
 		private const string SecretsPath = @"HKLM\SECURITY\Policy\Secrets";
 		private const string ServiceSecretPrefix = "_SC_";
-		private const string SecuritySubkeyName = "Security";
-		private const string SecurityValueName = "Security";
 		private const string ParametersSubkeyName = "Parameters";
 
 		[Parameter(Position = 1)]
@@ -190,7 +187,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					return;
 				}
 
-				var subkeys = CollectServiceSubkeys(smb, servicesKey, keyInfo, parsedPath, cancellationToken);
+				var subkeys = CollectServiceSubkeys(
+					smb,
+					servicesKey,
+					keyInfo,
+					parsedPath,
+					cancellationToken,
+					"Get-TBORegServiceDetails");
 				foreach (var subkey in subkeys)
 				{
 					if (string.IsNullOrWhiteSpace(subkey.KeyName))
@@ -243,7 +246,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (wildcardPatterns.Count == 0)
 				return;
 
-			var subkeys = CollectServiceSubkeys(smb, servicesKey, servicesInfo, servicesPath, cancellationToken);
+			var subkeys = CollectServiceSubkeys(
+				smb,
+				servicesKey,
+				servicesInfo,
+				servicesPath,
+				cancellationToken,
+				"Get-TBORegServiceDetails");
 			var wildcardMatched = false;
 			foreach (var subkey in subkeys)
 			{
@@ -260,50 +269,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			if (!wildcardMatched)
-				this.WriteWarning($"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
+				this.LogWarning(smb, $"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
 		}
 
-		private List<RegistrySubkeyInfo> CollectServiceSubkeys(
-			ISmbProviderInfo smb,
-			IRegistryKey servicesKey,
-			RegistryKeyInfo servicesInfo,
-			RegistryPathSpec servicesPath,
-			CancellationToken cancellationToken)
-		{
-			List<RegistrySubkeyInfo> subkeys;
-			try
-			{
-				subkeys = CollectSubkeys(servicesKey, cancellationToken);
-			}
-			catch (Exception ex)
-			{
-				smb.LogException("Get-TBORegServiceDetails failed to enumerate service keys", ex);
-				throw;
-			}
-
-			if (servicesInfo.SubkeyCount > 0 && subkeys.Count != servicesInfo.SubkeyCount)
-			{
-				this.WriteWarning(
-					$"Get-TBORegServiceDetails enumerated {subkeys.Count} of {servicesInfo.SubkeyCount} subkeys under {servicesPath.KeyPath}. Some services may be missing.");
-			}
-
-			return subkeys;
-		}
-
-		private static List<string> FilterNames(string[]? names)
-		{
-			if (names == null || names.Length == 0)
-				return new List<string>();
-
-			var filtered = new List<string>(names.Length);
-			foreach (var name in names)
-			{
-				if (!string.IsNullOrWhiteSpace(name))
-					filtered.Add(name.Trim());
-			}
-
-			return filtered;
-		}
 
 		private bool TryWriteServiceDetails(
 			ISmbProviderInfo smb,
@@ -333,23 +301,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (NtstatusException retryEx) when (retryEx.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 				{
-					this.WriteWarning($"Get-TBORegServiceDetails failed to read service '{serviceName}': {retryEx.Message}");
+					this.LogWarning(smb, $"Get-TBORegServiceDetails failed to read service '{serviceName}': {retryEx.Message}");
 				}
 				catch (Exception retryEx)
 				{
-					smb.LogException($"Get-TBORegServiceDetails failed to read service '{serviceName}'", retryEx);
-					this.WriteWarning($"Get-TBORegServiceDetails failed to read service '{serviceName}': {retryEx.Message}");
+					this.LogException(smb, $"Get-TBORegServiceDetails failed to read service '{serviceName}'", retryEx);
+					this.LogWarning(smb, $"Get-TBORegServiceDetails failed to read service '{serviceName}': {retryEx.Message}");
 				}
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
 				if (warnOnMissing)
-					this.WriteWarning($"Service key not found: {basePath.KeyPath}\\{serviceName}");
+					this.LogWarning(smb, $"Service key not found: {basePath.KeyPath}\\{serviceName}");
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegServiceDetails failed to read service '{serviceName}'", ex);
-				this.WriteWarning($"Get-TBORegServiceDetails failed to read service '{serviceName}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegServiceDetails failed to read service '{serviceName}'", ex);
+				this.LogWarning(smb, $"Get-TBORegServiceDetails failed to read service '{serviceName}': {ex.Message}");
 			}
 
 			return false;
@@ -470,7 +438,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				if (TryParseFailureActionsHeader(failureActions, out var header))
 				{
-					WriteVerbose(
+					this.LogVerbose(smb, 
 						$"FailureActions header for {serviceName}: length={failureActions.Length}, resetPeriod={header.ResetPeriodSeconds}, " +
 						$"rebootMsgOffset={header.RebootMsgOffset}, commandOffset={header.CommandOffset}, actionsOffset={header.ActionsOffset}, actionCount={header.ActionCount}.");
 				}
@@ -478,7 +446,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var candidates = CollectFailureActionsCandidates(failureActions, 12);
 				if (candidates.Count == 0)
 				{
-					WriteVerbose($"FailureActions string candidates for {serviceName}: none found.");
+					this.LogVerbose(smb, $"FailureActions string candidates for {serviceName}: none found.");
 				}
 				else
 				{
@@ -487,7 +455,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						var value = candidate.Value.Length > 120
 							? candidate.Value.Substring(0, 120) + "..."
 							: candidate.Value;
-						WriteVerbose($"FailureActions candidate [{candidate.Encoding}] @0x{candidate.Offset:X}: {value}");
+						this.LogVerbose(smb, $"FailureActions candidate [{candidate.Encoding}] @0x{candidate.Offset:X}: {value}");
 					}
 				}
 			}
@@ -591,8 +559,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegServiceDetails failed to read secret '{secretSpec.KeyPath}'", ex);
-				this.WriteWarning($"Get-TBORegServiceDetails failed to read service secret '{secretSpec.KeyPath}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegServiceDetails failed to read secret '{secretSpec.KeyPath}'", ex);
+				this.LogWarning(smb, $"Get-TBORegServiceDetails failed to read service secret '{secretSpec.KeyPath}': {ex.Message}");
 				return null;
 			}
 		}
@@ -624,15 +592,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (sdBytes == null || sdBytes.Length == 0)
 					return;
 
-				sd = TBOSD.FromRegistryBinary(sdBytes);
+				try
+				{
+					sd = TBOSD.FromRegistryBinary(sdBytes);
+				}
+				catch (ArgumentException) when (OperatingSystem.IsWindows())
+				{
+					// Some service security descriptors are valid Windows SDs but include ACE types
+					// not currently supported by Titanis.Winterop.Security.SecurityDescriptor.
+					sd = TBOSD.FromRegistryBinaryAsWindows(sdBytes);
+				}
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegServiceDetails failed to read security descriptor for '{serviceSpec.KeyPath}'", ex);
-				this.WriteWarning($"Get-TBORegServiceDetails failed to read security descriptor for '{serviceSpec.KeyPath}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegServiceDetails failed to read security descriptor for '{serviceSpec.KeyPath}'", ex);
+				this.LogWarning(smb, $"Get-TBORegServiceDetails failed to read security descriptor for '{serviceSpec.KeyPath}': {ex.Message}");
 			}
 		}
 
@@ -647,17 +624,25 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			try
 			{
-				return TBOSD.FromRegistryBinary(value);
+				try
+				{
+					return TBOSD.FromRegistryBinary(value);
+				}
+				catch (ArgumentException) when (OperatingSystem.IsWindows())
+				{
+					// Same fallback as above, but for security-descriptor-valued subkey fields.
+					return TBOSD.FromRegistryBinaryAsWindows(value);
+				}
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegServiceDetails failed to parse {valueName} on '{keyPath}'", ex);
-				this.WriteWarning($"Get-TBORegServiceDetails failed to parse {valueName} on '{keyPath}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegServiceDetails failed to parse {valueName} on '{keyPath}'", ex);
+				this.LogWarning(smb, $"Get-TBORegServiceDetails failed to parse {valueName} on '{keyPath}': {ex.Message}");
 				return null;
 			}
 		}
 
-		private static IReadOnlyList<string>? TryCollectSubkeyNames(
+		private IReadOnlyList<string>? TryCollectSubkeyNames(
 			ISmbProviderInfo smb,
 			IRegistryKey key,
 			CancellationToken cancellationToken)
@@ -671,7 +656,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				smb.LogException("Get-TBORegServiceDetails failed to enumerate subkeys for a service", ex);
+				this.LogException(smb, "Get-TBORegServiceDetails failed to enumerate subkeys for a service", ex);
 				return null;
 			}
 		}
@@ -699,8 +684,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegServiceDetails failed to read {subkeyName} values for '{serviceSpec.KeyPath}'", ex);
-				this.WriteWarning($"Get-TBORegServiceDetails failed to read {subkeyName} values for '{serviceSpec.KeyPath}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegServiceDetails failed to read {subkeyName} values for '{serviceSpec.KeyPath}'", ex);
+				this.LogWarning(smb, $"Get-TBORegServiceDetails failed to read {subkeyName} values for '{serviceSpec.KeyPath}': {ex.Message}");
 				return null;
 			}
 		}
@@ -784,8 +769,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegServiceDetails failed to read TriggerInfo for '{serviceSpec.KeyPath}'", ex);
-				this.WriteWarning($"Get-TBORegServiceDetails failed to read TriggerInfo for '{serviceSpec.KeyPath}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegServiceDetails failed to read TriggerInfo for '{serviceSpec.KeyPath}'", ex);
+				this.LogWarning(smb, $"Get-TBORegServiceDetails failed to read TriggerInfo for '{serviceSpec.KeyPath}': {ex.Message}");
 				return null;
 			}
 		}
@@ -840,17 +825,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			uint a4 = BinaryPrimitives.ReadUInt32LittleEndian(hash.AsSpan(16, 4));
 
 			return $"S-1-5-80-{a0}-{a1}-{a2}-{a3}-{a4}";
-		}
-
-		private static bool MatchesAnyPattern(IReadOnlyList<WildcardPattern> patterns, string value)
-		{
-			foreach (var pattern in patterns)
-			{
-				if (pattern.IsMatch(value))
-					return true;
-			}
-
-			return false;
 		}
 
 		private static int CompareTriggerKeyNames(string? left, string? right)

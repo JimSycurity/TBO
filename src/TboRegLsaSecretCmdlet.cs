@@ -1,10 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Management.Automation;
 using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
-using Titanis;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Winterop;
 
@@ -12,56 +11,36 @@ namespace Titanis.Tbo.Smb2.PowerShell
 {
 	public abstract class TboRegLsaSecretCmdlet : TboRegCmdlet
 	{
-		protected const string LsaKeyPath = @"SYSTEM\CurrentControlSet\Control\Lsa";
 		protected const string PolicyPath = @"SECURITY\Policy";
 		protected const string SecretsPath = @"SECURITY\Policy\Secrets";
-		protected const ulong BootKeyByteSwap = 0xEC6B4D50F91273A8;
-		protected static readonly string[] BootKeySubkeys = { "JD", "Skew1", "GBG", "Data" };
+		private static readonly SecretDecodeOptions LsaSecretDecodeOptions = new SecretDecodeOptions
+		{
+			MinTextLength = 1,
+			MinAsciiCount = 1,
+			MinAsciiRatio = 0.6,
+			MinPrintableRatio = 0.6,
+			MaxNonAsciiRatio = 1.0,
+			RejectReplacementChar = true,
+			AllowControlChars = false
+		};
 
 		protected byte[] ExtractBootKey(IRegistryClient client, CancellationToken cancellationToken)
 		{
 			var lsaSpec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
 				RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
-				LsaKeyPath);
+				RegistryBootKeyReader.LsaKeyPath);
 
 			using var lsaKey = OpenRegistryKey(client, lsaSpec, RegistryAccessRights.QueryValue, cancellationToken);
-
-			byte[] bootKey = new byte[16];
-			ulong swapKey = BootKeyByteSwap;
-			foreach (var subkeyName in BootKeySubkeys)
-			{
-				var subkeySpec = new RegistryPathSpec(
-					lsaSpec.RootKey,
-					lsaSpec.RootName,
-					CombineSubkeyPath(lsaSpec.SubkeyPath, subkeyName));
-
-				using var subkey = OpenRegistryKey(client, subkeySpec, RegistryAccessRights.QueryValue, cancellationToken);
-				var info = subkey.QueryInfo(includeClass: true, cancellationToken).GetAwaiter().GetResult();
-				var className = info.ClassName?.TrimEnd('\0');
-				if (string.IsNullOrWhiteSpace(className))
-					throw new InvalidOperationException($"Registry class for {subkeySpec.KeyPath} is empty.");
-
-				var bytes = BinaryHelper.ParseHexString(className.AsSpan());
-				if (bytes.Length < 4)
-					throw new InvalidOperationException($"Registry class for {subkeySpec.KeyPath} does not contain 4 bytes.");
-
-				for (int i = 0; i < 4; i++)
-				{
-					bootKey[(int)(swapKey & 0x0F)] = bytes[i];
-					swapKey >>= 4;
-				}
-			}
-
-			return bootKey;
+			return RegistryBootKeyReader.ExtractBootKey(lsaKey, lsaSpec.KeyPath, cancellationToken, null);
 		}
 
-		protected byte[]? ExtractLsaKey(
-			ISmbProviderInfo smb,
-			IRegistryClient client,
-			byte[] bootKey,
-			CancellationToken cancellationToken,
-			out string? lsaKeySource)
+	protected byte[]? ExtractLsaKey(
+		ISmbProviderInfo smb,
+		IRegistryClient client,
+		byte[] bootKey,
+		CancellationToken cancellationToken,
+		out string? lsaKeySource)
 		{
 			lsaKeySource = null;
 			byte[]? polEkList = null;
@@ -104,11 +83,75 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 			}
 
-			return null;
+		return null;
+	}
+
+	protected byte[]? ResolveLsaKey(
+		ISmbProviderInfo smb,
+		IRegistrySession session,
+		CancellationToken cancellationToken,
+		byte[]? lsaKeyBytes,
+		string? lsaKey,
+		string lsaKeyParamName,
+		out string? lsaKeySource)
+	{
+		lsaKeySource = null;
+		if (lsaKeyBytes != null && lsaKeyBytes.Length > 0)
+			return lsaKeyBytes;
+
+		if (!string.IsNullOrWhiteSpace(lsaKey))
+		{
+			try
+			{
+				return Titanis.BinaryHelper.ParseHexString(lsaKey.AsSpan());
+			}
+			catch (Exception ex)
+			{
+				var paramName = string.IsNullOrWhiteSpace(lsaKeyParamName) ? "LsaKey" : lsaKeyParamName;
+				throw new ArgumentException($"Invalid LSA key value: {ex.Message}", paramName, ex);
+			}
 		}
 
-		protected byte[]? TryReadPolicySecretValue(IRegistryClient client, string name, CancellationToken cancellationToken)
+		var cache = TryGetSecretCache(session);
+		if (cache != null && cache.TryGetLsaKey(out var cachedKey, out var cachedSource))
 		{
+			lsaKeySource = cachedSource;
+			LogCacheDiagnostic(smb, $"TBO: Registry secret cache hit (LSA key) for {this.ServerName}.");
+			return cachedKey;
+		}
+
+		LogCacheDiagnostic(smb, $"TBO: Registry secret cache miss (LSA key) for {this.ServerName}.");
+		var bootKey = ResolveBootKey(smb, session, cancellationToken);
+		if (bootKey == null || bootKey.Length == 0)
+			return null;
+
+		var derived = ExtractLsaKey(smb, session.Client, bootKey, cancellationToken, out lsaKeySource);
+		if (derived != null && derived.Length > 0)
+			cache?.SetLsaKey(derived, lsaKeySource);
+		return derived;
+	}
+
+	protected byte[]? ResolveBootKey(
+		ISmbProviderInfo smb,
+		IRegistrySession session,
+		CancellationToken cancellationToken)
+	{
+		var cache = TryGetSecretCache(session);
+		if (cache != null && cache.TryGetBootKey(out var cachedKey))
+		{
+			LogCacheDiagnostic(smb, $"TBO: Registry secret cache hit (boot key) for {this.ServerName}.");
+			return cachedKey;
+		}
+
+		LogCacheDiagnostic(smb, $"TBO: Registry secret cache miss (boot key) for {this.ServerName}.");
+		var bootKey = ExtractBootKey(session.Client, cancellationToken);
+		if (bootKey != null && bootKey.Length > 0)
+			cache?.SetBootKey(bootKey);
+		return bootKey;
+	}
+
+	protected byte[]? TryReadPolicySecretValue(IRegistryClient client, string name, CancellationToken cancellationToken)
+	{
 			var keyPath = CombineSubkeyPath(PolicyPath, name);
 			var spec = new RegistryPathSpec(
 				RegistryRootKey.LocalMachine,
@@ -211,30 +254,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (payload.Length == 0)
 				return null;
 
-			if (payload.Length % 2 == 0)
-			{
-				try
-				{
-					var str = Encoding.Unicode.GetString(payload).TrimEnd('\0');
-					if (IsLikelySecretText(str))
-						return str;
-				}
-				catch
-				{
-				}
-			}
-
-			try
-			{
-				var str = Encoding.UTF8.GetString(payload).TrimEnd('\0');
-				if (IsLikelySecretText(str))
-					return str;
-			}
-			catch
-			{
-			}
-
-			return null;
+			var result = SecretDecoding.TryDecode(payload, LsaSecretDecodeOptions);
+			return result.Text;
 		}
 
 		protected static string? FormatSecretText(string? name, byte[] payload, string? decoded)
@@ -296,14 +317,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return true;
 		}
 
-		protected static byte[]? ExtractValueBytes(RegistryValueInfo info)
-		{
-			if (info.Bytes != null && info.Bytes.Length > 0)
-				return info.Bytes;
-			if (info.TypedValue is byte[] typedBytes && typedBytes.Length > 0)
-				return typedBytes;
-			return null;
-		}
+	protected static byte[]? ExtractValueBytes(RegistryValueInfo info)
+	{
+		return RegistryHelpers.ExtractValueBytes(info);
+	}
+
+	private static RegistrySecretCache? TryGetSecretCache(IRegistrySession session)
+	{
+		if (session is IRegistrySecretCacheProvider provider)
+			return provider.SecretCache;
+
+		return null;
+	}
+
+	private static void LogCacheDiagnostic(ISmbProviderInfo smb, string message)
+	{
+		if (smb is SmbProviderInfo provider)
+			provider.LogDiagnostic(message);
+	}
 
 		protected static byte[]? TryReadValueBytes(IRegistryKey key, string name, CancellationToken cancellationToken)
 		{
@@ -421,20 +452,50 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return output;
 		}
 
-		protected static string? CombineSubkeyPath(string? basePath, string childName)
+	protected static string? CombineSubkeyPath(string? basePath, string childName)
+	{
+		if (string.IsNullOrEmpty(basePath))
+			return childName;
+		if (string.IsNullOrEmpty(childName))
+			return basePath;
+		return $"{basePath}\\{childName}";
+	}
+
+	protected static List<WildcardPattern> BuildNameFilters(IEnumerable<string>? names)
+	{
+		var filters = new List<WildcardPattern>();
+		if (names == null)
+			return filters;
+
+		foreach (var name in names)
 		{
-			if (string.IsNullOrEmpty(basePath))
-				return childName;
-			if (string.IsNullOrEmpty(childName))
-				return basePath;
-			return $"{basePath}\\{childName}";
+			if (string.IsNullOrWhiteSpace(name))
+				continue;
+			filters.Add(new WildcardPattern(name, WildcardOptions.IgnoreCase));
 		}
 
-		private static bool TrySlice(byte[] data, int offset, int length, out byte[] payload)
+		return filters;
+	}
+
+	protected static bool MatchesAny(IReadOnlyCollection<WildcardPattern> filters, string name)
+	{
+		if (filters.Count == 0)
+			return true;
+
+		foreach (var filter in filters)
 		{
-			payload = Array.Empty<byte>();
-			if (length <= 0 || offset < 0 || offset > data.Length)
-				return false;
+			if (filter.IsMatch(name))
+				return true;
+		}
+
+		return false;
+	}
+
+	private static bool TrySlice(byte[] data, int offset, int length, out byte[] payload)
+	{
+		payload = Array.Empty<byte>();
+		if (length <= 0 || offset < 0 || offset > data.Length)
+			return false;
 			if (offset + length > data.Length)
 				return false;
 			payload = data.AsSpan(offset, length).ToArray();
@@ -562,32 +623,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return score;
 		}
 
-		private static bool IsLikelySecretText(string? text)
-		{
-			if (string.IsNullOrWhiteSpace(text))
-				return false;
-
-			int asciiPrintable = 0;
-			int controlCount = 0;
-			int length = text.Length;
-
-			for (int i = 0; i < length; i++)
-			{
-				char c = text[i];
-				if (c == '\uFFFD')
-					return false;
-				if (char.IsControl(c) && c != '\r' && c != '\n' && c != '\t')
-					controlCount++;
-				if (c >= ' ' && c <= '~')
-					asciiPrintable++;
-			}
-
-			if (controlCount > 0 || asciiPrintable == 0)
-				return false;
-
-			double asciiRatio = (double)asciiPrintable / length;
-			return asciiRatio >= 0.6;
-		}
 		protected static byte[] TrimTrailingNulls(byte[] data)
 		{
 			int length = data.Length;

@@ -42,6 +42,8 @@
 
   <ItemGroup>
     <PackageReference Include="PowerShellStandard.Library" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="plist-cil" />
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TitanisRepoRoot)' != '' ">

