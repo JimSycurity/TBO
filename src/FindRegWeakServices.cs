@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Management.Automation;
+using System.Security.AccessControl;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Msrpc.Msscmr;
@@ -283,15 +284,52 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				RegistryAccessRights.QueryValue,
 				cancellationToken);
 
-			if (!TryReadSecurityDescriptor(smb, client, serviceSpec, cancellationToken, out var descriptor))
+			if (!TryReadSecurityDescriptor(smb, client, serviceSpec, cancellationToken, out var descriptor, out var windowsDescriptor))
 				return;
 
-			if (descriptor?.Dacl == null || descriptor.Dacl.Entries.Count == 0)
-				return;
-
-			foreach (var ace in descriptor.Dacl.Entries)
+			if (descriptor != null)
 			{
-				if (!TryGetAceInfo(ace, out var trustee, out var accessMask))
+				if (descriptor.Dacl == null || descriptor.Dacl.Entries.Count == 0)
+					return;
+
+				foreach (var ace in descriptor.Dacl.Entries)
+				{
+					if (!TryGetAceInfo(ace, out var trustee, out var accessMask))
+						continue;
+
+					if (!IsAccessMaskInteresting(accessMask, interestingAccessMask, useDefaultAccessMask))
+						continue;
+
+					var wellKnownSid = trustee.AsWellKnownSid();
+					if (!this.IncludeUninteresting.IsPresent && UninterestingSids.Contains(wellKnownSid))
+						continue;
+					if (this.IgnoreServiceSids.IsPresent && IsServiceSid(trustee))
+						continue;
+
+					var accessRights = BuildAccessRights(accessMask);
+					this.WriteObject(new TboRegWeakServiceInfo(
+						this.ServerName,
+						serviceName,
+						serviceSpec.KeyPath,
+						trustee.ToString(),
+						wellKnownSid,
+						ace.AceType,
+						accessMask,
+						FormatAccessMask(accessMask),
+						accessRights,
+						(ServiceAccess)accessMask,
+						(StandardAccessRights)accessMask));
+				}
+
+				return;
+			}
+
+			if (!OperatingSystem.IsWindows() || windowsDescriptor?.DiscretionaryAcl == null || windowsDescriptor.DiscretionaryAcl.Count == 0)
+				return;
+
+			foreach (GenericAce ace in windowsDescriptor.DiscretionaryAcl)
+			{
+				if (!TryGetWindowsAceInfo(ace, out var trustee, out var accessMask, out var aceType))
 					continue;
 
 				if (!IsAccessMaskInteresting(accessMask, interestingAccessMask, useDefaultAccessMask))
@@ -310,13 +348,52 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					serviceSpec.KeyPath,
 					trustee.ToString(),
 					wellKnownSid,
-					ace.AceType,
+					aceType,
 					accessMask,
 					FormatAccessMask(accessMask),
 					accessRights,
 					(ServiceAccess)accessMask,
 					(StandardAccessRights)accessMask));
 			}
+		}
+
+		private static bool TryGetWindowsAceInfo(
+			GenericAce ace,
+			out SecurityIdentifier trustee,
+			out uint accessMask,
+			out AccessControlEntryType aceType)
+		{
+			trustee = null!;
+			accessMask = 0;
+			aceType = AccessControlEntryType.AccessAllowed;
+
+			if (ace is not KnownAce known)
+				return false;
+
+			if (ace.AceType is not (AceType.AccessAllowed
+				or AceType.AccessAllowedObject
+				or AceType.AccessAllowedCallback
+				or AceType.AccessAllowedCallbackObject))
+			{
+				return false;
+			}
+
+			aceType = ace.AceType switch
+			{
+				AceType.AccessAllowed => AccessControlEntryType.AccessAllowed,
+				AceType.AccessAllowedObject => AccessControlEntryType.AccessAllowedObject,
+				AceType.AccessAllowedCallback => AccessControlEntryType.AccessAllowedCallback,
+				AceType.AccessAllowedCallbackObject => AccessControlEntryType.AcecssAllowedCallbackObject,
+				_ => AccessControlEntryType.AccessAllowed,
+			};
+
+			var sidValue = known.SecurityIdentifier?.Value;
+			if (string.IsNullOrWhiteSpace(sidValue))
+				return false;
+
+			trustee = SecurityIdentifier.Parse(sidValue);
+			accessMask = unchecked((uint)known.AccessMask);
+			return true;
 		}
 
 		private static bool TryGetAceInfo(
@@ -341,7 +418,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					trustee = simple.Trustee;
 					accessMask = simple.AccessMask;
 					return true;
-				case ObjectAce obj:
+				case Titanis.Winterop.Security.ObjectAce obj:
 					trustee = obj.Trustee;
 					accessMask = obj.AccessMask;
 					return true;
@@ -363,9 +440,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			IRegistryClient client,
 			RegistryPathSpec serviceSpec,
 			CancellationToken cancellationToken,
-			out SecurityDescriptor? descriptor)
+			out SecurityDescriptor? descriptor,
+			out RawSecurityDescriptor? windowsDescriptor)
 		{
 			descriptor = null;
+			windowsDescriptor = null;
 
 			try
 			{
@@ -383,7 +462,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (sdBytes == null || sdBytes.Length == 0)
 					return false;
 
-				descriptor = TBOSD.FromRegistryBinary(sdBytes);
+				try
+				{
+					descriptor = TBOSD.FromRegistryBinary(sdBytes);
+				}
+				catch (ArgumentException) when (OperatingSystem.IsWindows())
+				{
+					// Some service SDs (notably those containing custom SACL ACEs) are valid Windows SDs but
+					// aren't currently understood by Titanis.Winterop.Security.SecurityDescriptor.
+					// Fallback to the OS-backed RawSecurityDescriptor for weak-service triage.
+					windowsDescriptor = TBOSD.FromRegistryBinaryAsWindows(sdBytes);
+				}
+
 				return true;
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))

@@ -319,7 +319,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				else
 				{
-					sd = TBOSD.FromRegistryBinary(sdBytes);
+					try
+					{
+						sd = TBOSD.FromRegistryBinary(sdBytes);
+					}
+					catch (ArgumentException) when (OperatingSystem.IsWindows())
+					{
+						// Some service security descriptors are valid Windows SDs but include ACE types
+						// not currently supported by Titanis.Winterop.Security.SecurityDescriptor.
+						sd = TBOSD.FromRegistryBinaryAsWindows(sdBytes);
+					}
 				}
 			}
 			catch (Win32Exception ex) when (ex.NativeErrorCode is (int)Win32ErrorCode.ERROR_FILE_NOT_FOUND

@@ -592,7 +592,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (sdBytes == null || sdBytes.Length == 0)
 					return;
 
-				sd = TBOSD.FromRegistryBinary(sdBytes);
+				try
+				{
+					sd = TBOSD.FromRegistryBinary(sdBytes);
+				}
+				catch (ArgumentException) when (OperatingSystem.IsWindows())
+				{
+					// Some service security descriptors are valid Windows SDs but include ACE types
+					// not currently supported by Titanis.Winterop.Security.SecurityDescriptor.
+					sd = TBOSD.FromRegistryBinaryAsWindows(sdBytes);
+				}
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
@@ -615,7 +624,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			try
 			{
-				return TBOSD.FromRegistryBinary(value);
+				try
+				{
+					return TBOSD.FromRegistryBinary(value);
+				}
+				catch (ArgumentException) when (OperatingSystem.IsWindows())
+				{
+					// Same fallback as above, but for security-descriptor-valued subkey fields.
+					return TBOSD.FromRegistryBinaryAsWindows(value);
+				}
 			}
 			catch (Exception ex)
 			{
