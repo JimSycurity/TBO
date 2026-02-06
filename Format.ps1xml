@@ -293,5 +293,57 @@
 				</TableRowEntries>
 			</TableControl>
 		</View>
+		<View>
+			<Name>Titanis.Tbo.Smb2.PowerShell.TboSafariKeychainEntryInfo</Name>
+			<ViewSelectedBy>
+				<TypeName>Titanis.Tbo.Smb2.PowerShell.TboSafariKeychainEntryInfo</TypeName>
+			</ViewSelectedBy>
+			<TableControl>
+				<TableHeaders>
+					<TableColumnHeader>
+						<Label>ServerName</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>UserName</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>Account</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>Server</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>Password</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>FailureReason</Label>
+					</TableColumnHeader>
+				</TableHeaders>
+				<TableRowEntries>
+					<TableRowEntry>
+						<TableColumnItems>
+							<TableColumnItem>
+								<PropertyName>ServerName</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>UserName</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>Account</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>Server</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>Password</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>FailureReason</PropertyName>
+							</TableColumnItem>
+						</TableColumnItems>
+					</TableRowEntry>
+				</TableRowEntries>
+			</TableControl>
+		</View>
 	</ViewDefinitions>
 </Configuration>
