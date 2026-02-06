@@ -23,7 +23,11 @@ Public helpers should live in `src/SecretDecodingHelpers.cs` (namespace `Titanis
 
 Suggested types:
 - `public sealed record SecretDecodeResult` with `Text`, `Hex`, `Encoding`, `Confidence`, `FailureReason`, and `BytesLength`.
-- `public sealed record SecretDecodeOptions` with `MinPrintableRatio`, `MinAsciiRatio`, `MaxTextLength`, `AllowFragmentFallback`, `IncludeHexOnFailure`.
+- `public sealed record SecretDecodeOptions` with:
+  - Text heuristics: `MinTextLength`, `MinAsciiCount`, `MinAsciiRatio`, `MinPrintableRatio`, `MaxNonAsciiRatio`
+  - Safety toggles: `RejectReplacementChar`, `AllowControlChars`
+  - Fallbacks: `AllowFragmentFallback`, `IncludeHexOnFailure`
+  - Fragment tuning: `MinFragmentLength`, `MaxFragmentLength`, `MaxFragments`
 - `public static class SecretDecoding` with:
   - `SecretDecodeResult TryDecode(byte[] payload, SecretDecodeOptions? options = null, Action<string>? log = null)`
   - `bool TryDecodeUtf16(byte[] payload, out string text)`
@@ -63,6 +67,6 @@ Add optional logging hooks to surface why decode failed without changing output:
 - Migrate CredMan/CredVault fallback decoding to shared helpers (keep structured parsing intact).
 - Optional: consolidate registry string helpers to shared decode utilities.
 
-## Open Questions
-- Should `SecretDecodeResult` expose a numeric confidence score or only an encoding label?
-- Should fragment extraction be enabled by default or only for CredMan/CredVault fallbacks?
+## Decisions
+- `SecretDecodeResult` should expose a numeric confidence score alongside the encoding label.
+- Fragment extraction should be disabled by default and only enabled for CredMan/CredVault fallback paths.
