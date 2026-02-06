@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Text;
 using System.Threading;
 using Titanis.Net;
 
@@ -8,6 +7,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 {
 	internal static class DpapiHelpers
 	{
+		private static readonly SecretDecodeOptions CleartextDecodeOptions = new SecretDecodeOptions
+		{
+			MinTextLength = 1,
+			MinAsciiCount = 1,
+			MinAsciiRatio = 0.6,
+			MinPrintableRatio = 0.0,
+			MaxNonAsciiRatio = 1.0,
+			RejectReplacementChar = true,
+			AllowControlChars = false
+		};
+
 		internal static readonly byte[] DpapiMagic = new byte[]
 		{
 			0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF, 0x01, 0x15,
@@ -54,57 +64,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (payload.Length == 0)
 				return null;
 
-			if (payload.Length % 2 == 0)
-			{
-				try
-				{
-					var str = Encoding.Unicode.GetString(payload).TrimEnd('\0');
-					if (IsLikelyText(str))
-						return str;
-				}
-				catch
-				{
-				}
-			}
-
-			try
-			{
-				var str = Encoding.UTF8.GetString(payload).TrimEnd('\0');
-				if (IsLikelyText(str))
-					return str;
-			}
-			catch
-			{
-			}
-
-			return null;
-		}
-
-		private static bool IsLikelyText(string? text)
-		{
-			if (string.IsNullOrWhiteSpace(text))
-				return false;
-
-			int asciiPrintable = 0;
-			int controlCount = 0;
-			int length = text.Length;
-
-			for (int i = 0; i < length; i++)
-			{
-				char c = text[i];
-				if (c == '\uFFFD')
-					return false;
-				if (char.IsControl(c) && c != '\r' && c != '\n' && c != '\t')
-					controlCount++;
-				if (c >= ' ' && c <= '~')
-					asciiPrintable++;
-			}
-
-			if (controlCount > 0 || asciiPrintable == 0)
-				return false;
-
-			double asciiRatio = (double)asciiPrintable / length;
-			return asciiRatio >= 0.6;
+			var result = SecretDecoding.TryDecode(payload, CleartextDecodeOptions);
+			return result.Text;
 		}
 	}
 }
