@@ -29,7 +29,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				try
 				{
-					bootKey = ExtractBootKey(session.Client, cancellationToken);
+					bootKey = ResolveBootKey(smb, session, cancellationToken);
 				}
 				catch (Exception ex)
 				{
@@ -41,7 +41,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				{
 					try
 					{
-						lsaKey = ExtractLsaKey(smb, session.Client, bootKey, cancellationToken, out lsaKeySource);
+						lsaKey = ResolveLsaKey(smb, session, cancellationToken, null, null, "LsaKey", out lsaKeySource);
 					}
 					catch (Exception ex)
 					{

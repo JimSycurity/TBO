@@ -220,9 +220,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public IRegistrySession CreateSession()
 			=> new FakeRegistrySession(this);
 
-		public sealed class FakeRegistrySession : IRegistrySession
+		public sealed class FakeRegistrySession : IRegistrySession, IRegistrySecretCacheProvider
 		{
 			private readonly FakeRegistryClient _client;
+			private readonly RegistrySecretCache _secretCache = new();
 
 			internal FakeRegistrySession(FakeRegistryStore store)
 			{
@@ -230,6 +231,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			public IRegistryClient Client => _client;
+			RegistrySecretCache IRegistrySecretCacheProvider.SecretCache => _secretCache;
 
 			public void Dispose()
 			{

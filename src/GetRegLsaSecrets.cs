@@ -40,7 +40,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				var lsaKey = ResolveLsaKey(
 					smb,
-					session.Client,
+					session,
 					cancellationToken,
 					this.LsaKeyBytes,
 					this.LsaKey,

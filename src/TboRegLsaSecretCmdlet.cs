@@ -88,7 +88,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	protected byte[]? ResolveLsaKey(
 		ISmbProviderInfo smb,
-		IRegistryClient client,
+		IRegistrySession session,
 		CancellationToken cancellationToken,
 		byte[]? lsaKeyBytes,
 		string? lsaKey,
@@ -112,8 +112,42 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		var bootKey = ExtractBootKey(client, cancellationToken);
-		return ExtractLsaKey(smb, client, bootKey, cancellationToken, out lsaKeySource);
+		var cache = TryGetSecretCache(session);
+		if (cache != null && cache.TryGetLsaKey(out var cachedKey, out var cachedSource))
+		{
+			lsaKeySource = cachedSource;
+			LogCacheDiagnostic(smb, $"TBO: Registry secret cache hit (LSA key) for {this.ServerName}.");
+			return cachedKey;
+		}
+
+		LogCacheDiagnostic(smb, $"TBO: Registry secret cache miss (LSA key) for {this.ServerName}.");
+		var bootKey = ResolveBootKey(smb, session, cancellationToken);
+		if (bootKey == null || bootKey.Length == 0)
+			return null;
+
+		var derived = ExtractLsaKey(smb, session.Client, bootKey, cancellationToken, out lsaKeySource);
+		if (derived != null && derived.Length > 0)
+			cache?.SetLsaKey(derived, lsaKeySource);
+		return derived;
+	}
+
+	protected byte[]? ResolveBootKey(
+		ISmbProviderInfo smb,
+		IRegistrySession session,
+		CancellationToken cancellationToken)
+	{
+		var cache = TryGetSecretCache(session);
+		if (cache != null && cache.TryGetBootKey(out var cachedKey))
+		{
+			LogCacheDiagnostic(smb, $"TBO: Registry secret cache hit (boot key) for {this.ServerName}.");
+			return cachedKey;
+		}
+
+		LogCacheDiagnostic(smb, $"TBO: Registry secret cache miss (boot key) for {this.ServerName}.");
+		var bootKey = ExtractBootKey(session.Client, cancellationToken);
+		if (bootKey != null && bootKey.Length > 0)
+			cache?.SetBootKey(bootKey);
+		return bootKey;
 	}
 
 	protected byte[]? TryReadPolicySecretValue(IRegistryClient client, string name, CancellationToken cancellationToken)
@@ -286,6 +320,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	protected static byte[]? ExtractValueBytes(RegistryValueInfo info)
 	{
 		return RegistryHelpers.ExtractValueBytes(info);
+	}
+
+	private static RegistrySecretCache? TryGetSecretCache(IRegistrySession session)
+	{
+		if (session is IRegistrySecretCacheProvider provider)
+			return provider.SecretCache;
+
+		return null;
+	}
+
+	private static void LogCacheDiagnostic(ISmbProviderInfo smb, string message)
+	{
+		if (smb is SmbProviderInfo provider)
+			provider.LogDiagnostic(message);
 	}
 
 		protected static byte[]? TryReadValueBytes(IRegistryKey key, string name, CancellationToken cancellationToken)
