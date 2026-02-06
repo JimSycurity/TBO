@@ -300,6 +300,81 @@
 
   <command:command>
     <command:details>
+      <command:name>Get-TBODpapiMasterKeyHashes</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBODpapiMasterKeyHashes</command:noun>
+      <maml:description>
+        <maml:para>Formats DPAPI master key files into John/Hashcat DPAPImk hashes for offline password cracking.</maml:para>
+        <maml:para>The primary output is HashLine in the format {GUID}:$DPAPImk$... Preferred keys are highlighted when a Preferred file is present.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiMasterKeyHashes</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>DpapiMasterKeyScope</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Limit enumeration to machine, user, or both scopes (default: User).</maml:para>
+        </maml:description>
+        <command:parameterValue>DpapiMasterKeyScope</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates user-scoped master keys and formats them into John/Hashcat DPAPImk hashes.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol | Select-Object -ExpandProperty HashLine | Set-Content -Encoding ascii .\dpapi-masterkey-hashes.txt</maml:code>
+        <maml:remarks>
+          <maml:para>Writes only the John/Hashcat hash lines to a file.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol | Where-Object IsPreferred | Select-Object -ExpandProperty HashLine</maml:code>
+        <maml:remarks>
+          <maml:para>Filters to preferred master keys to prioritize cracking.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Find-TBODpapiBlobs</command:name>
       <command:verb>Find</command:verb>
       <command:noun>TBODpapiBlobs</command:noun>

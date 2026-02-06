@@ -403,5 +403,33 @@
 				</TableRowEntries>
 			</TableControl>
 		</View>
+		<View>
+			<Name>Titanis.Tbo.Smb2.PowerShell.TboDpapiMasterKeyHashInfo</Name>
+			<ViewSelectedBy>
+				<TypeName>Titanis.Tbo.Smb2.PowerShell.TboDpapiMasterKeyHashInfo</TypeName>
+			</ViewSelectedBy>
+			<TableControl>
+				<TableHeaders>
+					<TableColumnHeader>
+						<Label>Preferred</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>Hash</Label>
+					</TableColumnHeader>
+				</TableHeaders>
+				<TableRowEntries>
+					<TableRowEntry>
+						<TableColumnItems>
+							<TableColumnItem>
+								<PropertyName>IsPreferred</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>HashLine</PropertyName>
+							</TableColumnItem>
+						</TableColumnItems>
+					</TableRowEntry>
+				</TableRowEntries>
+			</TableControl>
+		</View>
 	</ViewDefinitions>
 </Configuration>

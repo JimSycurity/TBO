@@ -139,6 +139,7 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
         $cmdlets | Should -Contain 'Find-TBODpapiBlobs'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeyLocations'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeys'
+        $cmdlets | Should -Contain 'Get-TBODpapiMasterKeyHashes'
     }
 
     It 'registers the TBO.Smb2 provider' {
@@ -332,5 +333,124 @@ Describe 'DPAPI cmdlets with fake SMB file system' {
         $match | Should -Not -BeNullOrEmpty
         $match.IsPreferred | Should -BeTrue
         $match.Scope | Should -Be 'Machine'
+    }
+
+    It 'dumps DPAPImk hashes for user master keys using a fake SMB file system' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+
+        function New-FakeMasterKeyFileBytes {
+            param(
+                [Parameter(Mandatory=$true)][Guid]$Guid,
+                [Parameter(Mandatory=$true)][byte[]]$Salt16,
+                [Parameter(Mandatory=$true)][uint32]$Rounds,
+                [Parameter(Mandatory=$true)][uint32]$HashAlgo,
+                [Parameter(Mandatory=$true)][uint32]$CipherAlgo,
+                [Parameter(Mandatory=$true)][byte[]]$CipherText
+            )
+
+            $mkBlock =
+                [System.BitConverter]::GetBytes([uint32]2) +
+                $Salt16 +
+                [System.BitConverter]::GetBytes($Rounds) +
+                [System.BitConverter]::GetBytes($HashAlgo) +
+                [System.BitConverter]::GetBytes($CipherAlgo) +
+                $CipherText
+
+            $guidTextBytes = [System.Text.Encoding]::Unicode.GetBytes($Guid.ToString())
+
+            $zero32 = [System.BitConverter]::GetBytes([uint32]0)
+            $zero64 = [System.BitConverter]::GetBytes([uint64]0)
+            $policy = [System.BitConverter]::GetBytes([uint32]0)
+            $mkLen = [System.BitConverter]::GetBytes([uint64]$mkBlock.Length)
+
+            return (
+                [System.BitConverter]::GetBytes([uint32]2) +
+                $zero32 + $zero32 +
+                $guidTextBytes +
+                $zero32 + $zero32 +
+                $policy +
+                $mkLen + $zero64 + $zero64 + $zero64 +
+                $mkBlock
+            )
+        }
+
+        $domainSid = 'S-1-5-21-1111111111-2222222222-3333333333-1101'
+        $localSid  = 'S-1-5-21-1111111111-2222222222-3333333333-1102'
+
+        $domainGuid = [Guid]::Parse('0a9f3f91-51c6-43b8-9edb-3fbe5c8f6a1f')
+        $localGuid  = [Guid]::Parse('c7d15f8f-7fb9-4bc7-8cbe-2c1b7b1a6b9c')
+
+        $salt = [byte[]](1..16)
+        $cipherText = [byte[]](17..32)
+
+        $domainFileBytes = New-FakeMasterKeyFileBytes -Guid $domainGuid -Salt16 $salt -Rounds 1000 -HashAlgo 32782 -CipherAlgo 26128 -CipherText $cipherText
+        $localFileBytes  = New-FakeMasterKeyFileBytes -Guid $localGuid  -Salt16 $salt -Rounds 1000 -HashAlgo 32782 -CipherAlgo 26128 -CipherText $cipherText
+
+        $domainDir = "\\server\C$\Users\domuser\AppData\Roaming\Microsoft\Protect\$domainSid"
+        $localDir  = "\\server\C$\Users\localuser\AppData\Roaming\Microsoft\Protect\$localSid"
+
+        $versionBytes = [System.BitConverter]::GetBytes(2)
+        $lengthBytes = [System.BitConverter]::GetBytes(16)
+        $domainPreferredBytes = $versionBytes + $lengthBytes + $domainGuid.ToByteArray()
+        $localPreferredBytes  = $versionBytes + $lengthBytes + $localGuid.ToByteArray()
+
+        $fake.AddDirectory($domainDir) | Out-Null
+        $fake.AddFile("$domainDir\Preferred", $domainPreferredBytes) | Out-Null
+        $fake.AddFile("$domainDir\BK-TESTDOM", [byte[]](0x01,0x02,0x03)) | Out-Null
+        $fake.AddFile("$domainDir\$domainGuid", $domainFileBytes) | Out-Null
+
+        $fake.AddDirectory($localDir) | Out-Null
+        $fake.AddFile("$localDir\Preferred", $localPreferredBytes) | Out-Null
+        $fake.AddFile("$localDir\$localGuid", $localFileBytes) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            $results = @(Get-TBODpapiMasterKeyHashes -ServerName server -Scope User -ShareName C$)
+        } finally {
+            $scope.Dispose()
+        }
+
+        $results | Should -Not -BeNullOrEmpty
+
+        $domain = $results | Where-Object { $_.MasterKeyGuid -eq $domainGuid.ToString() } | Select-Object -First 1
+        $domain | Should -Not -BeNullOrEmpty
+        $domain.IsPreferred | Should -BeTrue
+        $domain.IsDomain | Should -BeTrue
+        $domain.HashContext | Should -Be 3
+
+        $saltHex = ($salt | ForEach-Object { $_.ToString('x2') }) -join ''
+        $cipherHex = ($cipherText | ForEach-Object { $_.ToString('x2') }) -join ''
+        $expectedDomainHash = '$DPAPImk$2*3*' + $domainSid + '*aes256*sha512*1000*' + $saltHex + '*32*' + $cipherHex
+        $domain.Hash | Should -Be $expectedDomainHash
+        $domain.HashLine | Should -Be "{$($domainGuid.ToString())}:$expectedDomainHash"
+
+        $local = $results | Where-Object { $_.MasterKeyGuid -eq $localGuid.ToString() } | Select-Object -First 1
+        $local | Should -Not -BeNullOrEmpty
+        $local.IsPreferred | Should -BeTrue
+        $local.IsDomain | Should -BeFalse
+        $local.HashContext | Should -Be 1
+        $expectedLocalHash = '$DPAPImk$2*1*' + $localSid + '*aes256*sha512*1000*' + $saltHex + '*32*' + $cipherHex
+        $local.Hash | Should -Be $expectedLocalHash
+        $local.HashLine | Should -Be "{$($localGuid.ToString())}:$expectedLocalHash"
     }
 }

