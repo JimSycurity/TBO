@@ -345,5 +345,63 @@
 				</TableRowEntries>
 			</TableControl>
 		</View>
+		<View>
+			<Name>Titanis.Tbo.Smb2.PowerShell.TboMachineCertificateInfo</Name>
+			<ViewSelectedBy>
+				<TypeName>Titanis.Tbo.Smb2.PowerShell.TboMachineCertificateInfo</TypeName>
+			</ViewSelectedBy>
+			<TableControl>
+				<TableHeaders>
+					<TableColumnHeader>
+						<Label>ServerName</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>Thumbprint</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>Subject</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>NotAfter</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>KeyType</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>UniqueName</Label>
+					</TableColumnHeader>
+					<TableColumnHeader>
+						<Label>FailureReason</Label>
+					</TableColumnHeader>
+				</TableHeaders>
+				<TableRowEntries>
+					<TableRowEntry>
+						<TableColumnItems>
+							<TableColumnItem>
+								<PropertyName>ServerName</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>Thumbprint</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>Subject</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>NotAfter</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>KeyType</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>UniqueName</PropertyName>
+							</TableColumnItem>
+							<TableColumnItem>
+								<PropertyName>FailureReason</PropertyName>
+							</TableColumnItem>
+						</TableColumnItems>
+					</TableRowEntry>
+				</TableRowEntries>
+			</TableControl>
+		</View>
 	</ViewDefinitions>
 </Configuration>

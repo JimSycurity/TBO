@@ -569,6 +569,104 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
 
   <command:command>
     <command:details>
+      <command:name>Get-TBOMachineCertificates</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOMachineCertificates</command:noun>
+      <maml:description>
+        <maml:para>Enumerates machine RSA private keys (CAPI and CNG), decrypts DPAPI-protected key material using machine DPAPI master keys, and maps keys to LocalMachine\My certificates when possible.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOMachineCertificates</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShowAll</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>SkipCng</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for key file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>Machine-scope DPAPI master keys (from Get-TBODpapiMasterKeys -Scope Machine).</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShowAll</maml:name>
+        <maml:description>
+          <maml:para>Return recovered keys and decrypt failures even when a key does not map to a LocalMachine\My certificate.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>SkipCng</maml:name>
+        <maml:description>
+          <maml:para>Skip CNG key locations and only scan CAPI MachineKeys.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
+Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts machine private keys and returns those that map to LocalMachine\My certificates.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys -ShowAll</maml:code>
+        <maml:remarks>
+          <maml:para>Includes unmatched keys and decrypt failures.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys -SkipCng</maml:code>
+        <maml:remarks>
+          <maml:para>Only scans CAPI MachineKeys and skips CNG key directories.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBOChromeLogins</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBOChromeLogins</command:noun>
