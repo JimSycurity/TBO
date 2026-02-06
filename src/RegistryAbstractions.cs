@@ -43,6 +43,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		IRegistrySession? OpenRegistrySession(string serverName, CancellationToken cancellationToken);
 	}
 
+	internal interface IRegistrySecretCacheProvider
+	{
+		RegistrySecretCache SecretCache { get; }
+	}
+
 	public enum RegistrySessionInvalidationReason
 	{
 		Unknown = 0,

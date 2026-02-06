@@ -23,8 +23,14 @@ Note: Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadat
 
 ## Local Logging
 
-Set `TITANIS_TBO_LOG` to `1` or to a file path. When set to `1`, logs go to
-`%TEMP%\Titanis.TBO.Smb2.log`.
+Set `TITANIS_TBO_LOG` to enable provider logging:
+
+- `TITANIS_TBO_LOG=1` (or `true`/`yes`) writes to `%TEMP%\Titanis.TBO.Smb2.log` at `Info`.
+- `TITANIS_TBO_LOG=<path>` writes to the specified file at `Info`.
+- `TITANIS_TBO_LOG=<level>` writes to `%TEMP%\Titanis.TBO.Smb2.log` at the specified level.
+- `TITANIS_TBO_LOG=<path>;<level>` writes to the specified file at the specified level.
+
+Levels: `Info`, `Verbose`, `Diagnostic`, `Debug`, `Warning`, `Error`.
 
 ## Build
 

@@ -184,6 +184,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			private readonly SmbProviderInfo _provider;
 			private readonly string _serverName;
+			private readonly RegistrySecretCache _secretCache = new();
 			private readonly SemaphoreSlim _gate = new(1, 1);
 			private RemoteRegistrySession? _session;
 			private int _invalidated;
@@ -199,6 +200,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			internal int Port { get; }
 			internal string Fingerprint { get; }
 			internal string ServerName => this._serverName;
+			internal RegistrySecretCache SecretCache => this._secretCache;
 
 			internal IRegistrySession Acquire(CancellationToken cancellationToken)
 			{
@@ -231,6 +233,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			internal void Invalidate(RegistrySessionInvalidationReason reason)
 			{
 				Interlocked.Exchange(ref this._invalidated, 1);
+				this._secretCache.Clear();
 				if (this._gate.Wait(0))
 				{
 					try
@@ -254,18 +257,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private sealed class RegistrySessionLease : IRegistrySession
+		private sealed class RegistrySessionLease : IRegistrySession, IRegistrySecretCacheProvider
 		{
 			private RegistrySessionCacheEntry? _entry;
 			private readonly IRegistryClient _client;
+			private readonly RegistrySecretCache _secretCache;
 
 			internal RegistrySessionLease(RegistrySessionCacheEntry entry, IRegistryClient client)
 			{
 				this._entry = entry ?? throw new ArgumentNullException(nameof(entry));
 				this._client = client ?? throw new ArgumentNullException(nameof(client));
+				this._secretCache = entry.SecretCache;
 			}
 
 			public IRegistryClient Client => this._client;
+			public RegistrySecretCache SecretCache => this._secretCache;
 
 			public void Dispose()
 			{

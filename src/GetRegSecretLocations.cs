@@ -237,12 +237,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			try
 			{
-				using var key = client.OpenRootKey(spec.RootKey, RegistryAccessRights.EnumerateSubkeys, cancellationToken).GetAwaiter().GetResult();
-				if (spec.IsRoot)
-					return true;
-
-				using var subkey = key.OpenSubkey(spec.SubkeyPath ?? string.Empty, RegistryAccessRights.QueryValue, RegistryKeyOptions.BackupRestore, cancellationToken).GetAwaiter().GetResult();
-				return subkey != null;
+				using var key = RegistryHelpers.TryOpenKey(client, spec, RegistryAccessRights.QueryValue, cancellationToken);
+				return key != null;
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{

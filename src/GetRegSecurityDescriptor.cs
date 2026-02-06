@@ -51,7 +51,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var sdBytes = key.QuerySecurity(this.Sections, cancellationToken).GetAwaiter().GetResult();
 				if (sdBytes.Length == 0)
 				{
-					this.WriteWarning($"No security descriptor was returned for '{parsedPath.KeyPath}'.");
+					this.LogWarning(smb, $"No security descriptor was returned for '{parsedPath.KeyPath}'.");
 					return;
 				}
 

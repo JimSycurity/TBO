@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.Management.Automation;
-using System.Text;
 using System.Threading;
 using Titanis;
 using Titanis.Msrpc.Msrrp;
@@ -125,7 +124,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var decryptResult = DpapiBlobCrypto.Decrypt(blob, masterKey, entropy);
 			var cleartextBytes = decryptResult.Cleartext;
-			var cleartextText = cleartextBytes != null ? TryDecodeCleartext(cleartextBytes) : null;
+			var cleartextText = cleartextBytes != null ? DpapiHelpers.TryDecodeCleartext(cleartextBytes) : null;
 
 			this.WriteObject(new TboDpapiBlobDecryptionInfo
 			{
@@ -139,9 +138,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				Flags = blob.Flags,
 				Description = blob.Description,
 				CryptAlgorithmId = blob.CryptAlgorithm,
-				CryptAlgorithm = ResolveCryptAlgorithmName(blob.CryptAlgorithm, blob.CryptAlgorithmLength),
+				CryptAlgorithm = DpapiBlobCrypto.ResolveCipherAlgorithmName(blob.CryptAlgorithm, blob.CryptAlgorithmLength),
 				HashAlgorithmId = blob.HashAlgorithm,
-				HashAlgorithm = ResolveHashAlgorithmName(blob.HashAlgorithm, blob.HashAlgorithmLength),
+				HashAlgorithm = DpapiBlobCrypto.ResolveHashAlgorithmName(blob.HashAlgorithm, blob.HashAlgorithmLength),
 				Cleartext = cleartextText,
 				CleartextHex = cleartextBytes?.ToHexString(),
 				CleartextBytes = cleartextBytes,
@@ -230,7 +229,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				&& !uncPath.ServerName.Equals(this.ServerName, StringComparison.OrdinalIgnoreCase))
 				throw new ArgumentException($"ServerName '{this.ServerName}' does not match UNC host '{uncPath.ServerName}'.", nameof(this.ServerName));
 
-			var bytes = ReadFileBytes(smb, uncPath, cancellationToken);
+			var bytes = DpapiHelpers.ReadFileBytes(smb, uncPath, cancellationToken);
 			return new DpapiBlobInput
 			{
 				Source = "File",
@@ -267,64 +266,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			};
 		}
 
-		private static byte[] ReadFileBytes(ISmbProviderInfo smb, UncPath path, CancellationToken cancellationToken)
-		{
-			var fileSystem = ResolveFileSystem(smb);
-			using var file = fileSystem.OpenFileRead(path, cancellationToken);
-			using var stream = file.OpenRead();
-			using var memory = new MemoryStream();
-			stream.CopyTo(memory);
-			return memory.ToArray();
-		}
-
-		private static ISmbFileSystem ResolveFileSystem(ISmbProviderInfo smb)
-		{
-			return SmbFileSystemResolver.Resolve(smb);
-		}
-
-		private static string ResolveCryptAlgorithmName(uint algoId, uint algoLen)
-		{
-			return algoId switch
-			{
-				0x6601 => "DES",
-				0x6603 => "DES3",
-				0x660e => "AES-128",
-				0x660f => "AES-192",
-				0x6610 => "AES-256",
-				0x6611 => algoLen switch
-				{
-					128 => "AES-128",
-					192 => "AES-192",
-					256 => "AES-256",
-					_ => "AES"
-				},
-				_ => $"0x{algoId:x}"
-			};
-		}
-
-		private static string ResolveHashAlgorithmName(uint algoId, uint algoLen)
-		{
-			if (algoId == 0x8009)
-			{
-				if (algoLen >= 512)
-					return "SHA512";
-				if (algoLen >= 384)
-					return "SHA384";
-				if (algoLen >= 256)
-					return "SHA256";
-				return "SHA1";
-			}
-
-			return algoId switch
-			{
-				0x8003 => "MD5",
-				0x8004 => "SHA1",
-				0x800c => "SHA256",
-				0x800d => "SHA384",
-				0x800e => "SHA512",
-				_ => $"0x{algoId:x}"
-			};
-		}
 
 		private byte[]? ResolveMasterKey()
 		{
@@ -344,63 +285,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		private static string? TryDecodeCleartext(byte[] payload)
-		{
-			if (payload.Length == 0)
-				return null;
-
-			if (payload.Length % 2 == 0)
-			{
-				try
-				{
-					var str = Encoding.Unicode.GetString(payload).TrimEnd('\0');
-					if (IsLikelyText(str))
-						return str;
-				}
-				catch
-				{
-				}
-			}
-
-			try
-			{
-				var str = Encoding.UTF8.GetString(payload).TrimEnd('\0');
-				if (IsLikelyText(str))
-					return str;
-			}
-			catch
-			{
-			}
-
-			return null;
-		}
-
-		private static bool IsLikelyText(string? text)
-		{
-			if (string.IsNullOrWhiteSpace(text))
-				return false;
-
-			int asciiPrintable = 0;
-			int controlCount = 0;
-			int length = text.Length;
-
-			for (int i = 0; i < length; i++)
-			{
-				char c = text[i];
-				if (c == '\uFFFD')
-					return false;
-				if (char.IsControl(c) && c != '\r' && c != '\n' && c != '\t')
-					controlCount++;
-				if (c >= ' ' && c <= '~')
-					asciiPrintable++;
-			}
-
-			if (controlCount > 0 || asciiPrintable == 0)
-				return false;
-
-			double asciiRatio = (double)asciiPrintable / length;
-			return asciiRatio >= 0.6;
-		}
 
 		private UncPath ResolveToUncPath(string path, string paramName)
 		{

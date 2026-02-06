@@ -61,8 +61,11 @@ The module must treat backup/restore semantics as non-optional:
 
 ### Local Logging
 Set `TITANIS_TBO_LOG` to enable SMB2 trace logging for the provider:
-- `TITANIS_TBO_LOG=1` (or `true`/`yes`) writes to `%TEMP%\Titanis.TBO.Smb2.log`.
-- `TITANIS_TBO_LOG=<path>` writes to the specified file.
+- `TITANIS_TBO_LOG=1` (or `true`/`yes`) writes to `%TEMP%\Titanis.TBO.Smb2.log` at `Info`.
+- `TITANIS_TBO_LOG=<path>` writes to the specified file at `Info`.
+- `TITANIS_TBO_LOG=<level>` writes to `%TEMP%\Titanis.TBO.Smb2.log` at the specified level.
+- `TITANIS_TBO_LOG=<path>;<level>` writes to the specified file at the specified level.
+Levels: `Info`, `Verbose`, `Diagnostic`, `Debug`, `Warning`, `Error`.
 Logs include connect/session/share events and DFS referral activity.
 
 ## SMB2 Provider (Backup-Only)

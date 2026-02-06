@@ -46,6 +46,11 @@ dotnet build C:\Data\Repos\TBO\src\Titanis.TBO.Smb2.PowerShell.csproj -c Release
 # .\Build\Build-Module.ps1 -Configuration Release -SkipTests
 ```
 
+For proper PSBuildModule and Pester handling, build via:
+```
+pwsh -NoProfile -File .\Build\Build-Module.ps1 -Configuration Release
+```
+
 `Build-Module.ps1` runs Pester and uses `/p:UseArtifactsOutput=false` for the build step.
 
 ## Build Titanis directly (optional)

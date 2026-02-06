@@ -17,6 +17,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public uint Policy { get; init; }
 		public DpapiMasterKeyBlock? MasterKey { get; init; }
 		public DpapiMasterKeyBlock? BackupKey { get; init; }
+		public DpapiMasterKeyCredHistBlock? CredHist { get; init; }
 		public ulong MasterKeyLength { get; init; }
 		public ulong BackupKeyLength { get; init; }
 		public ulong CredHistLength { get; init; }
@@ -76,13 +77,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			DpapiMasterKeyBlock? masterKey = null;
 			DpapiMasterKeyBlock? backupKey = null;
+			DpapiMasterKeyCredHistBlock? credHist = null;
 
 			if (masterKeyLen > 0)
 				masterKey = DpapiMasterKeyBlock.Parse(reader.ReadBytes(checked((int)masterKeyLen)));
 			if (backupKeyLen > 0)
 				backupKey = DpapiMasterKeyBlock.Parse(reader.ReadBytes(checked((int)backupKeyLen)));
 			if (credHistLen > 0)
-				reader.ReadBytes(checked((int)credHistLen));
+				credHist = DpapiMasterKeyCredHistBlock.Parse(reader.ReadBytes(checked((int)credHistLen)));
 			if (domainKeyLen > 0)
 				reader.ReadBytes(checked((int)domainKeyLen));
 
@@ -97,7 +99,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				CredHistLength = credHistLen,
 				DomainKeyLength = domainKeyLen,
 				MasterKey = masterKey,
-				BackupKey = backupKey
+				BackupKey = backupKey,
+				CredHist = credHist
 			};
 		}
 
@@ -204,6 +207,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private static readonly Dictionary<uint, CryptoAlgorithm> Algorithms = new()
 		{
 			{ 0x6603, new CryptoAlgorithm(0x6603, "DES3", 192, 64, 64, 0, fixParity: true) },
+			{ 0x6609, new CryptoAlgorithm(0x6609, "DES2", 128, 64, 64, 0, fixParity: true) },
 			{ 0x6601, new CryptoAlgorithm(0x6601, "DES", 64, 64, 64, 0, fixParity: true) },
 			{ 0x6611, new CryptoAlgorithm(0x6611, "AES", 128, 128, 128, 0) },
 			{ 0x660e, new CryptoAlgorithm(0x660e, "AES-128", 128, 128, 128, 0) },
@@ -226,6 +230,31 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			var file = DpapiMasterKeyFile.Parse(raw);
 			return file.DecryptWithKey(keyMaterial);
+		}
+
+		internal static int GetCipherBlockLengthBytes(uint cipherAlgorithmId)
+		{
+			if (!Algorithms.TryGetValue(cipherAlgorithmId, out var algo))
+				throw new InvalidDataException($"Unsupported cipher algorithm 0x{cipherAlgorithmId:x}.");
+			if (algo.BlockLength <= 0)
+				throw new InvalidDataException($"Algorithm 0x{cipherAlgorithmId:x} did not define a block size.");
+			return algo.BlockLength;
+		}
+
+		internal static byte[] DecryptDpapiData(
+			uint cipherAlgorithmId,
+			uint hashAlgorithmId,
+			byte[] cipherText,
+			byte[] encKey,
+			byte[] iv,
+			uint rounds)
+		{
+			if (!Algorithms.TryGetValue(hashAlgorithmId, out var hashAlgo))
+				throw new InvalidDataException($"Unsupported hash algorithm 0x{hashAlgorithmId:x}.");
+			if (!Algorithms.TryGetValue(cipherAlgorithmId, out var cipherAlgo))
+				throw new InvalidDataException($"Unsupported cipher algorithm 0x{cipherAlgorithmId:x}.");
+
+			return DataDecrypt(cipherAlgo, hashAlgo, cipherText, encKey, iv, rounds);
 		}
 
 		public static DpapiMasterKeyDecryptionResult DecryptMasterKey(DpapiMasterKeyBlock block, byte[] keyMaterial)
@@ -353,6 +382,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			SymmetricAlgorithm algo = cipherName switch
 			{
 				"DES3" => TripleDES.Create(),
+				"DES2" => TripleDES.Create(),
 				"DES" => DES.Create(),
 				"AES" => Aes.Create(),
 				"AES-128" => Aes.Create(),

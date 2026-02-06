@@ -54,7 +54,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	[OutputType(typeof(TboRegTcpIpInfo))]
 	public sealed class GetTBORegTCPIP : TboRegCmdlet
 	{
-		private const RegistryKeyOptions BackupOptions = RegistryKeyOptions.BackupRestore;
 		private const string TcpipParametersPath = @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters";
 		private const string TcpipInterfacesPath = @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
 		private const string Tcpip6ParametersPath = @"SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters";
@@ -174,14 +173,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
-				smb.LogException($"Get-TBORegTCPIP failed to open {protocol} parameters", ex);
-				this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} registry parameters: {ex.Message}");
+				this.LogException(smb, $"Get-TBORegTCPIP failed to open {protocol} parameters", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP could not read {protocol} registry parameters: {ex.Message}");
 				return null;
 			}
 			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 			{
-				smb.LogException($"Get-TBORegTCPIP failed to read {protocol} parameters", ex);
-				this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} registry parameters: {ex.Message}");
+				this.LogException(smb, $"Get-TBORegTCPIP failed to read {protocol} parameters", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP could not read {protocol} registry parameters: {ex.Message}");
 				return null;
 			}
 		}
@@ -210,14 +209,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
-				smb.LogException($"Get-TBORegTCPIP failed to open {protocol} interfaces", ex);
-				this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} interface list: {ex.Message}");
+				this.LogException(smb, $"Get-TBORegTCPIP failed to open {protocol} interfaces", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP could not read {protocol} interface list: {ex.Message}");
 				return null;
 			}
 			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 			{
-				smb.LogException($"Get-TBORegTCPIP failed to enumerate {protocol} interfaces", ex);
-				this.WriteWarning($"Get-TBORegTCPIP could not read {protocol} interface list: {ex.Message}");
+				this.LogException(smb, $"Get-TBORegTCPIP failed to enumerate {protocol} interfaces", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP could not read {protocol} interface list: {ex.Message}");
 				return null;
 			}
 		}
@@ -243,7 +242,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					using var ifaceKey = interfacesKey.OpenSubkey(
 						interfaceId,
 						RegistryAccessRights.QueryValue,
-						BackupOptions,
+						RegistryHelpers.BackupOptions,
 						cancellationToken).GetAwaiter().GetResult();
 
 					var keyPath = $"{interfacesSpec.KeyPath}\\{interfaceId}";
@@ -282,8 +281,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 			{
-				smb.LogException($"Get-TBORegTCPIP failed to read interface {interfaceId}", ex);
-				this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{interfaceId}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegTCPIP failed to read interface {interfaceId}", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP failed to read interface '{interfaceId}': {ex.Message}");
 				return null;
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex) || ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
@@ -292,8 +291,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegTCPIP failed to read interface {interfaceId}", ex);
-				this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{interfaceId}': {ex.Message}");
+				this.LogException(smb, $"Get-TBORegTCPIP failed to read interface {interfaceId}", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP failed to read interface '{interfaceId}': {ex.Message}");
 				return null;
 			}
 		}
@@ -345,8 +344,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				smb.LogException("Get-TBORegTCPIP failed to enumerate network connections", ex);
-				this.WriteWarning($"Get-TBORegTCPIP failed to read interface names: {ex.Message}");
+				this.LogException(smb, "Get-TBORegTCPIP failed to enumerate network connections", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP failed to read interface names: {ex.Message}");
 				return new List<string>();
 			}
 		}
@@ -372,7 +371,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					using var connectionKey = connectionsKey.OpenSubkey(
 						$"{interfaceId}\\Connection",
 						RegistryAccessRights.QueryValue,
-						BackupOptions,
+						RegistryHelpers.BackupOptions,
 						cancellationToken).GetAwaiter().GetResult();
 					return TryReadString(connectionKey, cancellationToken, "Name");
 				});
@@ -383,14 +382,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 			{
-				smb.LogException($"Get-TBORegTCPIP failed to read interface name for {interfaceId}", ex);
-				this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{interfaceId}' name: {ex.Message}");
+				this.LogException(smb, $"Get-TBORegTCPIP failed to read interface name for {interfaceId}", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP failed to read interface '{interfaceId}' name: {ex.Message}");
 				return null;
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Get-TBORegTCPIP failed to read interface name for {interfaceId}", ex);
-				this.WriteWarning($"Get-TBORegTCPIP failed to read interface '{interfaceId}' name: {ex.Message}");
+				this.LogException(smb, $"Get-TBORegTCPIP failed to read interface name for {interfaceId}", ex);
+				this.LogWarning(smb, $"Get-TBORegTCPIP failed to read interface '{interfaceId}' name: {ex.Message}");
 				return null;
 			}
 		}

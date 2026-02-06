@@ -34,12 +34,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string RegistryParameterSet = "Registry";
 		private const int DefaultMaxBytes = 1024;
 
-		private static readonly byte[] DpapiMagic = new byte[]
-		{
-			0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF, 0x01, 0x15,
-			0xD1, 0x11, 0x8C, 0x7A, 0x00, 0xC0, 0x4F, 0xC2, 0x97, 0xEB
-		};
-
 		[Parameter(Mandatory = true, Position = 1, ParameterSetName = FileSystemParameterSet, ValueFromPipeline = true, ValueFromPipelineByPropertyName = true)]
 		public string Path { get; set; } = string.Empty;
 
@@ -59,7 +53,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
-			var serverName = NormalizeServerName(this.ServerName);
+			var serverName = DpapiHelpers.NormalizeServerName(this.ServerName);
 			if (string.IsNullOrWhiteSpace(serverName))
 				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
 
@@ -241,7 +235,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (prefix == null || prefix.Length == 0)
 				return;
 
-			var offset = FindMagicOffset(prefix);
+			var offset = DpapiHelpers.FindMagicOffset(prefix);
 			if (offset < 0)
 				return;
 
@@ -358,10 +352,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return;
 
 			var scanLength = Math.Min(this.MaxBytes, valueInfo.Bytes.Length);
-			if (scanLength < DpapiMagic.Length)
+			if (scanLength < DpapiHelpers.DpapiMagic.Length)
 				return;
 
-			var offset = FindMagicOffset(valueInfo.Bytes.AsSpan(0, scanLength));
+			var offset = DpapiHelpers.FindMagicOffset(valueInfo.Bytes.AsSpan(0, scanLength));
 			if (offset < 0)
 				return;
 
@@ -377,14 +371,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				MatchOffset = offset,
 				BytesScanned = scanLength
 			});
-		}
-
-		private static int FindMagicOffset(ReadOnlySpan<byte> buffer)
-		{
-			if (buffer.Length < DpapiMagic.Length)
-				return -1;
-
-			return buffer.IndexOf(DpapiMagic);
 		}
 
 		private static byte[] ReadFilePrefix(ISmbFileSystem fileSystem, UncPath path, int maxBytes, CancellationToken cancellationToken)
@@ -438,13 +424,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			return ex.StatusCode is Ntstatus.STATUS_NOT_A_DIRECTORY
 				or Ntstatus.STATUS_FILE_IS_A_DIRECTORY;
-		}
-
-		private static string NormalizeServerName(string? serverName)
-		{
-			return string.IsNullOrWhiteSpace(serverName)
-				? string.Empty
-				: serverName.TrimStart('\\');
 		}
 
 		private UncPath ResolveToUncPath(string path, string paramName)

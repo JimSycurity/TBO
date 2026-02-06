@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Management.Automation;
+using System.Security.AccessControl;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Msrpc.Msscmr;
@@ -54,11 +55,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	[Cmdlet(VerbsCommon.Find, "TBORegWeakServices")]
 	[OutputType(typeof(TboRegWeakServiceInfo))]
-	public sealed class FindTBORegWeakServices : TboRegCmdlet
+	public sealed class FindTBORegWeakServices : ServiceRegistryCmdletBase
 	{
-		private const string DefaultServicesPath = @"HKLM\SYSTEM\CurrentControlSet\Services";
-		private const string SecuritySubkeyName = "Security";
-		private const string SecurityValueName = "Security";
 		private const uint GenericAllMask = 0x10000000;
 		private const uint GenericExecuteMask = 0x20000000;
 		private const uint GenericWriteMask = 0x40000000;
@@ -125,7 +123,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					return;
 				}
 
-				var subkeys = CollectServiceSubkeys(smb, servicesKey, keyInfo, parsedPath, cancellationToken);
+				var subkeys = CollectServiceSubkeys(
+					smb,
+					servicesKey,
+					keyInfo,
+					parsedPath,
+					cancellationToken,
+					"Find-TBORegWeakServices");
 				foreach (var subkey in subkeys)
 				{
 					if (string.IsNullOrWhiteSpace(subkey.KeyName))
@@ -182,7 +186,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (wildcardPatterns.Count == 0)
 				return;
 
-			var subkeys = CollectServiceSubkeys(smb, servicesKey, servicesInfo, servicesPath, cancellationToken);
+			var subkeys = CollectServiceSubkeys(
+				smb,
+				servicesKey,
+				servicesInfo,
+				servicesPath,
+				cancellationToken,
+				"Find-TBORegWeakServices");
 			var wildcardMatched = false;
 			foreach (var subkey in subkeys)
 			{
@@ -199,49 +209,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			if (!wildcardMatched)
-				this.WriteWarning($"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
-		}
-
-		private List<RegistrySubkeyInfo> CollectServiceSubkeys(
-			ISmbProviderInfo smb,
-			IRegistryKey servicesKey,
-			RegistryKeyInfo servicesInfo,
-			RegistryPathSpec servicesPath,
-			CancellationToken cancellationToken)
-		{
-			List<RegistrySubkeyInfo> subkeys;
-			try
-			{
-				subkeys = CollectSubkeys(servicesKey, cancellationToken);
-			}
-			catch (Exception ex)
-			{
-				smb.LogException("Find-TBORegWeakServices failed to enumerate service keys", ex);
-				throw;
-			}
-
-			if (servicesInfo.SubkeyCount > 0 && subkeys.Count != servicesInfo.SubkeyCount)
-			{
-				this.WriteWarning(
-					$"Find-TBORegWeakServices enumerated {subkeys.Count} of {servicesInfo.SubkeyCount} subkeys under {servicesPath.KeyPath}. Some services may be missing.");
-			}
-
-			return subkeys;
-		}
-
-		private static List<string> FilterNames(string[]? names)
-		{
-			if (names == null || names.Length == 0)
-				return new List<string>();
-
-			var filtered = new List<string>(names.Length);
-			foreach (var name in names)
-			{
-				if (!string.IsNullOrWhiteSpace(name))
-					filtered.Add(name.Trim());
-			}
-
-			return filtered;
+				this.LogWarning(smb, $"No service keys matched pattern(s): {string.Join(", ", wildcardInputs)}.");
 		}
 
 		private bool TryScanService(
@@ -274,23 +242,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 				catch (NtstatusException retryEx) when (retryEx.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
 				{
-					this.WriteWarning($"Find-TBORegWeakServices failed to read service '{serviceName}': {retryEx.Message}");
+					this.LogWarning(smb, $"Find-TBORegWeakServices failed to read service '{serviceName}': {retryEx.Message}");
 				}
 				catch (Exception retryEx)
 				{
-					smb.LogException($"Find-TBORegWeakServices failed to read service '{serviceName}'", retryEx);
-					this.WriteWarning($"Find-TBORegWeakServices failed to read service '{serviceName}': {retryEx.Message}");
+					this.LogException(smb, $"Find-TBORegWeakServices failed to read service '{serviceName}'", retryEx);
+					this.LogWarning(smb, $"Find-TBORegWeakServices failed to read service '{serviceName}': {retryEx.Message}");
 				}
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
 			{
 				if (warnOnMissing)
-					this.WriteWarning($"Service key not found: {basePath.KeyPath}\\{serviceName}");
+					this.LogWarning(smb, $"Service key not found: {basePath.KeyPath}\\{serviceName}");
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Find-TBORegWeakServices failed to read service '{serviceName}'", ex);
-				this.WriteWarning($"Find-TBORegWeakServices failed to read service '{serviceName}': {ex.Message}");
+				this.LogException(smb, $"Find-TBORegWeakServices failed to read service '{serviceName}'", ex);
+				this.LogWarning(smb, $"Find-TBORegWeakServices failed to read service '{serviceName}': {ex.Message}");
 			}
 
 			return false;
@@ -316,15 +284,52 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				RegistryAccessRights.QueryValue,
 				cancellationToken);
 
-			if (!TryReadSecurityDescriptor(smb, client, serviceSpec, cancellationToken, out var descriptor))
+			if (!TryReadSecurityDescriptor(smb, client, serviceSpec, cancellationToken, out var descriptor, out var windowsDescriptor))
 				return;
 
-			if (descriptor?.Dacl == null || descriptor.Dacl.Entries.Count == 0)
-				return;
-
-			foreach (var ace in descriptor.Dacl.Entries)
+			if (descriptor != null)
 			{
-				if (!TryGetAceInfo(ace, out var trustee, out var accessMask))
+				if (descriptor.Dacl == null || descriptor.Dacl.Entries.Count == 0)
+					return;
+
+				foreach (var ace in descriptor.Dacl.Entries)
+				{
+					if (!TryGetAceInfo(ace, out var trustee, out var accessMask))
+						continue;
+
+					if (!IsAccessMaskInteresting(accessMask, interestingAccessMask, useDefaultAccessMask))
+						continue;
+
+					var wellKnownSid = trustee.AsWellKnownSid();
+					if (!this.IncludeUninteresting.IsPresent && UninterestingSids.Contains(wellKnownSid))
+						continue;
+					if (this.IgnoreServiceSids.IsPresent && IsServiceSid(trustee))
+						continue;
+
+					var accessRights = BuildAccessRights(accessMask);
+					this.WriteObject(new TboRegWeakServiceInfo(
+						this.ServerName,
+						serviceName,
+						serviceSpec.KeyPath,
+						trustee.ToString(),
+						wellKnownSid,
+						ace.AceType,
+						accessMask,
+						FormatAccessMask(accessMask),
+						accessRights,
+						(ServiceAccess)accessMask,
+						(StandardAccessRights)accessMask));
+				}
+
+				return;
+			}
+
+			if (!OperatingSystem.IsWindows() || windowsDescriptor?.DiscretionaryAcl == null || windowsDescriptor.DiscretionaryAcl.Count == 0)
+				return;
+
+			foreach (GenericAce ace in windowsDescriptor.DiscretionaryAcl)
+			{
+				if (!TryGetWindowsAceInfo(ace, out var trustee, out var accessMask, out var aceType))
 					continue;
 
 				if (!IsAccessMaskInteresting(accessMask, interestingAccessMask, useDefaultAccessMask))
@@ -343,13 +348,52 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					serviceSpec.KeyPath,
 					trustee.ToString(),
 					wellKnownSid,
-					ace.AceType,
+					aceType,
 					accessMask,
 					FormatAccessMask(accessMask),
 					accessRights,
 					(ServiceAccess)accessMask,
 					(StandardAccessRights)accessMask));
 			}
+		}
+
+		private static bool TryGetWindowsAceInfo(
+			GenericAce ace,
+			out SecurityIdentifier trustee,
+			out uint accessMask,
+			out AccessControlEntryType aceType)
+		{
+			trustee = null!;
+			accessMask = 0;
+			aceType = AccessControlEntryType.AccessAllowed;
+
+			if (ace is not KnownAce known)
+				return false;
+
+			if (ace.AceType is not (AceType.AccessAllowed
+				or AceType.AccessAllowedObject
+				or AceType.AccessAllowedCallback
+				or AceType.AccessAllowedCallbackObject))
+			{
+				return false;
+			}
+
+			aceType = ace.AceType switch
+			{
+				AceType.AccessAllowed => AccessControlEntryType.AccessAllowed,
+				AceType.AccessAllowedObject => AccessControlEntryType.AccessAllowedObject,
+				AceType.AccessAllowedCallback => AccessControlEntryType.AccessAllowedCallback,
+				AceType.AccessAllowedCallbackObject => AccessControlEntryType.AcecssAllowedCallbackObject,
+				_ => AccessControlEntryType.AccessAllowed,
+			};
+
+			var sidValue = known.SecurityIdentifier?.Value;
+			if (string.IsNullOrWhiteSpace(sidValue))
+				return false;
+
+			trustee = SecurityIdentifier.Parse(sidValue);
+			accessMask = unchecked((uint)known.AccessMask);
+			return true;
 		}
 
 		private static bool TryGetAceInfo(
@@ -374,7 +418,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					trustee = simple.Trustee;
 					accessMask = simple.AccessMask;
 					return true;
-				case ObjectAce obj:
+				case Titanis.Winterop.Security.ObjectAce obj:
 					trustee = obj.Trustee;
 					accessMask = obj.AccessMask;
 					return true;
@@ -396,9 +440,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			IRegistryClient client,
 			RegistryPathSpec serviceSpec,
 			CancellationToken cancellationToken,
-			out SecurityDescriptor? descriptor)
+			out SecurityDescriptor? descriptor,
+			out RawSecurityDescriptor? windowsDescriptor)
 		{
 			descriptor = null;
+			windowsDescriptor = null;
 
 			try
 			{
@@ -416,7 +462,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (sdBytes == null || sdBytes.Length == 0)
 					return false;
 
-				descriptor = TBOSD.FromRegistryBinary(sdBytes);
+				try
+				{
+					descriptor = TBOSD.FromRegistryBinary(sdBytes);
+				}
+				catch (ArgumentException) when (OperatingSystem.IsWindows())
+				{
+					// Some service SDs (notably those containing custom SACL ACEs) are valid Windows SDs but
+					// aren't currently understood by Titanis.Winterop.Security.SecurityDescriptor.
+					// Fallback to the OS-backed RawSecurityDescriptor for weak-service triage.
+					windowsDescriptor = TBOSD.FromRegistryBinaryAsWindows(sdBytes);
+				}
+
 				return true;
 			}
 			catch (Win32Exception ex) when (IsMissingKey(ex))
@@ -425,21 +482,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			catch (Exception ex)
 			{
-				smb.LogException($"Find-TBORegWeakServices failed to read security descriptor for '{serviceSpec.KeyPath}'", ex);
-				this.WriteWarning($"Find-TBORegWeakServices failed to read security descriptor for '{serviceSpec.KeyPath}': {ex.Message}");
+				this.LogException(smb, $"Find-TBORegWeakServices failed to read security descriptor for '{serviceSpec.KeyPath}'", ex);
+				this.LogWarning(smb, $"Find-TBORegWeakServices failed to read security descriptor for '{serviceSpec.KeyPath}': {ex.Message}");
 				return false;
 			}
-		}
-
-		private static bool MatchesAnyPattern(IReadOnlyList<WildcardPattern> patterns, string value)
-		{
-			foreach (var pattern in patterns)
-			{
-				if (pattern.IsMatch(value))
-					return true;
-			}
-
-			return false;
 		}
 
 		private static bool IsMissingKey(Win32Exception ex)

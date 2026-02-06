@@ -94,43 +94,95 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			if (baseParams is null) throw new ArgumentNullException(nameof(baseParams));
 
-			SmbConnectionParameters merged = new SmbConnectionParameters()
-			{
-				HostName = this.HostName ?? baseParams.HostName,
-				RemotePort = this.RemotePort ?? baseParams.RemotePort,
-				Capabilities = this.Capabilities ?? baseParams.Capabilities,
-				NameResolveOptions = this.NameResolveOptions ?? baseParams.NameResolveOptions,
-				Dialects = this.Dialects ?? baseParams.Dialects,
-				SecurityMode = this.SecurityMode ?? baseParams.SecurityMode,
-				EnforceVersionCompliance = this.EnforceVersionCompliance.IsPresent ? this.EnforceVersionCompliance : baseParams.EnforceVersionCompliance,
-				RequireSecureNegotiate = this.RequireSecureNegotiate.IsPresent ? this.RequireSecureNegotiate : baseParams.RequireSecureNegotiate,
-				ClientGuid = this.ClientGuid ?? baseParams.ClientGuid,
-				PreauthSaltLength = this.PreauthSaltLength ?? baseParams.PreauthSaltLength,
-				Ciphers = this.Ciphers ?? baseParams.Ciphers,
-				SigningAlgorithms = this.SigningAlgorithms ?? baseParams.SigningAlgorithms,
-				CompressionCapabilities = this.CompressionCapabilities ?? baseParams.CompressionCapabilities,
-				CompressionAlgorithms = this.CompressionAlgorithms ?? baseParams.CompressionAlgorithms,
-				IncludeRootReparseInfo = this.IncludeRootReparseInfo ?? baseParams.IncludeRootReparseInfo,
-				RegistryRetryPolicy = this.RegistryRetryPolicy ?? baseParams.RegistryRetryPolicy,
-				RegistryRetryCount = this.RegistryRetryCount ?? baseParams.RegistryRetryCount,
-				RegistryRetryDelayMs = this.RegistryRetryDelayMs ?? baseParams.RegistryRetryDelayMs,
-				RegistryRetryMaxDelayMs = this.RegistryRetryMaxDelayMs ?? baseParams.RegistryRetryMaxDelayMs,
-				RegistryRetryJitterMs = this.RegistryRetryJitterMs ?? baseParams.RegistryRetryJitterMs,
+			static T? PreferRef<T>(T? value, T? fallback) where T : class
+				=> value ?? fallback;
 
-				UserName = this.UserName ?? baseParams.UserName,
-				UserDomain = this.UserDomain ?? baseParams.UserDomain,
-				Password = this.Password ?? baseParams.Password,
-				Kdc = this.Kdc ?? baseParams.Kdc,
-				KdcPort = this.KdcPort ?? baseParams.KdcPort,
-				NtlmHash = this.NtlmHash ?? baseParams.NtlmHash,
-				AesKey = this.AesKey ?? baseParams.AesKey,
-				DesKey = this.DesKey ?? baseParams.DesKey,
-				Tgt = this.Tgt ?? baseParams.Tgt,
-				Tickets = this.Tickets ?? baseParams.Tickets,
-				TicketCache = this.TicketCache ?? baseParams.TicketCache,
-				Workstation = this.Workstation ?? this.Workstation
+			static T? PreferVal<T>(T? value, T? fallback) where T : struct
+				=> value ?? fallback;
+
+			static SwitchParameter PreferSwitch(SwitchParameter value, SwitchParameter fallback)
+				=> value.IsPresent ? value : fallback;
+
+			SmbConnectionParameters merged = new SmbConnectionParameters
+			{
+				HostName = PreferRef(this.HostName, baseParams.HostName),
+				RemotePort = PreferVal(this.RemotePort, baseParams.RemotePort),
+				Capabilities = PreferVal(this.Capabilities, baseParams.Capabilities),
+				NameResolveOptions = PreferVal(this.NameResolveOptions, baseParams.NameResolveOptions),
+				Dialects = PreferRef(this.Dialects, baseParams.Dialects),
+				SecurityMode = PreferVal(this.SecurityMode, baseParams.SecurityMode),
+				EnforceVersionCompliance = PreferSwitch(this.EnforceVersionCompliance, baseParams.EnforceVersionCompliance),
+				RequireSecureNegotiate = PreferSwitch(this.RequireSecureNegotiate, baseParams.RequireSecureNegotiate),
+				ClientGuid = PreferVal(this.ClientGuid, baseParams.ClientGuid),
+				PreauthSaltLength = PreferVal(this.PreauthSaltLength, baseParams.PreauthSaltLength),
+				Ciphers = PreferRef(this.Ciphers, baseParams.Ciphers),
+				SigningAlgorithms = PreferRef(this.SigningAlgorithms, baseParams.SigningAlgorithms),
+				CompressionCapabilities = PreferVal(this.CompressionCapabilities, baseParams.CompressionCapabilities),
+				CompressionAlgorithms = PreferRef(this.CompressionAlgorithms, baseParams.CompressionAlgorithms),
+				IncludeRootReparseInfo = PreferVal(this.IncludeRootReparseInfo, baseParams.IncludeRootReparseInfo),
+				RegistryRetryPolicy = PreferVal(this.RegistryRetryPolicy, baseParams.RegistryRetryPolicy),
+				RegistryRetryCount = PreferVal(this.RegistryRetryCount, baseParams.RegistryRetryCount),
+				RegistryRetryDelayMs = PreferVal(this.RegistryRetryDelayMs, baseParams.RegistryRetryDelayMs),
+				RegistryRetryMaxDelayMs = PreferVal(this.RegistryRetryMaxDelayMs, baseParams.RegistryRetryMaxDelayMs),
+				RegistryRetryJitterMs = PreferVal(this.RegistryRetryJitterMs, baseParams.RegistryRetryJitterMs),
+
+				UserName = PreferRef(this.UserName, baseParams.UserName),
+				UserDomain = PreferRef(this.UserDomain, baseParams.UserDomain),
+				Password = PreferRef(this.Password, baseParams.Password),
+				Kdc = PreferRef(this.Kdc, baseParams.Kdc),
+				KdcPort = PreferVal(this.KdcPort, baseParams.KdcPort),
+				NtlmHash = PreferRef(this.NtlmHash, baseParams.NtlmHash),
+				AesKey = PreferRef(this.AesKey, baseParams.AesKey),
+				DesKey = PreferRef(this.DesKey, baseParams.DesKey),
+				Tgt = PreferRef(this.Tgt, baseParams.Tgt),
+				Tickets = PreferRef(this.Tickets, baseParams.Tickets),
+				TicketCache = PreferRef(this.TicketCache, baseParams.TicketCache),
+				Workstation = PreferRef(this.Workstation, baseParams.Workstation)
 			};
 			return merged;
+		}
+
+		internal static SmbConnectionParameters ResolveDefault(object? parameters)
+		{
+			return parameters as SmbConnectionParameters ?? GetDefault();
+		}
+
+		internal static SmbConnectionParameters ResolveOrDefault(ISmbProviderInfo smb, string serverName)
+		{
+			if (smb is null) throw new ArgumentNullException(nameof(smb));
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("Server name must be provided.", nameof(serverName));
+
+			var parameters = smb.GetConnectParametersFor(serverName, true) as SmbConnectionParameters;
+			return parameters ?? ResolveDefault(smb.DefaultConnectParameters);
+		}
+
+		internal static SmbConnectionParameters? TryGetServerSpecific(ISmbProviderInfo smb, string serverName)
+		{
+			if (smb is null) throw new ArgumentNullException(nameof(smb));
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("Server name must be provided.", nameof(serverName));
+
+			return smb.GetConnectParametersFor(serverName, false) as SmbConnectionParameters;
+		}
+
+		internal static SmbConnectionParameters MergeForServer(
+			ISmbProviderInfo smb,
+			string serverName,
+			SmbConnectionParameters overrides)
+		{
+			if (overrides is null) throw new ArgumentNullException(nameof(overrides));
+			var baseParams = ResolveOrDefault(smb, serverName);
+			return overrides.MergeOnto(baseParams);
+		}
+
+		internal static SmbConnectionParameters MergeDefaults(
+			ISmbProviderInfo smb,
+			SmbConnectionParameters overrides)
+		{
+			if (overrides is null) throw new ArgumentNullException(nameof(overrides));
+			var baseParams = ResolveDefault(smb.DefaultConnectParameters);
+			return overrides.MergeOnto(baseParams);
 		}
 
 		public Smb2ConnectionOptions ToConnectionOptions()
