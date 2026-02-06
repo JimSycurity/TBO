@@ -194,6 +194,29 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string TaskSchedulerMarker = "Domain:batch=TaskScheduler:Task:";
 
 		private static readonly byte[] TaskSchedulerMarkerBytes = System.Text.Encoding.Unicode.GetBytes(TaskSchedulerMarker);
+		private static readonly SecretDecodeOptions CredManDecodeOptions = new SecretDecodeOptions
+		{
+			MinTextLength = 1,
+			MinAsciiCount = 8,
+			MinAsciiRatio = 0.5,
+			MinPrintableRatio = 0.8,
+			MaxNonAsciiRatio = 0.4,
+			RejectReplacementChar = false,
+			AllowControlChars = true
+		};
+		private static readonly SecretDecodeOptions CredManFragmentOptions = new SecretDecodeOptions
+		{
+			MinTextLength = MinFragmentLength,
+			MinAsciiCount = 0,
+			MinAsciiRatio = 0.0,
+			MinPrintableRatio = 0.0,
+			MaxNonAsciiRatio = 1.0,
+			RejectReplacementChar = false,
+			AllowControlChars = true,
+			MinFragmentLength = MinFragmentLength,
+			MaxFragmentLength = MaxFragmentLength,
+			MaxFragments = MaxFragments
+		};
 
 		[Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true, ParameterSetName = PathParameterSet)]
 		public string ServerName { get; set; } = string.Empty;
@@ -306,7 +329,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				this.LogVerbose(smb, $"Get-TBOCredManEntry did not decrypt DPAPI blob for {path}: {decryptResult.FailureReason}");
 			}
-			var cleartextText = cleartextBytes != null ? TryDecodeCleartext(cleartextBytes) : null;
+			var cleartextText = cleartextBytes != null
+				? TryDecodeCleartext(cleartextBytes, message => this.LogVerbose(smb, message))
+				: null;
 			if (cleartextBytes != null && cleartextText == null)
 			{
 				this.LogVerbose(smb, $"Get-TBOCredManEntry could not decode cleartext from DPAPI payload for {path} (length {cleartextBytes.Length}).");
@@ -591,7 +616,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		private static string? TryDecodeCleartext(byte[] payload)
+		private static string? TryDecodeCleartext(byte[] payload, Action<string>? log = null)
 		{
 			if (payload.Length == 0)
 				return null;
@@ -605,30 +630,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (TryDecodeVaultPolicyCleartext(payload, out var vaultText))
 				return vaultText;
 
-			if (payload.Length % 2 == 0)
+			log ??= _ => { };
+			var decodeMessages = new List<string>();
+			var result = SecretDecoding.TryDecode(payload, CredManDecodeOptions, message => decodeMessages.Add(message));
+			if (!string.IsNullOrWhiteSpace(result.Text))
+				return result.Text;
+
+			if (decodeMessages.Count > 0)
 			{
-				try
-				{
-					var str = System.Text.Encoding.Unicode.GetString(payload).TrimEnd('\0');
-					if (IsLikelyText(str))
-						return str;
-				}
-				catch
-				{
-				}
+				foreach (var message in decodeMessages)
+					log(message);
 			}
 
-			try
-			{
-				var str = System.Text.Encoding.UTF8.GetString(payload).TrimEnd('\0');
-				if (IsLikelyText(str))
-					return str;
-			}
-			catch
-			{
-			}
-
-			return TryExtractReadableCleartext(payload);
+			var fragmentText = TryExtractReadableCleartext(payload);
+			if (fragmentText == null)
+				log("SecretDecoding fragment fallback did not produce readable text.");
+			return fragmentText;
 		}
 
 		private static string? TryDecodeVaultCredentialFile(
@@ -1389,164 +1406,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static string? TryExtractReadableCleartext(byte[] payload)
 		{
-			var fragments = new List<(string Fragment, int Offset)>();
-			ExtractUnicodeFragments(payload, fragments);
-			ExtractAsciiFragments(payload, fragments);
-
-			if (fragments.Count == 0)
-				return null;
-
-			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-			var scored = new List<(string Fragment, int Score, int Offset)>();
-			foreach (var fragment in fragments)
-			{
-				var normalized = NormalizeFragment(fragment.Fragment);
-				if (string.IsNullOrWhiteSpace(normalized))
-					continue;
-				if (!IsLikelyFragment(normalized))
-					continue;
-				if (!seen.Add(normalized))
-					continue;
-
-				var score = ScoreFragment(normalized);
-				scored.Add((normalized, score, fragment.Offset));
-			}
-
-			if (scored.Count == 0)
-				return null;
-
-			var selected = scored
-				.OrderByDescending(item => item.Score)
-				.ThenBy(item => item.Offset)
-				.Take(MaxFragments)
-				.Select(item => item.Fragment)
-				.ToList();
-
-			return selected.Count == 0 ? null : string.Join(Environment.NewLine, selected);
-		}
-
-		private static void ExtractUnicodeFragments(byte[] payload, List<(string Fragment, int Offset)> results)
-		{
-			if (payload.Length < 2)
-				return;
-
-			var builder = new System.Text.StringBuilder();
-			var startOffset = -1;
-
-			for (var i = 0; i + 1 < payload.Length; i += 2)
-			{
-				var ch = (char)(payload[i] | (payload[i + 1] << 8));
-				if (IsPrintableTextChar(ch))
-				{
-					if (startOffset < 0)
-						startOffset = i;
-					builder.Append(ch);
-					continue;
-				}
-
-				if (builder.Length > 0)
-				{
-					results.Add((builder.ToString(), startOffset));
-					builder.Clear();
-					startOffset = -1;
-				}
-			}
-
-			if (builder.Length > 0)
-				results.Add((builder.ToString(), startOffset));
-		}
-
-		private static void ExtractAsciiFragments(byte[] payload, List<(string Fragment, int Offset)> results)
-		{
-			if (payload.Length == 0)
-				return;
-
-			var builder = new System.Text.StringBuilder();
-			var startOffset = -1;
-
-			for (var i = 0; i < payload.Length; i++)
-			{
-				var value = payload[i];
-				if (value >= 0x20 && value <= 0x7E)
-				{
-					if (startOffset < 0)
-						startOffset = i;
-					builder.Append((char)value);
-					continue;
-				}
-
-				if (builder.Length > 0)
-				{
-					results.Add((builder.ToString(), startOffset));
-					builder.Clear();
-					startOffset = -1;
-				}
-			}
-
-			if (builder.Length > 0)
-				results.Add((builder.ToString(), startOffset));
-		}
-
-		private static bool IsLikelyFragment(string fragment)
-		{
-			if (string.IsNullOrWhiteSpace(fragment))
-				return false;
-
-			var trimmed = fragment.Trim();
-			if (trimmed.Length < MinFragmentLength)
-				return false;
-
-			var letters = 0;
-			var digits = 0;
-			foreach (var ch in trimmed)
-			{
-				if (char.IsLetter(ch))
-					letters++;
-				else if (char.IsDigit(ch))
-					digits++;
-			}
-
-			if (letters + digits < Math.Min(3, trimmed.Length))
-				return false;
-
-			return true;
-		}
-
-		private static string NormalizeFragment(string fragment)
-		{
-			var trimmed = fragment.Trim();
-			if (trimmed.Length > MaxFragmentLength)
-				return trimmed.Substring(0, MaxFragmentLength) + "...";
-			return trimmed;
-		}
-
-		private static int ScoreFragment(string fragment)
-		{
-			var score = fragment.Length;
-
-			if (fragment.IndexOf("target=", StringComparison.OrdinalIgnoreCase) >= 0)
-				score += 20;
-			if (fragment.Contains("://", StringComparison.Ordinal))
-				score += 10;
-			if (fragment.Contains('@'))
-				score += 6;
-			if (fragment.Contains('\\') || fragment.Contains('/'))
-				score += 4;
-			if (fragment.Contains('='))
-				score += 6;
-			if (fragment.Contains(':'))
-				score += 3;
-			if (fragment.IndexOf("authstate", StringComparison.OrdinalIgnoreCase) >= 0)
-				score -= 15;
-
-			return score;
-		}
-
-		private static bool IsPrintableTextChar(char ch)
-		{
-			if (ch == '\r' || ch == '\n' || ch == '\t')
-				return false;
-			return !char.IsControl(ch);
+			return SecretDecoding.TryExtractReadableFragments(payload, CredManFragmentOptions);
 		}
 
 		private static bool TryDecodeTaskSchedulerCleartext(byte[] payload, out string? text)
