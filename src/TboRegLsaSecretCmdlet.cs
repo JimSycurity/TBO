@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Management.Automation;
 using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Winterop;
@@ -14,6 +13,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		protected const string PolicyPath = @"SECURITY\Policy";
 		protected const string SecretsPath = @"SECURITY\Policy\Secrets";
+		private static readonly SecretDecodeOptions LsaSecretDecodeOptions = new SecretDecodeOptions
+		{
+			MinTextLength = 1,
+			MinAsciiCount = 1,
+			MinAsciiRatio = 0.6,
+			MinPrintableRatio = 0.6,
+			MaxNonAsciiRatio = 1.0,
+			RejectReplacementChar = true,
+			AllowControlChars = false
+		};
 
 		protected byte[] ExtractBootKey(IRegistryClient client, CancellationToken cancellationToken)
 		{
@@ -211,30 +220,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (payload.Length == 0)
 				return null;
 
-			if (payload.Length % 2 == 0)
-			{
-				try
-				{
-					var str = Encoding.Unicode.GetString(payload).TrimEnd('\0');
-					if (IsLikelySecretText(str))
-						return str;
-				}
-				catch
-				{
-				}
-			}
-
-			try
-			{
-				var str = Encoding.UTF8.GetString(payload).TrimEnd('\0');
-				if (IsLikelySecretText(str))
-					return str;
-			}
-			catch
-			{
-			}
-
-			return null;
+			var result = SecretDecoding.TryDecode(payload, LsaSecretDecodeOptions);
+			return result.Text;
 		}
 
 		protected static string? FormatSecretText(string? name, byte[] payload, string? decoded)
@@ -588,32 +575,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return score;
 		}
 
-		private static bool IsLikelySecretText(string? text)
-		{
-			if (string.IsNullOrWhiteSpace(text))
-				return false;
-
-			int asciiPrintable = 0;
-			int controlCount = 0;
-			int length = text.Length;
-
-			for (int i = 0; i < length; i++)
-			{
-				char c = text[i];
-				if (c == '\uFFFD')
-					return false;
-				if (char.IsControl(c) && c != '\r' && c != '\n' && c != '\t')
-					controlCount++;
-				if (c >= ' ' && c <= '~')
-					asciiPrintable++;
-			}
-
-			if (controlCount > 0 || asciiPrintable == 0)
-				return false;
-
-			double asciiRatio = (double)asciiPrintable / length;
-			return asciiRatio >= 0.6;
-		}
 		protected static byte[] TrimTrailingNulls(byte[] data)
 		{
 			int length = data.Length;
