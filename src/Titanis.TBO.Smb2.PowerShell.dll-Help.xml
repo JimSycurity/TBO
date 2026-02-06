@@ -150,7 +150,7 @@
       <command:noun>TBODpapiMasterKeys</command:noun>
       <maml:description>
         <maml:para>Decrypts DPAPI master keys.</maml:para>
-        <maml:para>Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decrypted via user SID plus password or NT hash.</maml:para>
+        <maml:para>Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decrypted via user SID plus password or NT hash. When present, CREDHIST is used to handle password changes for user-scoped keys.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>

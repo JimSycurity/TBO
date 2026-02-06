@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Management.Automation;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using Titanis;
 using Titanis.Net;
@@ -97,6 +100,54 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				catch (Exception ex)
 				{
 					throw new ArgumentException($"UserNtlmHash was invalid: {ex.Message}", nameof(this.UserNtlmHash), ex);
+				}
+			}
+
+			byte[]? userSha1Hash = null;
+			byte[]? userNtHashFromPassword = null;
+			if (!string.IsNullOrWhiteSpace(this.UserPassword))
+			{
+				var pwdUtf16 = Encoding.Unicode.GetBytes(this.UserPassword);
+				userSha1Hash = SHA1.HashData(pwdUtf16);
+
+				if (userNtHash == null)
+				{
+					userNtHashFromPassword = Titanis.Crypto.SlimHashAlgorithm
+						.ComputeHash<Titanis.Crypto.Md4Context>(pwdUtf16);
+				}
+			}
+
+			var credHistStartHashes = new List<(string Label, byte[] Hash)>();
+			if (userSha1Hash != null && userSha1Hash.Length > 0)
+				credHistStartHashes.Add(("SHA1(password)", userSha1Hash));
+			if (userNtHash != null && userNtHash.Length > 0)
+				credHistStartHashes.Add(("UserNtlmHash", userNtHash));
+			if (userNtHashFromPassword != null && userNtHashFromPassword.Length > 0)
+				credHistStartHashes.Add(("NT(password)", userNtHashFromPassword));
+
+			credHistStartHashes = credHistStartHashes
+				.GroupBy(x => Convert.ToHexString(x.Hash), StringComparer.OrdinalIgnoreCase)
+				.Select(g => g.First())
+				.ToList();
+
+			var credHistCache = new Dictionary<string, DpapiCredHistFile?>(StringComparer.OrdinalIgnoreCase);
+			DpapiCredHistFile? ResolveCredHistFile(string credHistPath)
+			{
+				if (credHistCache.TryGetValue(credHistPath, out var cached))
+					return cached;
+
+				try
+				{
+					var bytes = DpapiHelpers.ReadFileBytes(smb, UncPath.Parse(credHistPath), cancellationToken);
+					var parsed = DpapiCredHistFile.Parse(bytes);
+					credHistCache[credHistPath] = parsed;
+					return parsed;
+				}
+				catch (Exception ex)
+				{
+					this.WriteVerbose($"Get-TBODpapiMasterKeys could not load CREDHIST from {credHistPath}: {ex.Message}");
+					credHistCache[credHistPath] = null;
+					return null;
 				}
 			}
 
@@ -263,19 +314,110 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				DpapiMasterKeyDecryptionResult? bestResult = null;
 				string? usedKeyLabel = null;
 
-				foreach (var candidate in keyCandidates)
+				bool TryDecryptWithCandidates(IEnumerable<DpapiKeyMaterialCandidate> candidates)
 				{
-					var candidateResult = masterKeyFile.DecryptWithKey(candidate.KeyMaterial);
-					var candidateBest = candidateResult.MasterKeyResult?.Success == true
-						? candidateResult.MasterKeyResult
-						: candidateResult.BackupKeyResult;
+					foreach (var candidate in candidates)
+					{
+						var candidateResult = masterKeyFile.DecryptWithKey(candidate.KeyMaterial);
+						var candidateBest = candidateResult.MasterKeyResult?.Success == true
+							? candidateResult.MasterKeyResult
+							: candidateResult.BackupKeyResult;
 
-					decryptResult = candidateResult;
-					bestResult = candidateBest;
-					usedKeyLabel = candidate.Label;
+						decryptResult = candidateResult;
+						bestResult = candidateBest;
+						usedKeyLabel = candidate.Label;
 
-					if (candidateBest?.Success == true)
-						break;
+						if (candidateBest?.Success == true)
+							return true;
+					}
+
+					return false;
+				}
+
+				var decrypted = TryDecryptWithCandidates(keyCandidates);
+				if (!decrypted
+					&& isUserScope
+					&& hasUserMaterial
+					&& !string.IsNullOrWhiteSpace(location.UserSid)
+					&& credHistStartHashes.Count > 0
+					&& (masterKeyFile.CredHist != null || masterKeyFile.CredHistLength > 0))
+				{
+					var keyDir = Path.GetDirectoryName(location.KeyPath);
+					if (!string.IsNullOrWhiteSpace(keyDir))
+					{
+						var credHistPath = Path.Combine(keyDir, "CREDHIST");
+						var credHistFile = ResolveCredHistFile(credHistPath);
+						if (credHistFile != null)
+						{
+							var targetGuid = masterKeyFile.CredHist?.Guid;
+							var tried = new HashSet<string>(
+								keyCandidates.Select(c => Convert.ToHexString(c.KeyMaterial)),
+								StringComparer.OrdinalIgnoreCase);
+
+							foreach (var (label, startHash) in credHistStartHashes)
+							{
+								if (!credHistFile.TryDecryptChain(startHash, out var decryptedEntries, out var failureReason))
+								{
+									this.WriteVerbose($"Get-TBODpapiMasterKeys failed to decrypt CREDHIST ({label}) for {location.KeyPath}: {failureReason}");
+									continue;
+								}
+
+								var candidatesToUse = decryptedEntries;
+								if (targetGuid.HasValue)
+								{
+									var match = decryptedEntries.FirstOrDefault(e => e.Guid == targetGuid.Value);
+									if (match != null)
+										candidatesToUse = new[] { match };
+								}
+
+								var credCandidates = new List<DpapiKeyMaterialCandidate>();
+								foreach (var entry in candidatesToUse)
+								{
+									if (entry.PasswordHash != null && entry.PasswordHash.Length > 0)
+									{
+										credCandidates.Add(new DpapiKeyMaterialCandidate
+										{
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(pwdhash, SID)",
+											KeyMaterial = DpapiUserKeyDerivation.DeriveLocalPreKeyFromHash(location.UserSid, entry.PasswordHash),
+											Confidence = 0.8
+										});
+									}
+
+									if (entry.NtHash != null && entry.NtHash.Length == 16)
+									{
+										credCandidates.Add(new DpapiKeyMaterialCandidate
+										{
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(PBKDF2-SHA256(NT), SID)",
+											KeyMaterial = DpapiUserKeyDerivation.DeriveDomainPreKeyFromNtHash(location.UserSid, entry.NtHash),
+											Confidence = 0.7
+										});
+
+										credCandidates.Add(new DpapiKeyMaterialCandidate
+										{
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(NT, SID)",
+											KeyMaterial = DpapiUserKeyDerivation.DeriveFallbackPreKeyFromNtHash(location.UserSid, entry.NtHash),
+											Confidence = 0.4
+										});
+									}
+								}
+
+								credCandidates = credCandidates
+									.Where(c => c.KeyMaterial != null && c.KeyMaterial.Length > 0)
+									.Where(c => tried.Add(Convert.ToHexString(c.KeyMaterial)))
+									.OrderByDescending(c => c.Confidence)
+									.ThenBy(c => c.Label, StringComparer.OrdinalIgnoreCase)
+									.ToList();
+
+								if (credCandidates.Count == 0)
+									continue;
+
+								this.WriteVerbose($"Get-TBODpapiMasterKeys attempting CREDHIST-based decryption ({label}) for {location.KeyPath}.");
+								decrypted = TryDecryptWithCandidates(credCandidates);
+								if (decrypted)
+									break;
+							}
+						}
+					}
 				}
 
 				if (bestResult != null && bestResult.Success && bestResult.MasterKey != null)

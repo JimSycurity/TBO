@@ -510,6 +510,7 @@ Decrypts DPAPI master keys.
 Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decrypted via user SID plus password or NT hash.
 Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw DPAPI_SYSTEM key bytes.
 `UserNtlmHash` accepts either a 32-hex NT hash or an `LM:NT` string (only the NT portion is used for DPAPI).
+If a user-scoped master key cannot be decrypted with the current password/hash, `Get-TBODpapiMasterKeys` will attempt to use `CREDHIST` (when present) to handle password changes.
 
 ```powershell
 Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |

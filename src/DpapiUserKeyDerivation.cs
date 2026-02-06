@@ -29,17 +29,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			password = string.IsNullOrWhiteSpace(password) ? null : password;
 			ntHash = (ntHash != null && ntHash.Length > 0) ? ntHash : null;
 
-			var sidUtf16 = Encoding.Unicode.GetBytes(userSid);
-			var sidUtf16Final = new byte[sidUtf16.Length + 2]; // include UTF-16 NUL terminator
-			Buffer.BlockCopy(sidUtf16, 0, sidUtf16Final, 0, sidUtf16.Length);
-
 			var candidates = new List<DpapiKeyMaterialCandidate>();
 
 			if (password != null)
 			{
 				var passwordUtf16 = Encoding.Unicode.GetBytes(password);
 				var sha1Password = SHA1.HashData(passwordUtf16);
-				var localPreKey = HmacSha1(sha1Password, sidUtf16Final);
+				var localPreKey = DeriveLocalPreKeyFromHash(userSid, sha1Password);
 				candidates.Add(new DpapiKeyMaterialCandidate
 				{
 					Label = "Local: HMAC-SHA1(SHA1(password), SID)",
@@ -59,8 +55,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				// Domain-style DPAPI: derive a 16-byte credkey via PBKDF2-HMAC-SHA256(ntHash, sid, ...),
 				// then prekey = HMAC-SHA1(credkey, sid\0).
-				var credKey = DeriveCredKeyFromNtHash(ntHash, sidUtf16);
-				var domainPreKey = HmacSha1(credKey, sidUtf16Final);
+				var domainPreKey = DeriveDomainPreKeyFromNtHash(userSid, ntHash);
 				candidates.Add(new DpapiKeyMaterialCandidate
 				{
 					Label = "Domain: HMAC-SHA1(PBKDF2-SHA256(NT), SID)",
@@ -69,7 +64,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				});
 
 				// Fallback candidate sometimes referenced in tooling.
-				var ntHashHmac = HmacSha1(ntHash, sidUtf16Final);
+				var ntHashHmac = DeriveFallbackPreKeyFromNtHash(userSid, ntHash);
 				candidates.Add(new DpapiKeyMaterialCandidate
 				{
 					Label = "Fallback: HMAC-SHA1(NT, SID)",
@@ -79,6 +74,27 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return Deduplicate(candidates);
+		}
+
+		internal static byte[] DeriveLocalPreKeyFromHash(string userSid, byte[] passwordHash)
+		{
+			var sidUtf16Final = EncodeSidUtf16WithNullTerminator(userSid);
+			return HmacSha1(passwordHash, sidUtf16Final);
+		}
+
+		internal static byte[] DeriveDomainPreKeyFromNtHash(string userSid, byte[] ntHash)
+		{
+			var sidUtf16 = Encoding.Unicode.GetBytes(userSid);
+			var sidUtf16Final = EncodeSidUtf16WithNullTerminator(sidUtf16);
+
+			var credKey = DeriveCredKeyFromNtHash(ntHash, sidUtf16);
+			return HmacSha1(credKey, sidUtf16Final);
+		}
+
+		internal static byte[] DeriveFallbackPreKeyFromNtHash(string userSid, byte[] ntHash)
+		{
+			var sidUtf16Final = EncodeSidUtf16WithNullTerminator(userSid);
+			return HmacSha1(ntHash, sidUtf16Final);
 		}
 
 		private static byte[] DeriveCredKeyFromNtHash(byte[] ntHash, byte[] sidUtf16)
@@ -102,6 +118,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			using var hmac = new HMACSHA1(key);
 			return hmac.ComputeHash(data);
+		}
+
+		private static byte[] EncodeSidUtf16WithNullTerminator(string userSid)
+		{
+			var sidUtf16 = Encoding.Unicode.GetBytes(userSid);
+			return EncodeSidUtf16WithNullTerminator(sidUtf16);
+		}
+
+		private static byte[] EncodeSidUtf16WithNullTerminator(byte[] sidUtf16)
+		{
+			var sidUtf16Final = new byte[sidUtf16.Length + 2]; // include UTF-16 NUL terminator
+			Buffer.BlockCopy(sidUtf16, 0, sidUtf16Final, 0, sidUtf16.Length);
+			return sidUtf16Final;
 		}
 
 		private static IReadOnlyList<DpapiKeyMaterialCandidate> Deduplicate(List<DpapiKeyMaterialCandidate> candidates)
@@ -128,4 +157,3 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 	}
 }
-
