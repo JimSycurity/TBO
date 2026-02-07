@@ -50,7 +50,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static RegistryAccessRights ResolveRegistryAccess(SecurityInfo sections)
 		{
-			var access = ReadControl;
+			// Some servers appear to require at least one "registry" right (KEY_QUERY_VALUE, etc.)
+			// even when the intended operation is purely standard-rights based (WRITE_DAC/WRITE_OWNER).
+			// QueryValue is a safe baseline and avoids handle-access oddities.
+			var access = ReadControl | RegistryAccessRights.QueryValue;
 			if (sections.HasFlag(SecurityInfo.Dacl))
 				access |= WriteDac;
 			if (sections.HasFlag(SecurityInfo.Owner) || sections.HasFlag(SecurityInfo.Group))
