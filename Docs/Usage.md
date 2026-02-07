@@ -315,11 +315,11 @@ Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
 
 #### Set-TBORegSecurityDescriptor
 
-Writes a security descriptor to a remote registry key. Input can be a portable `SecurityDescriptor`, SDDL string, raw bytes, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only. Use `-Sections` to limit which parts are applied.
+Writes a security descriptor to a remote registry key. Input can be a portable `SecurityDescriptor`, SDDL string, raw bytes, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only. Use `-Sections` to limit which parts are applied (default: `Dacl`).
 
 ```powershell
-$sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
-Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd
+$sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -Sections Dacl
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd -Sections Dacl
 
 $sddl = "O:BAG:BAD:(A;;KR;;;SY)"
 Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sddl -Sections Dacl

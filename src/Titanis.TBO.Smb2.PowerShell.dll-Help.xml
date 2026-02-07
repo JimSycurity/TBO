@@ -3230,7 +3230,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:parameter>
         <maml:name>Sections</maml:name>
         <maml:description>
-          <maml:para>Security descriptor sections to apply (default: Owner, Group, DACL).</maml:para>
+          <maml:para>Security descriptor sections to apply (default: DACL).</maml:para>
         </maml:description>
         <command:parameterValue>SecurityInfo</command:parameterValue>
       </command:parameter>
@@ -3238,8 +3238,8 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
     <command:examples>
       <command:example>
         <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
-        <maml:code>$sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
-Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd</maml:code>
+        <maml:code>$sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -Sections Dacl
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd -Sections Dacl</maml:code>
         <maml:remarks>
           <maml:para>Reads and then writes a security descriptor.</maml:para>
         </maml:remarks>

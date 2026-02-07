@@ -24,7 +24,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public object SecurityDescriptor { get; set; } = null!;
 
 		[Parameter]
-		public SecurityInfo Sections { get; set; } = SecurityInfo.Owner | SecurityInfo.Group | SecurityInfo.Dacl;
+		public SecurityInfo Sections { get; set; } = SecurityInfo.Dacl;
 
 		internal IRegistrySecurityDescriptorWriter SecurityDescriptorWriter { get; set; } = new RegistryKeySecurityDescriptorWriter();
 
