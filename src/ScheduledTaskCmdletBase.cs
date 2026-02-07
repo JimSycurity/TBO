@@ -27,6 +27,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		public string TaskId { get; init; } = string.Empty;
 		public DateTime? RegistryLastWriteTime { get; init; }
+		public byte[]? TaskSecurityDescriptorBytes { get; init; }
 	}
 
 	public abstract class ScheduledTaskCmdletBase : TboRegCmdlet
@@ -266,6 +267,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				using (subkey)
 				{
 					var taskId = TryReadTaskId(subkey, cancellationToken);
+					var taskSdBytes = TryReadTaskSecurityDescriptorBytes(subkey, cancellationToken);
 					DateTime? lastWrite = null;
 					try
 					{
@@ -280,12 +282,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						entries[NormalizeRelativePath(childRelative)] = new TaskCacheEntry
 						{
 							TaskId = taskId,
-							RegistryLastWriteTime = lastWrite
+							RegistryLastWriteTime = lastWrite,
+							TaskSecurityDescriptorBytes = taskSdBytes
 						};
 					}
 
 					CollectTaskCacheEntries(subkey, childRelative, entries, cancellationToken, ref pipeBusyCount);
 				}
+			}
+		}
+
+		private static byte[]? TryReadTaskSecurityDescriptorBytes(IRegistryKey key, CancellationToken cancellationToken)
+		{
+			try
+			{
+				// TaskCache leaf keys store the task's security descriptor as a REG_BINARY value named "SD".
+				// The value is a binary (self-relative) security descriptor (same bytes used by Win32_SecurityDescriptorHelper).
+				var valueInfo = key.GetValue("SD", cancellationToken).GetAwaiter().GetResult();
+				return RegistryHelpers.ExtractValueBytes(valueInfo);
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex) || ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
+			{
+				return null;
+			}
+			catch
+			{
+				return null;
 			}
 		}
 

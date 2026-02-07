@@ -36,6 +36,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public TboScheduledTaskSettingsInfo? Settings { get; init; }
 		public object? SecurityDescriptor { get; init; }
 		public byte[]? SecurityDescriptorBytes { get; init; }
+		public object? TaskSecurityDescriptor { get; init; }
+		public byte[]? TaskSecurityDescriptorBytes { get; init; }
 	}
 
 	public sealed class TboScheduledTaskTriggerInfo
@@ -184,6 +186,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					taskFile.LastWriteTime,
 					taskFile.LastChangeTime,
 					cacheEntry?.RegistryLastWriteTime,
+					cacheEntry?.TaskSecurityDescriptorBytes,
 					format,
 					cancellationToken);
 			}
@@ -200,6 +203,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				? NormalizeTaskPath(input.TaskName)
 				: input.TaskPath;
 			var taskFilePath = ResolveTaskFilePath(serverName, input.TaskFilePath, taskPath);
+			var taskSdBytes = TryReadTaskCacheSecurityDescriptorBytes(smb, taskPath, cancellationToken);
 
 			WriteTaskDetails(
 				smb,
@@ -212,6 +216,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				input.FileLastWriteTime,
 				input.FileLastChangeTime,
 				input.RegistryLastWriteTime,
+				taskSdBytes,
 				format,
 				cancellationToken);
 		}
@@ -227,6 +232,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			DateTime? lastWriteTime,
 			DateTime? lastChangeTime,
 			DateTime? registryLastWriteTime,
+			byte[]? taskSecurityDescriptorBytes,
 			SecurityDescriptorOutputFormat format,
 			CancellationToken cancellationToken)
 		{
@@ -254,6 +260,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 			}
 
+			object? taskSecurityDescriptor = null;
+			if (taskSecurityDescriptorBytes != null && taskSecurityDescriptorBytes.Length > 0)
+			{
+				try
+				{
+					var sd = TBOSD.FromRegistryBinary(taskSecurityDescriptorBytes);
+					taskSecurityDescriptor = SecurityDescriptorHelpers.Format(sd, format);
+				}
+				catch (Exception ex)
+				{
+					this.LogException(smb, $"Get-TBOScheduledTaskDetails failed to parse TaskCache security descriptor for '{taskPath}'", ex);
+				}
+			}
+
 			this.WriteObject(new TboScheduledTaskDetailsInfo
 			{
 				ServerName = serverName,
@@ -271,7 +291,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				Principal = parsed.Principal,
 				Settings = parsed.Settings,
 				SecurityDescriptor = fileDetails?.SecurityDescriptor,
-				SecurityDescriptorBytes = fileDetails?.SecurityDescriptorBytes
+				SecurityDescriptorBytes = fileDetails?.SecurityDescriptorBytes,
+				TaskSecurityDescriptor = taskSecurityDescriptor,
+				TaskSecurityDescriptorBytes = taskSecurityDescriptorBytes
 			});
 		}
 
@@ -644,6 +666,49 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var relativePath = NormalizeRelativePath(taskPath);
 			var root = UncPath.Parse($"\\\\{serverName}\\C$\\{TasksFolderPath}");
 			return root.Append(relativePath);
+		}
+
+		private byte[]? TryReadTaskCacheSecurityDescriptorBytes(ISmbProviderInfo smb, string taskPath, CancellationToken cancellationToken)
+		{
+			try
+			{
+				return ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					var relative = NormalizeRelativePath(taskPath);
+					var subkeyPath = string.IsNullOrWhiteSpace(relative)
+						? TaskCacheTreePath
+						: $"{TaskCacheTreePath}\\{relative}";
+
+					var spec = new RegistryPathSpec(
+						RegistryRootKey.LocalMachine,
+						RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
+						subkeyPath);
+
+					using var key = OpenRegistryKey(
+						session.Client,
+						spec,
+						RegistryAccessRights.QueryValue,
+						RegistryAccessRights.EnumerateSubkeys,
+						cancellationToken);
+
+					var valueInfo = key.GetValue("SD", cancellationToken).GetAwaiter().GetResult();
+					return RegistryHelpers.ExtractValueBytes(valueInfo);
+				});
+			}
+			catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY)
+			{
+				this.LogWarning(smb, $"Get-TBOScheduledTaskDetails could not read TaskCache security descriptor for '{taskPath}' (STATUS_PIPE_BUSY).");
+				return null;
+			}
+			catch (Win32Exception ex) when (IsMissingKey(ex) || ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
+			{
+				return null;
+			}
+			catch (Exception ex)
+			{
+				this.LogException(smb, $"Get-TBOScheduledTaskDetails failed to read TaskCache security descriptor for '{taskPath}'", ex);
+				return null;
+			}
 		}
 
 	}

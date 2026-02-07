@@ -3594,7 +3594,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:verb>Get</command:verb>
       <command:noun>TBOScheduledTaskDetails</command:noun>
       <maml:description>
-        <maml:para>Reads scheduled task XML definitions, parses triggers/actions/principal/settings, and returns the task file security descriptor.</maml:para>
+        <maml:para>Reads scheduled task XML definitions, parses triggers/actions/principal/settings, and returns both the task file security descriptor and the TaskCache registry security descriptor.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -3673,14 +3673,14 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:parameter>
         <maml:name>AsSddl</maml:name>
         <maml:description>
-          <maml:para>Return the security descriptor as an SDDL string.</maml:para>
+          <maml:para>Return security descriptors as SDDL strings.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>AsWindows</maml:name>
         <maml:description>
-          <maml:para>Return the security descriptor as a Windows RawSecurityDescriptor.</maml:para>
+          <maml:para>Return security descriptors as Windows RawSecurityDescriptor objects.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
@@ -3705,6 +3705,90 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         <maml:code>Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\Microsoft\\Windows\\Defrag\\*' -AsSddl</maml:code>
         <maml:remarks>
           <maml:para>Returns task details and security descriptors as SDDL strings.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Set-TBOScheduledTaskSecurityDescriptor</command:name>
+      <command:verb>Set</command:verb>
+      <command:noun>TBOScheduledTaskSecurityDescriptor</command:noun>
+      <maml:description>
+        <maml:para>Writes the TaskCache registry security descriptor (SD value) for a scheduled task.</maml:para>
+        <maml:para>Accepts portable SecurityDescriptor instances, SDDL strings, raw byte arrays, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Set-TBOScheduledTaskSecurityDescriptor</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="2">
+          <maml:name>SecurityDescriptor</maml:name>
+          <command:parameterValue>Object</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Set-TBOScheduledTaskSecurityDescriptor</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>InputObject</maml:name>
+          <command:parameterValue>TboScheduledTaskDetailsInfo</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="2">
+          <maml:name>SecurityDescriptor</maml:name>
+          <command:parameterValue>Object</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Task path (for example, \Microsoft\Windows\Defrag\ScheduledDefrag).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>InputObject</maml:name>
+        <maml:description>
+          <maml:para>Input task details from Get-TBOScheduledTaskDetails.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboScheduledTaskDetailsInfo</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="2">
+        <maml:name>SecurityDescriptor</maml:name>
+        <maml:description>
+          <maml:para>Security descriptor to write. Accepts portable SecurityDescriptor instances, SDDL strings, raw byte arrays, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only.</maml:para>
+        </maml:description>
+        <command:parameterValue>Object</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$task = Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask' -AsSddl
+Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.TaskPath -SecurityDescriptor $task.TaskSecurityDescriptor</maml:code>
+        <maml:remarks>
+          <maml:para>Reads the TaskCache security descriptor as SDDL and writes it back (edit the SDDL string to modify permissions).</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

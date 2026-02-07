@@ -36,8 +36,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw new ArgumentException("Sections must include at least one SecurityInfo flag.", nameof(this.Sections));
 
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-			var resolvedDescriptor = ResolveSecurityDescriptor(this.SecurityDescriptor);
-			var securityInfo = ResolveSecurityInfo(resolvedDescriptor, this.Sections);
+			var resolvedDescriptor = SecurityDescriptorInputHelpers.ResolveSecurityDescriptor(this.SecurityDescriptor, allowRegistryBinaryBytes: false);
+			var securityInfo = SecurityDescriptorInputHelpers.ResolveSecurityInfo(resolvedDescriptor, this.Sections);
 			var access = ResolveRegistryAccess(securityInfo);
 			var rootAccess = ResolveRootRegistryAccess(parsedPath, access);
 
@@ -100,57 +100,5 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return access;
 		}
 
-		private static SecurityDescriptor ResolveSecurityDescriptor(object input)
-		{
-			if (input is PSObject psObject)
-				input = psObject.BaseObject;
-
-			switch (input)
-			{
-				case SecurityDescriptor descriptor:
-					return descriptor;
-				case byte[] bytes:
-					return SecurityDescriptorHelpers.FromBytes(bytes);
-				case string sddl:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("SDDL input is only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromSddl(sddl);
-				case RawSecurityDescriptor rawDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromWindowsSecurityDescriptor(rawDescriptor);
-				case CommonSecurityDescriptor commonDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromWindowsSecurityDescriptor(commonDescriptor);
-				case GenericSecurityDescriptor genericDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					var buffer = new byte[genericDescriptor.BinaryLength];
-					genericDescriptor.GetBinaryForm(buffer, 0);
-					return SecurityDescriptorHelpers.FromBytes(buffer);
-				default:
-					throw new ArgumentException("SecurityDescriptor must be a Titanis SecurityDescriptor, SDDL string (Windows only), raw byte array, or Windows security descriptor.", nameof(input));
-			}
-		}
-
-		private static SecurityInfo ResolveSecurityInfo(SecurityDescriptor securityDescriptor, SecurityInfo requestedSections)
-		{
-			if (securityDescriptor is null) throw new ArgumentNullException(nameof(securityDescriptor));
-
-			if (requestedSections == SecurityInfo.None)
-				throw new ArgumentException("Sections must include at least one SecurityInfo flag.", nameof(requestedSections));
-
-			if (requestedSections.HasFlag(SecurityInfo.Owner) && securityDescriptor.Owner == null)
-				throw new ArgumentException("Security descriptor does not include an owner section.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Group) && securityDescriptor.Group == null)
-				throw new ArgumentException("Security descriptor does not include a group section.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Dacl) && securityDescriptor.Dacl == null)
-				throw new ArgumentException("Security descriptor does not include a DACL.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Sacl) && securityDescriptor.Sacl == null)
-				throw new ArgumentException("Security descriptor does not include a SACL.", nameof(securityDescriptor));
-
-			return requestedSections;
-		}
 	}
 }

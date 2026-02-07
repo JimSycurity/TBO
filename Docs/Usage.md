@@ -422,13 +422,28 @@ Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\Mi
 
 #### Get-TBOScheduledTaskDetails
 
-Reads scheduled task XML definitions, parses triggers/actions/principal/settings, and returns the task file security descriptor.
-Use `-AsSddl` or `-AsWindows` (Windows only) to change the security descriptor format.
+Reads scheduled task XML definitions, parses triggers/actions/principal/settings, and returns both task security descriptors:
+
+- Task file security descriptor (`SecurityDescriptor` / `SecurityDescriptorBytes`) for `C:\Windows\System32\Tasks\...`
+- TaskCache registry security descriptor (`TaskSecurityDescriptor` / `TaskSecurityDescriptorBytes`) stored under `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree\<task>\SD`
+
+Use `-AsSddl` or `-AsWindows` (Windows only) to change the security descriptor format (applies to both security descriptor properties).
 
 ```powershell
 Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask'
 Get-TBOScheduledTasks -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask' | Get-TBOScheduledTaskDetails
 Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\Microsoft\Windows\Defrag\*' -AsSddl
+```
+
+#### Set-TBOScheduledTaskSecurityDescriptor
+
+Writes the TaskCache registry security descriptor for a task. This modifies the security descriptor stored at `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tree\<task>\SD` and does not change the ACL on the task file in `C:\Windows\System32\Tasks`.
+
+```powershell
+# View the TaskCache SD as SDDL, then write it back (edit the SDDL to modify permissions).
+$task = Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask' -AsSddl
+$task.TaskSecurityDescriptor
+Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.TaskPath -SecurityDescriptor $task.TaskSecurityDescriptor -Confirm:$false
 ```
 
 #### Get-TBORegTCPIP
