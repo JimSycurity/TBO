@@ -997,6 +997,104 @@ Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys
 
   <command:command>
     <command:details>
+      <command:name>Get-TBOChromiumStateKeys</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOChromiumStateKeys</command:noun>
+      <maml:description>
+        <maml:para>Reads a Chromium-based browser Local State file over SMB and decrypts os_crypt.encrypted_key to obtain the AES state key used for AES-GCM v10/v11 secrets.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOChromiumStateKeys</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Browser</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserName</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Browser</maml:name>
+        <maml:description>
+          <maml:para>Which Chromium browser to target (default: Chrome). Valid values: Chrome, Edge, Brave, Chromium.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserName</maml:name>
+        <maml:description>
+          <maml:para>Optional user profile filters (wildcards supported).</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>DPAPI master key objects (from Get-TBODpapiMasterKeys). Entries are matched by MasterKeyGuid.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts Chromium state keys for accessible user profiles (default browser: Chrome).</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -Browser Edge -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Filters to a specific user and targets Microsoft Edge instead of Google Chrome.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Browser Brave -MasterKeys $userKeys |
+  Select-Object UserName, Browser, StateKeyHex, MasterKeyGuid, HmacValidated, FailureReason</maml:code>
+        <maml:remarks>
+          <maml:para>Targets Brave and selects common fields.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBOSafariKeychain</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBOSafariKeychain</command:noun>

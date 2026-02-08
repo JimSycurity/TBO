@@ -183,3 +183,69 @@ Describe 'Chrome helpers (fake SMB file system)' {
 		$chromeProfiles | Should -Be @()
 	}
 }
+
+Describe 'Chrome Local State parsing' {
+	It 'TryParseEncryptedStateKey parses os_crypt.encrypted_key from Local State JSON' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for Local State parsing tests.'
+			return
+		}
+
+		if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+			Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+			return
+		}
+
+		$asm = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem].Assembly
+		$cacheType = $asm.GetType('Titanis.Tbo.Smb2.PowerShell.ChromeStateKeyCache', $false)
+		$cacheType | Should -Not -BeNullOrEmpty
+
+		$flags = [System.Reflection.BindingFlags]::Static -bor [System.Reflection.BindingFlags]::NonPublic
+		$method = $cacheType.GetMethods($flags) | Where-Object { $_.Name -eq 'TryParseEncryptedStateKey' } | Select-Object -First 1
+		$method | Should -Not -BeNullOrEmpty
+
+		$payload = [byte[]](0x44, 0x50, 0x41, 0x50, 0x49, 0x01, 0x02, 0x03) # "DPAPI" + 0x01 0x02 0x03
+		$base64 = [Convert]::ToBase64String($payload)
+		$json = "{`"os_crypt`": {`"encrypted_key`": `"$base64`"}}"
+		$localStateBytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+
+		$args = @($localStateBytes, [byte[]]::new(0), $null)
+		$ok = $method.Invoke($null, $args)
+		$ok | Should -BeTrue
+		$args[1] | Should -Be $payload
+		$args[2] | Should -BeNullOrEmpty
+	}
+
+	It 'TryStripDpapiHeader strips the DPAPI prefix from Local State encrypted_key bytes' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for Local State parsing tests.'
+			return
+		}
+
+		if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+			Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+			return
+		}
+
+		$asm = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem].Assembly
+		$chromeHelpersType = $asm.GetType('Titanis.Tbo.Smb2.PowerShell.ChromeHelpers', $false)
+		$chromeHelpersType | Should -Not -BeNullOrEmpty
+
+		$flags = [System.Reflection.BindingFlags]::Static -bor [System.Reflection.BindingFlags]::NonPublic
+		$method = $chromeHelpersType.GetMethods($flags) | Where-Object { $_.Name -eq 'TryStripDpapiHeader' } | Select-Object -First 1
+		$method | Should -Not -BeNullOrEmpty
+
+		$payload = [byte[]](0x44, 0x50, 0x41, 0x50, 0x49, 0x01, 0x02, 0x03) # "DPAPI" + 0x01 0x02 0x03
+		$args = @($payload, [byte[]]::new(0), $null)
+		$ok = $method.Invoke($null, $args)
+		$ok | Should -BeTrue
+		$args[1] | Should -Be ([byte[]](0x01, 0x02, 0x03))
+		$args[2] | Should -BeNullOrEmpty
+
+		$badPayload = [System.Text.Encoding]::UTF8.GetBytes('NOPE')
+		$argsBad = @($badPayload, [byte[]]::new(0), $null)
+		$okBad = $method.Invoke($null, $argsBad)
+		$okBad | Should -BeFalse
+		$argsBad[2] | Should -Be 'DPAPI header missing.'
+	}
+}

