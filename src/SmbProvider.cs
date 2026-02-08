@@ -137,6 +137,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (string.IsNullOrEmpty(uncPath.ShareName))
 					throw new ArgumentException("The UNC path must include a share name");
 
+				// Local NTFS mode uses admin-share-style UNC paths to keep provider/cmdlet UX consistent,
+				// but must not attempt to create an SMB connection to the local machine. This allows
+				// `New-PSDrive -PSProvider TBO.Smb2 -Root \\localhost\\C$` to work without network calls.
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsLocalHost(uncPath.ServerName))
+				{
+					if (!LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+						throw new NotSupportedException("Local-mode PSDrive roots must be a <DriveLetter>$ admin share (ex: \\\\localhost\\C$).");
+
+					this.LogDiagnostic($"TBO: Creating local-mode PSDrive for '{drive.Root}' (bypassing SMB connect).");
+					return new SmbShareDriveInfo(drive, this, uncPath, share: null);
+				}
+
 				var client = this.SmbClient;
 				var share = client.GetShare(uncPath, cancellationToken).Result;
 				try
