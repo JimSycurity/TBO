@@ -746,7 +746,7 @@ Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -Mast
       <command:verb>Get</command:verb>
       <command:noun>TBOChromeLogins</command:noun>
       <maml:description>
-        <maml:para>Reads Chrome's Login Data SQLite database over SMB and decrypts saved passwords.</maml:para>
+        <maml:para>Reads a Chromium-based browser's Login Data SQLite database over SMB and decrypts saved passwords.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -758,6 +758,10 @@ Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -Mast
         </command:parameter>
         <command:parameter required="false">
           <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Browser</maml:name>
           <command:parameterValue>String</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
@@ -794,16 +798,23 @@ Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -Mast
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
       <command:parameter>
+        <maml:name>Browser</maml:name>
+        <maml:description>
+          <maml:para>Which Chromium browser to target (default: Chrome). Valid values: Chrome, Edge, Brave, Chromium.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
         <maml:name>ProfileName</maml:name>
         <maml:description>
-          <maml:para>Chrome profile folder name under User Data (default: Default).</maml:para>
+          <maml:para>Browser profile folder name under User Data (default: Default).</maml:para>
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>AllProfiles</maml:name>
         <maml:description>
-          <maml:para>Enumerate all Chrome profile folders under User Data (Default, Profile *, Guest Profile, System Profile).</maml:para>
+          <maml:para>Enumerate all browser profile folders under User Data (Default, Profile *, Guest Profile, System Profile).</maml:para>
           <maml:para>When set, ProfileName is ignored.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
@@ -846,6 +857,13 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
           <maml:para>Filters to a specific user and non-default Chrome profile folder.</maml:para>
         </maml:remarks>
       </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -AllProfiles -Browser Edge -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Targets Microsoft Edge user profiles instead of Google Chrome.</maml:para>
+        </maml:remarks>
+      </command:example>
     </command:examples>
   </command:command>
 
@@ -855,7 +873,7 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
       <command:verb>Get</command:verb>
       <command:noun>TBOChromeCookies</command:noun>
       <maml:description>
-        <maml:para>Reads Chrome's Cookies SQLite database over SMB and decrypts cookie values.</maml:para>
+        <maml:para>Reads a Chromium-based browser's Cookies SQLite database over SMB and decrypts cookie values.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -867,6 +885,10 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
         </command:parameter>
         <command:parameter required="false">
           <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Browser</maml:name>
           <command:parameterValue>String</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
@@ -903,16 +925,23 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
       <command:parameter>
+        <maml:name>Browser</maml:name>
+        <maml:description>
+          <maml:para>Which Chromium browser to target (default: Chrome). Valid values: Chrome, Edge, Brave, Chromium.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
         <maml:name>ProfileName</maml:name>
         <maml:description>
-          <maml:para>Chrome profile folder name under User Data (default: Default).</maml:para>
+          <maml:para>Browser profile folder name under User Data (default: Default).</maml:para>
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>AllProfiles</maml:name>
         <maml:description>
-          <maml:para>Enumerate all Chrome profile folders under User Data (Default, Profile *, Guest Profile, System Profile).</maml:para>
+          <maml:para>Enumerate all browser profile folders under User Data (Default, Profile *, Guest Profile, System Profile).</maml:para>
           <maml:para>When set, ProfileName is ignored.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
@@ -954,6 +983,13 @@ Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys
   Select-Object HostKey, Name, Value, ExpiresUtc</maml:code>
         <maml:remarks>
           <maml:para>Filters to a specific user and selects common fields.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -AllProfiles -Browser Edge -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Targets Microsoft Edge user profiles instead of Google Chrome.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

