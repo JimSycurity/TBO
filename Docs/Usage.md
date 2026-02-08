@@ -55,10 +55,13 @@ On Windows, `Get-Acl` and `Set-Acl` work with `tbo:\` and provider-qualified UNC
 ```powershell
 # Local NTFS mode (Windows only) bypasses SMB by using \\localhost\<Drive>$ UNC paths.
 New-PSDrive -Name tbo-local -PSProvider 'TBO.Smb2' -Root '\\localhost\C$'
+New-Item tbo-local:\Temp\tbo-ilz-test -ItemType Directory
+New-Item tbo-local:\Temp\tbo-ilz-test\file.txt -ItemType File
 Set-Content tbo-local:\Temp\tbo-local.txt -Value 'testing'
 Add-Content tbo-local:\Temp\tbo-local.txt -Value 'more'
 Get-Content tbo-local:\Temp\tbo-local.txt
 Clear-Content tbo-local:\Temp\tbo-local.txt
+Remove-Item tbo-local:\Temp\tbo-ilz-test -Recurse
 ```
 
 ## Provider (TBO.Reg) (Preview)

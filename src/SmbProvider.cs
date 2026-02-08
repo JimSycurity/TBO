@@ -198,10 +198,52 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (snapshotPath.HasTimeWarpToken)
 				throw new NotSupportedException("Snapshot paths are read-only.");
 
+			var uncPath = snapshotPath.ResolvedPath;
+			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
+				throw new NotSupportedException("New-Item requires a file or directory path, not a share root.");
+
+			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			{
+				this.BeginOperation(cancellationToken =>
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+
+					var newItemParams = this.DynamicParameters as SmbNewItemParams ?? GetNewItemParamsCore(itemTypeName) ?? new SmbNewFileItemParams();
+
+					var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath);
+
+					if (newItemParams is SmbNewFileItemParams)
+					{
+						this.LogDiagnostic($"TBO: Creating local NTFS file '{snapshotPath.OriginalPath}'.");
+						LocalNtfsFileOperations.CreateEmptyFile(localPath, this.LogDiagnostic, this.LogWarning, cancellationToken);
+						return;
+					}
+
+					if (newItemParams is SmbNewDirectoryItemParams)
+					{
+						this.LogDiagnostic($"TBO: Creating local NTFS directory '{snapshotPath.OriginalPath}'.");
+						LocalNtfsFileOperations.CreateDirectory(localPath, this.LogDiagnostic, this.LogWarning, cancellationToken);
+						return;
+					}
+
+					throw new NotSupportedException("Local-mode New-Item currently supports only File and Directory item types.");
+				});
+
+				return;
+			}
+
 			this.BeginOperation(cancellationToken =>
 			{
 				var newItemParams = this.DynamicParameters as SmbNewItemParams ?? new SmbNewFileItemParams();
-				return newItemParams.Create(this.SmbClient, snapshotPath.ResolvedPath, cancellationToken);
+				var file = newItemParams.Create(this.SmbClient, uncPath, cancellationToken).GetAwaiter().GetResult();
+				try
+				{
+					// No output by default; provider engines typically query the created item separately.
+				}
+				finally
+				{
+					file.CloseAsync(cancellationToken).GetAwaiter().GetResult();
+				}
 			});
 		}
 

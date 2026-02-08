@@ -86,6 +86,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
 				throw new ArgumentException("Path must include a file or directory name.", nameof(path));
 
+			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			{
+				this.BeginOperation(cancellationToken =>
+				{
+					RemoveLocalItemCore(snapshotPath.OriginalPath.ToString(), uncPath, recurse, cancellationToken);
+				});
+				return;
+			}
+
 			this.BeginOperation(cancellationToken =>
 			{
 				RemoveItemCore(uncPath, recurse, cancellationToken);
@@ -240,6 +249,74 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			this.smb.SmbClient.RemoveDirectoryAsync(directoryPath, cancellationToken).GetAwaiter().GetResult();
+		}
+
+		private void RemoveLocalItemCore(string originalPath, UncPath uncPath, bool recurse, System.Threading.CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+
+			this.LogDiagnostic($"TBO: Removing local NTFS item '{originalPath}' (recurse={recurse}).");
+
+			if (!TryGetLocalItemEntry(uncPath, cancellationToken, out var entry))
+				throw new ItemNotFoundException($"Cannot find path '{originalPath}' because it does not exist.");
+
+			bool isDirectory = 0 != (entry.FileAttributes & Winterop.FileAttributes.Directory);
+			bool isReparse = 0 != (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint);
+
+			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath);
+
+			if (!isDirectory)
+			{
+				LocalNtfsFileOperations.DeleteFile(localPath, openReparsePoint: true, this.LogDiagnostic, this.LogWarning, cancellationToken);
+				return;
+			}
+
+			if (recurse && !isReparse)
+			{
+				RemoveLocalDirectoryRecursive(originalPath, uncPath, cancellationToken);
+				return;
+			}
+
+			LocalNtfsFileOperations.DeleteDirectory(localPath, openReparsePoint: true, this.LogDiagnostic, this.LogWarning, cancellationToken);
+		}
+
+		private void RemoveLocalDirectoryRecursive(string originalPath, UncPath directoryPath, System.Threading.CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+
+			this.LogDiagnostic($"TBO: Recursively removing local NTFS directory '{originalPath}'.");
+
+			var localFs = new LocalNtfsFileSystem(this.LogDiagnostic, this.LogWarning);
+			using var dir = localFs.OpenDirectory(directoryPath, cancellationToken);
+			var entries = dir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken);
+
+			foreach (var entry in entries)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+
+				if (entry.FileName is "." or "..")
+					continue;
+
+				var childPath = directoryPath.Append(entry.FileName);
+				bool isDirectory = 0 != (entry.FileAttributes & Winterop.FileAttributes.Directory);
+				bool isReparse = 0 != (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint);
+
+				if (isDirectory && !isReparse)
+				{
+					RemoveLocalDirectoryRecursive(childPath.ToString(), childPath, cancellationToken);
+					continue;
+				}
+
+				var childLocalPath = LocalNtfsUncPathMapper.MapToLocalPath(childPath);
+
+				if (isDirectory)
+					LocalNtfsFileOperations.DeleteDirectory(childLocalPath, openReparsePoint: true, this.LogDiagnostic, this.LogWarning, cancellationToken);
+				else
+					LocalNtfsFileOperations.DeleteFile(childLocalPath, openReparsePoint: true, this.LogDiagnostic, this.LogWarning, cancellationToken);
+			}
+
+			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(directoryPath);
+			LocalNtfsFileOperations.DeleteDirectory(localPath, openReparsePoint: true, this.LogDiagnostic, this.LogWarning, cancellationToken);
 		}
 	}
 }
