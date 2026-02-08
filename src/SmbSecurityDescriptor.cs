@@ -82,13 +82,30 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			SecurityInfo sections,
 			CancellationToken cancellationToken)
 		{
+			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			{
+				var provider = smb as SmbProviderInfo;
+				Action<string>? logDiagnostic = provider != null ? provider.LogDiagnostic : null;
+				Action<string>? logWarning = provider != null ? provider.LogWarning : null;
+				return LocalNtfsSecurityDescriptor.Read(
+					uncPath,
+					sections,
+					logDiagnostic: logDiagnostic,
+					logWarning: logWarning,
+					cancellationToken: cancellationToken);
+			}
+
 			Smb2OpenFileObjectBase? file = null;
 			try
 			{
+				var desiredAccess = Smb2AccessRights.ReadControl;
+				if (sections.HasFlag(SecurityInfo.Sacl))
+					desiredAccess |= Smb2AccessRights.AccessSystemSecurity;
+
 				var createInfo = new Smb2CreateInfo
 				{
 					CreateDisposition = Smb2CreateDisposition.Open,
-					DesiredAccess = (uint)Smb2AccessRights.ReadControl,
+					DesiredAccess = (uint)desiredAccess,
 					ShareAccess = Smb2ShareAccess.ReadWriteDelete,
 					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
 					CreateOptions = Smb2FileCreateOptions.SynchronousIoNonalert,
@@ -195,13 +212,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			SecurityInfo securityInfo,
 			CancellationToken cancellationToken)
 		{
+			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			{
+				var provider = smb as SmbProviderInfo;
+				Action<string>? logDiagnostic = provider != null ? provider.LogDiagnostic : null;
+				Action<string>? logWarning = provider != null ? provider.LogWarning : null;
+				LocalNtfsSecurityDescriptor.Write(
+					uncPath,
+					securityDescriptor,
+					securityInfo,
+					logDiagnostic: logDiagnostic,
+					logWarning: logWarning,
+					cancellationToken: cancellationToken);
+				return;
+			}
+
 			Smb2OpenFileObjectBase? file = null;
 			try
 			{
+				var desiredAccess = Smb2AccessRights.WriteDac | Smb2AccessRights.WriteOwner | Smb2AccessRights.ReadControl;
+				if (securityInfo.HasFlag(SecurityInfo.Sacl))
+					desiredAccess |= Smb2AccessRights.AccessSystemSecurity;
+
 				var createInfo = new Smb2CreateInfo
 				{
 					CreateDisposition = Smb2CreateDisposition.Open,
-					DesiredAccess = (uint)(Smb2AccessRights.WriteDac | Smb2AccessRights.WriteOwner | Smb2AccessRights.ReadControl),
+					DesiredAccess = (uint)desiredAccess,
 					ShareAccess = Smb2ShareAccess.ReadWriteDelete,
 					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
 					CreateOptions = Smb2FileCreateOptions.SynchronousIoNonalert,
