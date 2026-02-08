@@ -146,17 +146,67 @@ tokens initially with a clear error.
 ## Manual Test Cases
 These are manual validation steps (not automated tests).
 
-1. Start a SYSTEM shell and create a local-mode drive:
-   - Example: `psexec -s -i powershell.exe`
-   - `New-PSDrive -Name tbo-local -PSProvider TBO.Smb2 -Root \\localhost\\C$`
-2. Enumerate a protected directory:
-   - `Get-ChildItem tbo-local:\\Windows\\System32\\config`
-3. Read a protected file (proof of backup semantics):
-   - `Get-Content -Raw -Encoding Byte tbo-local:\\Windows\\System32\\config\\SAM | Measure-Object`
-4. Get and set a security descriptor (use a safe test target):
-   - Create `tbo-local:\\Windows\\Temp\\tbo-ilz-test` and operate there.
-   - `Get-Acl tbo-local:\\Windows\\Temp\\tbo-ilz-test`
-   - `Set-Acl ...` (validate round-trip, do not weaken security on system folders)
-5. Enable logging for diagnostics:
-   - Set `TITANIS_TBO_LOG=Debug` (or `Diagnostic`) and inspect the log in `%TEMP%`.
+### Pre-flight (Any Shell)
+1. Enable provider logging (optional, recommended for troubleshooting):
+   ```powershell
+   $env:TITANIS_TBO_LOG = "Diagnostic" # or "Debug"
+   ```
+2. Import the module (adjust path if you are testing from an installed module):
+   ```powershell
+   Import-Module .\Titanis.TBO.Smb2.psd1 -Force
+   ```
 
+### SYSTEM Scenario
+1. Start a SYSTEM shell:
+   - Example (Sysinternals PsExec): `psexec -s -i powershell.exe`
+2. Create a local-mode drive:
+   ```powershell
+   New-PSDrive -Name tbo-local -PSProvider TBO.Smb2 -Root \\localhost\C$
+   ```
+3. Enumerate a protected directory (should work with backup semantics):
+   ```powershell
+   Get-ChildItem tbo-local:\Windows\System32\config | Select-Object Name, Length, Attributes
+   ```
+4. Get a security descriptor from a protected file:
+   ```powershell
+   Get-TBOSmbSecurityDescriptor -Path tbo-local:\Windows\System32\config\SAM -AsSddl -Sections Owner,Group,Dacl
+   ```
+   Note: Provider `Get-Content`/`Set-Content` are text-oriented (via `StreamReader`/`StreamWriter`). Avoid using them against binary hive files like `SAM` unless you only need a non-destructive "can open the file" check.
+5. Get and set a security descriptor (round-trip) on a safe test target:
+   ```powershell
+   $testDir = 'tbo-local:\Windows\Temp\tbo-ilz-test'
+   $testFile = Join-Path $testDir 'file.txt'
+
+   New-Item -Path $testDir -ItemType Directory -Force | Out-Null
+   New-Item -Path $testFile -ItemType File -Force | Out-Null
+   Set-Content -Path $testFile -Value 'tbo local mode'
+
+   $dacl = Get-TBOSmbSecurityDescriptor -Path $testFile -AsSddl -Sections Dacl
+   Set-TBOSmbSecurityDescriptor -Path $testFile -SecurityDescriptor $dacl -Sections Dacl
+   ```
+
+### TrustedInstaller Scenario
+1. Start a PowerShell session as `TrustedInstaller` using your preferred launcher (not shipped with this project).
+2. Create a local-mode drive:
+   ```powershell
+   New-PSDrive -Name tbo-local -PSProvider TBO.Smb2 -Root \\localhost\C$
+   ```
+3. Enumerate a location that is commonly owned by `TrustedInstaller`:
+   ```powershell
+   Get-ChildItem tbo-local:\Windows\servicing | Select-Object -First 10 Name, Attributes
+   ```
+4. Validate security descriptor read on a servicing file:
+   ```powershell
+   Get-TBOSmbSecurityDescriptor -Path tbo-local:\Windows\servicing\TrustedInstaller.exe -AsSddl -Sections Owner,Group,Dacl
+   ```
+5. Optionally, repeat the safe DACL round-trip test from the SYSTEM scenario to validate `Set-TBOSmbSecurityDescriptor` from this context.
+
+### Limit / Negative Tests (Optional)
+1. Snapshot/time-warp tokens are not supported in local mode (tracked separately as `TBO-ilz.12`):
+   ```powershell
+   Get-ChildItem TBO.Smb2::\\localhost\C$\@GMT-2001.01.01-00.00.00\Windows
+   ```
+2. Non-admin shares (ex: `ADMIN$`, `IPC$`) are rejected for local mode:
+   ```powershell
+   New-PSDrive -Name tbo-admin -PSProvider TBO.Smb2 -Root \\localhost\ADMIN$
+   ```

@@ -64,6 +64,8 @@ Clear-Content tbo-local:\Temp\tbo-local.txt
 Remove-Item tbo-local:\Temp\tbo-ilz-test -Recurse
 ```
 
+For SYSTEM/TrustedInstaller validation steps and additional local-mode notes, see `Docs/DevGuide/PowerShellSmb2LocalNtfs.md`.
+
 ## Provider (TBO.Reg) (Preview)
 
 The `TBO.Reg` provider exposes the remote registry through a per-server PSDrive. The drive root is the server name, and the top-level items are hives (HKLM, HKCU, HKU, etc). Keys enumerate subkeys by default; use `-IncludeProperties` to populate per-subkey value names in the Property column and `-IncludeValues` (or `-IncludeData`) to include values. The default value is shown as `(Default)`.
