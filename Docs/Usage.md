@@ -50,7 +50,16 @@ Use `Get-Help about_TBO_Smb2_Provider` for supported item types, dynamic paramet
 
 Root listings (`tbo:\` or `TBO.Smb2::\\server\share`) skip reparse metadata by default to avoid per-entry opens on large roots. Use `-IncludeRootReparseInfo` (alias `-RootReparseInfo`) on `New-PSDrive` or `Set-TBOConnectOptions` to enable it.
 
-On Windows, `Get-Acl` and `Set-Acl` work with `tbo:\` and provider-qualified UNC paths. Snapshot paths are read-only. Local NTFS mode (`\\localhost\<Drive>$`) supports the same security descriptor operations, but does not support `@GMT-` snapshot tokens.
+On Windows, `Get-Acl` and `Set-Acl` work with `tbo:\` and provider-qualified UNC paths. Snapshot paths are read-only. Local NTFS mode (`\\localhost\<Drive>$`) supports `Get-Content`/`Set-Content`/`Add-Content`/`Clear-Content` and security descriptor operations, but does not support `@GMT-` snapshot tokens.
+
+```powershell
+# Local NTFS mode (Windows only) bypasses SMB by using \\localhost\<Drive>$ UNC paths.
+New-PSDrive -Name tbo-local -PSProvider 'TBO.Smb2' -Root '\\localhost\C$'
+Set-Content tbo-local:\Temp\tbo-local.txt -Value 'testing'
+Add-Content tbo-local:\Temp\tbo-local.txt -Value 'more'
+Get-Content tbo-local:\Temp\tbo-local.txt
+Clear-Content tbo-local:\Temp\tbo-local.txt
+```
 
 ## Provider (TBO.Reg) (Preview)
 

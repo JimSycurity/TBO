@@ -532,6 +532,37 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
 				throw new NotSupportedException("Get-Content and Set-Content require a file path, not a share root.");
 
+			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			{
+				this.BeginOperation(cancellationToken =>
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+
+					this.LogDiagnostic($"TBO: Clearing local NTFS content '{snapshotPath.OriginalPath}'.");
+
+					var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath);
+
+					var access =
+						LocalNtfsFileAccess.WriteDataOrAddFile |
+						LocalNtfsFileAccess.Synchronize;
+
+					using var stream = LocalNtfsCreateFile.OpenFileStream(
+						localPath,
+						access,
+						FileMode.OpenOrCreate,
+						FileAccess.Write,
+						share: FileShare.ReadWrite | FileShare.Delete,
+						flags: LocalNtfsOpenFlags.None,
+						includeSecurityPrivilege: false,
+						logDiagnostic: this.LogDiagnostic,
+						logWarning: this.LogWarning);
+
+					stream.SetLength(0);
+				});
+
+				return;
+			}
+
 			this.BeginOperation(cancellationToken =>
 			{
 				var createInfo = SmbCreateInfoFactory.CreateContentWriteInfo(
@@ -555,6 +586,43 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			UncPath uncPath = snapshotPath.ResolvedPath;
 			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
 				throw new NotSupportedException("Get-Content requires a file path, not a share root.");
+
+			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			{
+				if (snapshotPath.HasTimeWarpToken)
+					throw new NotSupportedException("Snapshot paths are not supported in local NTFS mode.");
+
+				return this.BeginOperation(cancellationToken =>
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+
+					this.LogDiagnostic($"TBO: Opening local NTFS content reader for '{snapshotPath.OriginalPath}'.");
+
+					var parms = this.DynamicParameters as SmbGetContentParams;
+					var encoding = parms?.Encoding ?? Encoding.UTF8;
+					var raw = parms?.Raw.IsPresent ?? false;
+
+					var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath);
+					var access =
+						LocalNtfsFileAccess.ReadDataOrListDirectory |
+						LocalNtfsFileAccess.ReadAttributes |
+						LocalNtfsFileAccess.ReadExtendedAttributes |
+						LocalNtfsFileAccess.Synchronize;
+
+					var stream = LocalNtfsCreateFile.OpenFileStream(
+						localPath,
+						access,
+						FileMode.Open,
+						FileAccess.Read,
+						share: FileShare.ReadWrite | FileShare.Delete,
+						flags: LocalNtfsOpenFlags.None,
+						includeSecurityPrivilege: false,
+						logDiagnostic: this.LogDiagnostic,
+						logWarning: this.LogWarning);
+
+					return (IContentReader)new SmbContentReader(stream, encoding, raw);
+				});
+			}
 
 			return this.BeginOperation(cancellationToken =>
 			{
@@ -586,6 +654,57 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			UncPath uncPath = snapshotPath.ResolvedPath;
 			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
 				throw new NotSupportedException("Set-Content and Add-Content require a file path, not a share root.");
+
+			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			{
+				return this.BeginOperation(cancellationToken =>
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+
+					var parms = this.DynamicParameters as SmbSetContentParams ?? new SmbSetContentParams();
+					var encoding = parms.Encoding ?? Encoding.UTF8;
+					var invocation = GetProviderInvocationInfo(this);
+					var commandName = invocation?.MyCommand?.Name;
+					var isAddContent = string.Equals(commandName, "Add-Content", StringComparison.OrdinalIgnoreCase);
+					var force = GetContextSwitch(this, "Force");
+					var noClobber = invocation?.BoundParameters != null
+						&& invocation.BoundParameters.ContainsKey("NoClobber")
+						&& invocation.BoundParameters["NoClobber"] is true;
+
+					if (force)
+						noClobber = false;
+
+					var mode = isAddContent
+						? FileMode.OpenOrCreate
+						: noClobber
+							? FileMode.CreateNew
+							: FileMode.Create;
+
+					this.LogDiagnostic($"TBO: Opening local NTFS content writer for '{snapshotPath.OriginalPath}' (mode={mode}).");
+
+					var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath);
+					var access =
+						LocalNtfsFileAccess.WriteDataOrAddFile |
+						LocalNtfsFileAccess.AppendDataOrAddSubdirectory |
+						LocalNtfsFileAccess.Synchronize;
+
+					var stream = LocalNtfsCreateFile.OpenFileStream(
+						localPath,
+						access,
+						mode,
+						FileAccess.Write,
+						share: FileShare.ReadWrite | FileShare.Delete,
+						flags: LocalNtfsOpenFlags.None,
+						includeSecurityPrivilege: false,
+						logDiagnostic: this.LogDiagnostic,
+						logWarning: this.LogWarning);
+
+					if (isAddContent)
+						stream.Seek(0, SeekOrigin.End);
+
+					return (IContentWriter)new SmbContentWriter(stream, encoding, parms.NoNewline.IsPresent);
+				});
+			}
 
 			return this.BeginOperation(cancellationToken =>
 			{
