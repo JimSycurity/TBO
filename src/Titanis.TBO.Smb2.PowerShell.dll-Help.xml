@@ -5161,6 +5161,182 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
   </command:command>
   <command:command>
     <command:details>
+      <command:name>Add-TBOCacheObservation</command:name>
+      <command:verb>Add</command:verb>
+      <command:noun>TBOCacheObservation</command:noun>
+      <maml:description>
+        <maml:para>Adds an observation edge to the persistent TBO cache.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Add-TBOCacheObservation</command:name>
+        <command:parameter required="true">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>SourceKind</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>SourcePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ObservedUtc</maml:name>
+          <command:parameterValue>DateTime</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Confidence</maml:name>
+          <command:parameterValue>Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ContextJson</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>PrincipalSid</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>PrincipalDomain</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>PrincipalName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>PrincipalType</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CredentialKind</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CredentialIdentifier</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Machine identity used for correlation (typically the server or host name).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>SourceKind</maml:name>
+        <maml:description>
+          <maml:para>Source identifier for the observation (for example, a cmdlet name). Default: Manual.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>SourcePath</maml:name>
+        <maml:description>
+          <maml:para>Optional source path or location where the observation was obtained.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>ObservedUtc</maml:name>
+        <maml:description>
+          <maml:para>Optional timestamp for when the observation occurred. Defaults to current time.</maml:para>
+        </maml:description>
+        <command:parameterValue>DateTime</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Confidence</maml:name>
+        <maml:description>
+          <maml:para>Optional confidence score (0-100) to associate with the observation.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>ContextJson</maml:name>
+        <maml:description>
+          <maml:para>Optional JSON context blob to store with the observation.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>PrincipalSid</maml:name>
+        <maml:description>
+          <maml:para>Optional principal SID.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>PrincipalDomain</maml:name>
+        <maml:description>
+          <maml:para>Optional principal domain name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>PrincipalName</maml:name>
+        <maml:description>
+          <maml:para>Optional principal name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>PrincipalType</maml:name>
+        <maml:description>
+          <maml:para>Optional principal type label (for example, User or Computer).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>CredentialKind</maml:name>
+        <maml:description>
+          <maml:para>Optional credential kind (for example, NTHash). Must be provided together with CredentialIdentifier.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>CredentialIdentifier</maml:name>
+        <maml:description>
+          <maml:para>Optional credential identifier (for example, an NTHash). Must be provided together with CredentialKind.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol -PrincipalName Administrator -CredentialKind NTHash -CredentialIdentifier 8846f7eaee8fb117ad06bdd830b7586c -SourceKind Get-TBORegSamHashes</maml:code>
+        <maml:remarks>
+          <maml:para>Adds a principal and credential observation for a machine.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol -CredentialKind NTHash -CredentialIdentifier 8846f7eaee8fb117ad06bdd830b7586c -SourceKind Manual</maml:code>
+        <maml:remarks>
+          <maml:para>Adds a credential observation without principal context.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
       <command:name>Get-TBOCacheCredentialReuse</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBOCacheCredentialReuse</command:noun>

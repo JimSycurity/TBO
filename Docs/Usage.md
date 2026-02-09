@@ -182,6 +182,25 @@ Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2
 Get-TBOCacheCredentialReuse -Kind NTHash -Identifier 8846f7eaee8fb117ad06bdd830b7586c -MinimumMachineCount 2
 ```
 
+### Add-TBOCacheObservation
+
+Adds an observation edge to the persistent cache (machine, optional principal identity, optional credential identity). Other cmdlets use this same ingestion surface.
+
+```powershell
+# Record an NTHash observed for a local account on a host.
+Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol `
+  -PrincipalName Administrator `
+  -CredentialKind NTHash `
+  -CredentialIdentifier 8846f7eaee8fb117ad06bdd830b7586c `
+  -SourceKind Get-TBORegSamHashes
+
+# Record a credential observation without principal context.
+Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol `
+  -CredentialKind NTHash `
+  -CredentialIdentifier 8846f7eaee8fb117ad06bdd830b7586c `
+  -SourceKind Manual
+```
+
 ### Set-TBOSmbConnectOptions (Deprecated)
 
 Deprecated shim for `Set-TBOConnectOptions`. Uses the same dynamic parameters and behavior.
