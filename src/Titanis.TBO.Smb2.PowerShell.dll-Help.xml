@@ -477,6 +477,91 @@
 
   <command:command>
     <command:details>
+      <command:name>Get-TBODpapiMemoryDump</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBODpapiMemoryDump</command:noun>
+      <maml:description>
+        <maml:para>Scans a memory dump file for embedded DPAPI blobs (and optionally attempts decryption).</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiMemoryDump</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Target server name (used for SMB/local-mode file access and optional per-session DPAPI master key cache lookup).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>UNC path or TBO.Smb2 drive path to the memory dump file to scan.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Decrypt</maml:name>
+        <maml:description>
+          <maml:para>Attempt to parse and decrypt matching DPAPI blobs when master keys are available.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>DPAPI master key objects (from Get-TBODpapiMasterKeys). Entries are matched by MasterKeyGuid.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ChunkBytes</maml:name>
+        <maml:description>
+          <maml:para>Read chunk size when streaming the dump (default: 4MB).</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MaxBlobBytes</maml:name>
+        <maml:description>
+          <maml:para>Maximum bytes to capture after a DPAPI hit for parsing/decryption (default: 64KB).</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\lsass.dmp</maml:code>
+        <maml:remarks>
+          <maml:para>Scans the memory dump for DPAPI blob headers.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>$keys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\lsass.dmp -Decrypt -MasterKeys $keys</maml:code>
+        <maml:remarks>
+          <maml:para>Attempts to decrypt DPAPI blobs found in the dump using a provided master key set.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBODpapiBlob</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBODpapiBlob</command:noun>

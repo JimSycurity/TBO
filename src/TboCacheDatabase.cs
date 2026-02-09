@@ -829,8 +829,8 @@ RETURNING dpapi_masterkey_id;";
 			int? valueType,
 			int? dataLength,
 			long? fileSize,
-			int matchOffset,
-			int bytesScanned,
+			long matchOffset,
+			long bytesScanned,
 			string? credentialGuid,
 			string? masterKeyGuid,
 			uint? flags,
@@ -1184,8 +1184,8 @@ ORDER BY
 			internal int? ValueType { get; init; }
 			internal int? DataLength { get; init; }
 			internal long? FileSize { get; init; }
-			internal int MatchOffset { get; init; }
-			internal int BytesScanned { get; init; }
+			internal long MatchOffset { get; init; }
+			internal long BytesScanned { get; init; }
 			internal string? CredentialGuid { get; init; }
 			internal string? MasterKeyGuid { get; init; }
 			internal uint? Flags { get; init; }
@@ -1288,8 +1288,8 @@ ORDER BY dpapi_blob_id;";
 					ValueType = reader.IsDBNull(6) ? null : reader.GetInt32(6),
 					DataLength = reader.IsDBNull(7) ? null : reader.GetInt32(7),
 					FileSize = reader.IsDBNull(8) ? null : reader.GetInt64(8),
-					MatchOffset = reader.GetInt32(9),
-					BytesScanned = reader.GetInt32(10),
+					MatchOffset = reader.GetInt64(9),
+					BytesScanned = reader.GetInt64(10),
 					CredentialGuid = reader.IsDBNull(11) ? null : reader.GetString(11),
 					MasterKeyGuid = reader.IsDBNull(12) ? null : reader.GetString(12),
 					Flags = reader.IsDBNull(13) ? null : unchecked((uint)reader.GetInt64(13)),

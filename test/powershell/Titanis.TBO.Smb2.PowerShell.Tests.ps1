@@ -137,6 +137,7 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
         $cmdlets | Should -Contain 'Get-TBORegSecurityDescriptor'
         $cmdlets | Should -Contain 'Set-TBORegSecurityDescriptor'
         $cmdlets | Should -Contain 'Find-TBODpapiBlobs'
+        $cmdlets | Should -Contain 'Get-TBODpapiMemoryDump'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeyLocations'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeys'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeyHashes'
@@ -287,6 +288,66 @@ Describe 'DPAPI cmdlets with fake SMB file system' {
         $match | Should -Not -BeNullOrEmpty
         $match.MatchOffset | Should -Be 0
         $match.Source | Should -Be 'File'
+    }
+
+    It 'scans a memory dump for DPAPI blobs using a fake SMB file system' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $fake.AddDirectory("\\server\C$\Temp") | Out-Null
+
+        $mkGuid = [Guid]::Parse('50323a73-4618-4959-82d1-dc71fe85c087')
+        $blobBytes = New-Object System.Collections.Generic.List[byte]
+        $blobBytes.AddRange([byte[]](0x01,0x00,0x00,0x00,0xD0,0x8C,0x9D,0xDF,0x01,0x15,0xD1,0x11,0x8C,0x7A,0x00,0xC0,0x4F,0xC2,0x97,0xEB)) | Out-Null
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]2)) | Out-Null
+        $blobBytes.AddRange($mkGuid.ToByteArray()) | Out-Null
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # flags
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # desc len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0x6610)) | Out-Null # AES-256
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0x20)) | Out-Null # key len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # salt len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # hmac key len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0x800e)) | Out-Null # SHA512
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # hash len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # hmac len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # data len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # sign len
+
+        # Put the blob near the end of the first chunk so it crosses into the next chunk.
+        $dump = New-Object byte[] 8192
+        $blob = $blobBytes.ToArray()
+        [System.Array]::Copy($blob, 0, $dump, 4090, $blob.Length)
+        $fake.AddFile("\\server\C$\Temp\mem.dmp", $dump) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            $results = @(Get-TBODpapiMemoryDump -ServerName server -Path "\\server\C$\Temp\mem.dmp" -ChunkBytes 4096 -MaxBlobBytes 128)
+        } finally {
+            $scope.Dispose()
+        }
+
+        $results | Should -Not -BeNullOrEmpty
+        $match = $results | Select-Object -First 1
+        $match.MatchOffset | Should -Be 4090
+        $match.MasterKeyGuid | Should -Be $mkGuid.ToString()
     }
 
     It 'enumerates master key locations using a fake SMB file system' {
