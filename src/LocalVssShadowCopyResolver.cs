@@ -106,6 +106,52 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return true;
 		}
 
+		internal static bool TryListShadowCopies(
+			string driveRoot,
+			Action<string>? logDiagnostic,
+			Action<string>? logWarning,
+			out IReadOnlyList<LocalVssShadowCopyInfo> shadowCopies,
+			out string? failureReason)
+		{
+			shadowCopies = Array.Empty<LocalVssShadowCopyInfo>();
+			failureReason = null;
+
+			if (!OperatingSystem.IsWindows())
+			{
+				failureReason = "VSS snapshot enumeration is only supported on Windows.";
+				return false;
+			}
+
+			if (string.IsNullOrWhiteSpace(driveRoot))
+			{
+				failureReason = "Drive root must be provided.";
+				return false;
+			}
+
+			logDiagnostic ??= _ => { };
+			logWarning ??= _ => { };
+
+			var normalizedDriveRoot = NormalizeDriveRoot(driveRoot);
+
+			string? volumeName = null;
+			if (!TryGetVolumeNameForMountPoint(normalizedDriveRoot, out var volName, out var volErr))
+			{
+				logWarning($"VSS: GetVolumeNameForVolumeMountPoint failed for '{normalizedDriveRoot}': {volErr}. Falling back to drive-root matching.");
+			}
+			else
+			{
+				volumeName = volName;
+				logDiagnostic($"VSS: volume name for '{normalizedDriveRoot}' is '{volumeName}'.");
+			}
+
+			var snapshots = GetSnapshotsForVolume(volumeName, normalizedDriveRoot, logDiagnostic, logWarning, out failureReason);
+			if (snapshots == null)
+				return false;
+
+			shadowCopies = snapshots;
+			return true;
+		}
+
 		private static IReadOnlyList<LocalVssShadowCopyInfo>? GetSnapshotsForVolume(
 			string? volumeName,
 			string driveRoot,
@@ -277,4 +323,3 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 	}
 }
-

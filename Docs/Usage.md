@@ -179,6 +179,7 @@ Lists available VSS snapshots for a file or directory.
 ```powershell
 Get-TBOSmbSnapshots -Path tbo:\Windows\System32\config
 Get-TBOSmbSnapshots -Path \\corp1-web01\C$\Windows\System32\config
+Get-TBOSmbSnapshots -Path tbo-local:\Windows\System32\config
 Set-Location tbo:\@GMT-2026.01.25-20.47.30\Windows\System32\config
 ```
 
@@ -189,6 +190,7 @@ Lists the data streams of a file or directory.
 ```powershell
 Get-TBOSmbStreams -Path tbo:\Temp\local.txt
 Get-TBOSmbStreams -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\local.txt
+Get-TBOSmbStreams -Path tbo-local:\Temp\local.txt
 ```
 
 ### Get-TBOSmbSessions

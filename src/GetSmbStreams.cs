@@ -29,6 +29,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			this._cancelSource ??= new CancellationTokenSource();
 			var cancellationToken = this._cancelSource.Token;
 
+			Action<string>? logDiagnostic = null;
+			Action<string>? logWarning = null;
+			if (smb is SmbProviderInfo provider)
+			{
+				logDiagnostic = provider.LogDiagnostic;
+				logWarning = provider.LogWarning;
+			}
+
 			foreach (var path in GetTargetPaths())
 			{
 				var uncPath = ResolveToUncPath(path, this.ParameterSetName);
@@ -38,6 +46,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var snapshotPath = ResolveSnapshotPath(uncPath);
 				if (string.IsNullOrEmpty(snapshotPath.ResolvedPath.ShareRelativePath))
 					throw new ArgumentException("Path must include a file or directory name.", this.ParameterSetName);
+
+				// Local-mode uses \\localhost\<Drive>$ admin-share UNC paths but must not attempt SMB authentication.
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(snapshotPath.ResolvedPath))
+				{
+					var localPath = LocalNtfsUncPathMapper.MapToLocalPath(snapshotPath.ResolvedPath, snapshotPath.TimeWarpToken, logDiagnostic, logWarning);
+					var localStreams = LocalNtfsStreams.ReadStreams(localPath, logDiagnostic, logWarning, cancellationToken);
+					foreach (var stream in localStreams)
+					{
+						this.WriteObject(stream);
+					}
+					continue;
+				}
 
 				var streams = ReadStreams(smb, snapshotPath, cancellationToken);
 				foreach (var stream in streams)

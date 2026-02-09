@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Management.Automation;
 using System.Threading;
 using Titanis;
@@ -29,15 +30,43 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			this._cancelSource ??= new CancellationTokenSource();
 
+			Action<string>? logDiagnostic = null;
+			Action<string>? logWarning = null;
+			if (smb is SmbProviderInfo provider)
+			{
+				logDiagnostic = provider.LogDiagnostic;
+				logWarning = provider.LogWarning;
+			}
+
 			foreach (var path in GetTargetPaths())
 			{
 				var uncPath = ResolveToUncPath(path, this.ParameterSetName);
+
+				// Local-mode uses \\localhost\<Drive>$ admin-share UNC paths but must not attempt SMB authentication.
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+				{
+					var shareName = uncPath.ShareName;
+					if (string.IsNullOrEmpty(shareName))
+						throw new InvalidOperationException($"UNC path '{uncPath}' did not include a share name.");
+
+					var driveRoot = GetDriveRoot(shareName);
+					if (!LocalVssShadowCopyResolver.TryListShadowCopies(driveRoot, logDiagnostic, logWarning, out var shadowCopies, out var listFailure))
+						throw new InvalidOperationException(listFailure ?? $"Failed to enumerate VSS shadow copies for '{driveRoot}'.");
+
+					foreach (var shadowCopy in shadowCopies)
+					{
+						var token = "@GMT-" + shadowCopy.InstallDateUtc.ToString("yyyy.MM.dd-HH.mm.ss", CultureInfo.InvariantCulture);
+						this.WriteObject(FileSnapshotInfo.Parse(token));
+					}
+
+					this.WriteVerbose($"Total snapshots: {shadowCopies.Count}");
+					continue;
+				}
+
 				var snapshotInfo = ReadSnapshots(smb, uncPath, this._cancelSource.Token);
 
 				foreach (var snapshot in snapshotInfo.Snapshots)
-				{
 					this.WriteObject(snapshot);
-				}
 
 				this.WriteVerbose($"Total snapshots: {snapshotInfo.TotalSnapshots}");
 			}
@@ -85,6 +114,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (file != null)
 					file.CloseAsync(cancellationToken).GetAwaiter().GetResult();
 			}
+		}
+
+		private static string GetDriveRoot(string shareName)
+		{
+			if (string.IsNullOrWhiteSpace(shareName))
+				throw new ArgumentException("UNC share name must be provided.", nameof(shareName));
+
+			var trimmed = shareName.Trim().Trim('\\');
+			if (trimmed.Length == 2 && char.IsLetter(trimmed[0]) && trimmed[1] == '$')
+				return $"{char.ToUpperInvariant(trimmed[0])}:\\";
+
+			throw new ArgumentException($"UNC share '{shareName}' is not a supported local admin share. Expected '<DriveLetter>$' (ex: 'C$').", nameof(shareName));
 		}
 
 		private UncPath ResolveToUncPath(string path, string paramName)
