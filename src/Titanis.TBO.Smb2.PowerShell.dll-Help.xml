@@ -4091,7 +4091,7 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
       <command:noun>TBORegCachedCredentials</command:noun>
       <maml:description>
         <maml:para>Decrypts cached domain credentials from HKLM\SECURITY\Cache and returns DCC1/DCC2 hashes with usernames.</maml:para>
-        <maml:para>If -Cache is specified, writes DCC1/DCC2 observations into the persistent cache for later reuse queries.</maml:para>
+        <maml:para>If cache ingestion is enabled (via -Cache or TITANIS_TBO_CACHE_INGEST), writes DCC1/DCC2 observations into the persistent cache for later reuse queries.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -4155,14 +4155,14 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
       <command:parameter>
         <maml:name>Cache</maml:name>
         <maml:description>
-          <maml:para>When specified, writes DCC1/DCC2 observations into the persistent cache for later reuse queries.</maml:para>
+          <maml:para>Overrides the cache ingestion default. Use -Cache to force cache writes or -Cache:$false to suppress writes when TITANIS_TBO_CACHE_INGEST is enabled.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>CachePath</maml:name>
         <maml:description>
-          <maml:para>Optional cache database path override used when -Cache is specified. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+          <maml:para>Optional cache database path override used when writing cache observations. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
@@ -4437,7 +4437,7 @@ Get-TBOCacheCredentialReuse -Kind DCC2 -MinimumMachineCount 2</maml:code>
       <maml:description>
         <maml:para>Retrieves local SAM account hashes from the remote registry.</maml:para>
         <maml:para>Returns the account name, full name, and RID alongside the hash data.</maml:para>
-        <maml:para>If -Cache is specified, writes NTHash observations into the persistent cache for later reuse queries.</maml:para>
+        <maml:para>If cache ingestion is enabled (via -Cache or TITANIS_TBO_CACHE_INGEST), writes NTHash observations into the persistent cache for later reuse queries.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -4468,14 +4468,14 @@ Get-TBOCacheCredentialReuse -Kind DCC2 -MinimumMachineCount 2</maml:code>
       <command:parameter>
         <maml:name>Cache</maml:name>
         <maml:description>
-          <maml:para>When specified, writes NTHash observations into the persistent cache for later reuse queries.</maml:para>
+          <maml:para>Overrides the cache ingestion default. Use -Cache to force cache writes or -Cache:$false to suppress writes when TITANIS_TBO_CACHE_INGEST is enabled.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>CachePath</maml:name>
         <maml:description>
-          <maml:para>Optional cache database path override used when -Cache is specified. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+          <maml:para>Optional cache database path override used when writing cache observations. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>

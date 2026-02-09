@@ -151,6 +151,17 @@ Get-TBOCacheInfo -Path C:\Temp\tbo-cache.sqlite3
 $env:TITANIS_TBO_CACHE = 'C:\Temp\tbo-cache.sqlite3'; Get-TBOCacheInfo
 ```
 
+Cache ingestion defaults:
+
+- Set `TITANIS_TBO_CACHE_INGEST` to `1/true/yes` to enable cache writes by default for cmdlets that support `-Cache`.
+- Use `-Cache:$false` to suppress cache writes for a single invocation when global ingestion is enabled.
+
+```powershell
+$env:TITANIS_TBO_CACHE_INGEST = 'true'
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache:$false
+```
+
 ### Clear-TBOCache
 
 Deletes all rows from the cache database.

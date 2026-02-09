@@ -47,7 +47,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return GetDefaultCachePath();
 		}
 
-		private static bool IsTruthy(string value)
+		internal static bool IsTruthy(string value)
 		{
 			if (string.IsNullOrWhiteSpace(value))
 				return false;

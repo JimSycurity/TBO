@@ -106,9 +106,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return;
 			}
 
+			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
 			foreach (var info in userInfos)
 			{
-				if (this.Cache.IsPresent && !string.IsNullOrWhiteSpace(info.NtlmHashText))
+				if (ingestCache && !string.IsNullOrWhiteSpace(info.NtlmHashText))
 				{
 					try
 					{

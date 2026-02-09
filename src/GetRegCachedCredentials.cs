@@ -50,6 +50,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
 			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
 				var lsaKey = ResolveLsaKey(
@@ -131,7 +132,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						DecryptedBytes = entry.DecryptedBytes
 					};
 
-					if (this.Cache.IsPresent && !string.IsNullOrWhiteSpace(info.DccHashHex))
+					if (ingestCache && !string.IsNullOrWhiteSpace(info.DccHashHex))
 					{
 						try
 						{
