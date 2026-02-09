@@ -612,6 +612,116 @@ Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\c
 
   <command:command>
     <command:details>
+      <command:name>Get-TBONGCInfo</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBONGCInfo</command:noun>
+      <maml:description>
+        <maml:para>Parses Windows Hello for Business / NGC container metadata.</maml:para>
+        <maml:para>Reads the system Ngc folder under Windows\ServiceProfiles\LocalService and returns per-container info plus optional protector/item details.</maml:para>
+        <maml:para>Protector payloads (15.dat) can be included for offline tooling flows.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBONGCInfo</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Snapshot</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeProtectors</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeItems</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeProtectorData</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Target server name (used for SMB/local-mode file access).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Snapshot</maml:name>
+        <maml:description>
+          <maml:para>@GMT- snapshot token used to read files from a VSS shadow copy.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeProtectors</maml:name>
+        <maml:description>
+          <maml:para>Include parsed Protector entries in the output.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeItems</maml:name>
+        <maml:description>
+          <maml:para>Include parsed Item entries in the output.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeProtectorData</maml:name>
+        <maml:description>
+          <maml:para>Include protector 15.dat payloads (InputData) as hex.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates Windows Hello NGC containers for all configured users.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol -IncludeProtectors -IncludeItems</maml:code>
+        <maml:remarks>
+          <maml:para>Includes parsed protector and item details.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol -IncludeProtectors -IncludeProtectorData |
+  Select-Object NgcGuid, UserSid, KeyStorageProviderGuid1, InputDataLength, KeyStorageProviderGuid2</maml:code>
+        <maml:remarks>
+          <maml:para>Includes protector payloads (InputData) and selects common summary fields.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBODpapiBlob</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBODpapiBlob</command:noun>

