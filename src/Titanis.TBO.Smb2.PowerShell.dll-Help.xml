@@ -4091,6 +4091,7 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
       <command:noun>TBORegCachedCredentials</command:noun>
       <maml:description>
         <maml:para>Decrypts cached domain credentials from HKLM\SECURITY\Cache and returns DCC1/DCC2 hashes with usernames.</maml:para>
+        <maml:para>If -Cache is specified, writes DCC1/DCC2 observations into the persistent cache for later reuse queries.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -4111,6 +4112,14 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
         <command:parameter required="false">
           <maml:name>LsaKeyBytes</maml:name>
           <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Cache</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CachePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
         </command:parameter>
       </command:syntaxItem>
     </command:syntax>
@@ -4143,6 +4152,20 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
         </maml:description>
         <command:parameterValue>Byte[]</command:parameterValue>
       </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>When specified, writes DCC1/DCC2 observations into the persistent cache for later reuse queries.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override used when -Cache is specified. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -4157,6 +4180,15 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
         <maml:code>Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$1'</maml:code>
         <maml:remarks>
           <maml:para>Reads a specific cache value.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+Get-TBORegCachedCredentials -ServerName corp1-web02.corp1.lab.home-labs.lol -Cache
+Get-TBOCacheCredentialReuse -Kind DCC2 -MinimumMachineCount 2</maml:code>
+        <maml:remarks>
+          <maml:para>Writes DCC observations to the cache and shows DCC2 hashes observed on multiple machines.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

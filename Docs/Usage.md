@@ -602,6 +602,11 @@ Decrypts cached domain credentials stored under `HKLM\SECURITY\Cache` and return
 ```powershell
 Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol
 Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$1'
+
+# Cache DCC hashes for later reuse queries.
+Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+Get-TBORegCachedCredentials -ServerName corp1-web02.corp1.lab.home-labs.lol -Cache
+Get-TBOCacheCredentialReuse -Kind DCC2 -MinimumMachineCount 2
 ```
 
 #### Get-TBORegMachineAccount
