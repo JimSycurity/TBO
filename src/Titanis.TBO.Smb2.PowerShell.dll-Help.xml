@@ -481,7 +481,8 @@
       <command:verb>Get</command:verb>
       <command:noun>TBODpapiMemoryDump</command:noun>
       <maml:description>
-        <maml:para>Scans a memory dump file for embedded DPAPI blobs (and optionally attempts decryption).</maml:para>
+        <maml:para>Scans a dump file for embedded DPAPI blobs (and optionally attempts decryption).</maml:para>
+        <maml:para>This cmdlet performs a byte-pattern scan and does not parse or decompress dump formats. Results depend on the dump including the DPAPI blob bytes contiguously.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -540,6 +541,48 @@
         </maml:description>
         <command:parameterValue>Int32</command:parameterValue>
       </command:parameter>
+      <command:parameter>
+        <maml:name>MaxHits</maml:name>
+        <maml:description>
+          <maml:para>Maximum number of DPAPI blob header hits to emit before stopping.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Entropy</maml:name>
+        <maml:description>
+          <maml:para>Optional hex-encoded entropy bytes to pass to DPAPI blob decryption.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>EntropyBytes</maml:name>
+        <maml:description>
+          <maml:para>Optional entropy bytes to pass to DPAPI blob decryption.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeRawBytes</maml:name>
+        <maml:description>
+          <maml:para>Include the raw DPAPI blob bytes for each hit when parsing succeeds.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>Cache DPAPI blob hits (and any decrypted cleartext that looks like text) for later triage/export.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -555,6 +598,13 @@
 Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\lsass.dmp -Decrypt -MasterKeys $keys</maml:code>
         <maml:remarks>
           <maml:para>Attempts to decrypt DPAPI blobs found in the dump using a provided master key set.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Windows\MEMORY.DMP -MaxHits 200</maml:code>
+        <maml:remarks>
+          <maml:para>Scans a large dump file and stops after a fixed number of hits.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
