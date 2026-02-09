@@ -125,6 +125,12 @@ Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI
   Get-TBODpapiMasterKeys -Scope Machine | Out-Null
 ```
 
+User master keys can be decrypted with either a plaintext password or an NT hash (useful for domain users when only NTLM material is available):
+
+```powershell
+$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserNtlmHash '0123456789abcdef0123456789abcdef'
+```
+
 After this, cmdlets that encounter DPAPI blobs may be able to reuse cached master keys without you re-supplying `-MasterKeys` every time (example: `Get-TBOCredManEntry`).
 
 Reference:
