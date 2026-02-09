@@ -2,6 +2,9 @@
 
 This module provides the TBO SMB2 PowerShell provider and cmdlets for backup-operator workflows.
 
+If you're new, start with [Docs/Guide.md](Guide.md) (short, task-focused) and use this file as the full reference.
+For a docs index, see [Docs/README.md](README.md).
+
 ## Quick Start
 
 ```powershell
