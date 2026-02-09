@@ -5005,4 +5005,158 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
       </command:example>
     </command:examples>
   </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOCacheInfo</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOCacheInfo</command:noun>
+      <maml:description>
+        <maml:para>Shows information about the persistent TBO cache database (schema version and row counts).</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOCacheInfo</command:name>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBOCacheInfo</maml:code>
+        <maml:remarks>
+          <maml:para>Returns schema version and row counts for the default cache.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOCacheInfo -Path C:\Temp\tbo-cache.sqlite3</maml:code>
+        <maml:remarks>
+          <maml:para>Reads cache info from an explicit database file.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Clear-TBOCache</command:name>
+      <command:verb>Clear</command:verb>
+      <command:noun>TBOCache</command:noun>
+      <maml:description>
+        <maml:para>Deletes all rows from the persistent TBO cache database.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Clear-TBOCache</command:name>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Clear-TBOCache</maml:code>
+        <maml:remarks>
+          <maml:para>Clears the cache after confirmation.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Clear-TBOCache -WhatIf</maml:code>
+        <maml:remarks>
+          <maml:para>Shows what would be deleted without modifying the cache.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Remove-TBOCacheEntry</command:name>
+      <command:verb>Remove</command:verb>
+      <command:noun>TBOCacheEntry</command:noun>
+      <maml:description>
+        <maml:para>Deletes one or more cache entries by type and id.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Remove-TBOCacheEntry</command:name>
+        <command:parameter required="true">
+          <maml:name>Type</maml:name>
+          <command:parameterValue>TboCacheEntryType</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>Id</maml:name>
+          <command:parameterValue>Int64[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true">
+        <maml:name>Type</maml:name>
+        <maml:description>
+          <maml:para>Cache entry type to delete.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboCacheEntryType</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>Id</maml:name>
+        <maml:description>
+          <maml:para>Cache entry id (or ids) to delete.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int64[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Remove-TBOCacheEntry -Type Observation -Id 1</maml:code>
+        <maml:remarks>
+          <maml:para>Deletes an observation entry from the cache.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Remove-TBOCacheEntry -Type Credential -Id 12,13,14</maml:code>
+        <maml:remarks>
+          <maml:para>Deletes multiple credential entries by id.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
 </helpItems>

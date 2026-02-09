@@ -385,6 +385,69 @@ RETURNING observation_id;";
 			tx.Commit();
 		}
 
+		internal void RemoveEntries(TboCacheEntryType type, IReadOnlyCollection<long> ids)
+		{
+			if (ids == null)
+				throw new ArgumentNullException(nameof(ids));
+
+			if (ids.Count == 0)
+				return;
+
+			using var tx = _connection.BeginTransaction();
+			using var cmd = _connection.CreateCommand();
+			cmd.Transaction = tx;
+
+			var inClause = AddLongParameters(cmd, "$id", ids);
+
+			switch (type)
+			{
+				case TboCacheEntryType.Observation:
+					cmd.CommandText = $"DELETE FROM observations WHERE observation_id IN ({inClause});";
+					cmd.ExecuteNonQuery();
+					break;
+
+				case TboCacheEntryType.Machine:
+					cmd.CommandText = $"DELETE FROM observations WHERE machine_id IN ({inClause});";
+					cmd.ExecuteNonQuery();
+					cmd.CommandText = $"DELETE FROM machines WHERE machine_id IN ({inClause});";
+					cmd.ExecuteNonQuery();
+					break;
+
+				case TboCacheEntryType.Principal:
+					cmd.CommandText = $"DELETE FROM observations WHERE principal_id IN ({inClause});";
+					cmd.ExecuteNonQuery();
+					cmd.CommandText = $"DELETE FROM principals WHERE principal_id IN ({inClause});";
+					cmd.ExecuteNonQuery();
+					break;
+
+				case TboCacheEntryType.Credential:
+					cmd.CommandText = $"DELETE FROM observations WHERE credential_id IN ({inClause});";
+					cmd.ExecuteNonQuery();
+					cmd.CommandText = $"DELETE FROM credentials WHERE credential_id IN ({inClause});";
+					cmd.ExecuteNonQuery();
+					break;
+
+				default:
+					throw new ArgumentOutOfRangeException(nameof(type), type, "Not a valid cache entry type.");
+			}
+
+			tx.Commit();
+		}
+
+		private static string AddLongParameters(SqliteCommand cmd, string baseName, IReadOnlyCollection<long> values)
+		{
+			var names = new List<string>(values.Count);
+			int i = 0;
+			foreach (var value in values)
+			{
+				var name = $"{baseName}{i++}";
+				cmd.Parameters.AddWithValue(name, value);
+				names.Add(name);
+			}
+
+			return string.Join(", ", names);
+		}
+
 		internal (int schemaVersion, string path) GetInfo(string? explicitPath = null)
 		{
 			// The DB path is not directly exposed by Microsoft.Data.Sqlite in a structured way;

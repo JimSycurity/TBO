@@ -135,6 +135,41 @@ Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryPoli
 Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeRootReparseInfo
 ```
 
+### Get-TBOCacheInfo
+
+Shows information about the persistent TBO cache (schema version and row counts). The cache is stored on disk (SQLite) and persists between PowerShell sessions.
+
+Cache path resolution order:
+
+- `-Path` parameter
+- `TITANIS_TBO_CACHE` environment variable (file path, or `1/true/yes` to use default)
+- Default: `%LOCALAPPDATA%\TBO\cache.sqlite3` (Windows)
+
+```powershell
+Get-TBOCacheInfo
+Get-TBOCacheInfo -Path C:\Temp\tbo-cache.sqlite3
+$env:TITANIS_TBO_CACHE = 'C:\Temp\tbo-cache.sqlite3'; Get-TBOCacheInfo
+```
+
+### Clear-TBOCache
+
+Deletes all rows from the cache database.
+
+```powershell
+Clear-TBOCache
+Clear-TBOCache -WhatIf
+Clear-TBOCache -Confirm:$false
+```
+
+### Remove-TBOCacheEntry
+
+Deletes one or more entries by type and id. When removing machines/principals/credentials, related observations are deleted first.
+
+```powershell
+Remove-TBOCacheEntry -Type Observation -Id 1
+Remove-TBOCacheEntry -Type Credential -Id 12,13,14
+```
+
 ### Set-TBOSmbConnectOptions (Deprecated)
 
 Deprecated shim for `Set-TBOConnectOptions`. Uses the same dynamic parameters and behavior.
