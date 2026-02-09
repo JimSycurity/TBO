@@ -5502,7 +5502,7 @@ Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2</maml:code>
       <command:parameter required="false">
         <maml:name>Format</maml:name>
         <maml:description>
-          <maml:para>Graph export format. Supported values: Json, Dot.</maml:para>
+          <maml:para>Graph export format. Supported values: Json, Dot, OpenGraph.</maml:para>
         </maml:description>
         <command:parameterValue>TboCacheGraphFormat</command:parameterValue>
       </command:parameter>
@@ -5527,6 +5527,13 @@ Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2</maml:code>
         <maml:code>Export-TBOCacheGraph -Format Dot | Set-Content -Path .\tbo-cache-graph.dot -Encoding ascii</maml:code>
         <maml:remarks>
           <maml:para>Exports a GraphViz DOT graph.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Export-TBOCacheGraph -Format OpenGraph | Set-Content -Path .\tbo-cache-opengraph.json -Encoding utf8</maml:code>
+        <maml:remarks>
+          <maml:para>Exports BloodHound OpenGraph JSON.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

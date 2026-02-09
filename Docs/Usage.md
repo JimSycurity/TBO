@@ -203,7 +203,7 @@ Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol `
 
 ### Export-TBOCacheGraph
 
-Exports the persistent cache as a graph for external visualization. Supports `Json` (nodes+edges) and GraphViz `Dot`.
+Exports the persistent cache as a graph for external visualization. Supports `Json` (nodes+edges), GraphViz `Dot`, and BloodHound `OpenGraph` (https://bloodhound.specterops.io/opengraph/schema).
 
 ```powershell
 # Export as JSON.
@@ -211,6 +211,9 @@ Export-TBOCacheGraph -Format Json | Set-Content -Path .\tbo-cache-graph.json -En
 
 # Export as GraphViz DOT.
 Export-TBOCacheGraph -Format Dot | Set-Content -Path .\tbo-cache-graph.dot -Encoding ascii
+
+# Export as BloodHound OpenGraph JSON.
+Export-TBOCacheGraph -Format OpenGraph | Set-Content -Path .\tbo-cache-opengraph.json -Encoding utf8
 ```
 
 ### Set-TBOSmbConnectOptions (Deprecated)

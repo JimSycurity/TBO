@@ -49,7 +49,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	public enum TboCacheGraphFormat
 	{
 		Json = 1,
-		Dot = 2
+		Dot = 2,
+		OpenGraph = 3
 	}
 
 	[Cmdlet(VerbsCommon.Get, "TBOCacheInfo")]
@@ -229,10 +230,229 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var output = this.Format switch
 			{
 				TboCacheGraphFormat.Dot => RenderDot(graph),
+				TboCacheGraphFormat.OpenGraph => RenderOpenGraph(graph),
 				_ => RenderJson(graph)
 			};
 
 			this.WriteObject(output);
+		}
+
+		// BloodHound OpenGraph JSON export.
+		//
+		// Schema reference: https://bloodhound.specterops.io/opengraph/schema
+		//
+		// Important constraints:
+		// - Node.id is a string and must be unique.
+		// - Node.kinds is a string array (1..3 items). The first element is treated as the "primary" kind.
+		// - Node/Edge properties is a flat key-value map where values must not be objects
+		//   (strings, numbers, booleans, or arrays of primitives only).
+		private static string RenderOpenGraph(TboCacheDatabase.GraphData graph)
+		{
+			using var ms = new MemoryStream();
+
+			using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
+			{
+				writer.WriteStartObject();
+
+				writer.WriteStartObject("graph");
+
+				writer.WriteStartArray("nodes");
+
+				foreach (var m in graph.Machines)
+					WriteOpenGraphMachineNode(writer, m);
+
+				foreach (var p in graph.Principals)
+					WriteOpenGraphPrincipalNode(writer, p);
+
+				foreach (var c in graph.Credentials)
+					WriteOpenGraphCredentialNode(writer, c);
+
+				writer.WriteEndArray();
+
+				writer.WriteStartArray("edges");
+
+				foreach (var o in graph.Observations)
+				{
+					if (o.PrincipalId.HasValue)
+					{
+						WriteOpenGraphObservationEdge(
+							writer,
+							o,
+							edgeKind: "ObservedPrincipal",
+							targetNodeId: $"principal:{o.PrincipalId.Value}",
+							targetKind: "TBO.Principal");
+					}
+
+					if (o.CredentialId.HasValue)
+					{
+						WriteOpenGraphObservationEdge(
+							writer,
+							o,
+							edgeKind: "ObservedCredential",
+							targetNodeId: $"credential:{o.CredentialId.Value}",
+							targetKind: "TBO.Credential");
+					}
+				}
+
+				writer.WriteEndArray();
+
+				writer.WriteEndObject(); // graph
+				writer.WriteEndObject(); // root
+			}
+
+			return Encoding.UTF8.GetString(ms.ToArray());
+		}
+
+		private static void WriteOpenGraphMachineNode(Utf8JsonWriter writer, TboCacheDatabase.GraphMachineRow m)
+		{
+			writer.WriteStartObject();
+			writer.WriteString("id", $"machine:{m.MachineId}");
+
+			// Keep the primary kind generic for UI readability, while preserving a TBO-specific kind for filtering.
+			writer.WriteStartArray("kinds");
+			writer.WriteStringValue("Computer");
+			writer.WriteStringValue("TBO.Machine");
+			writer.WriteEndArray();
+
+			writer.WriteStartObject("properties");
+			writer.WriteString("objectid", $"machine:{m.MachineId}");
+			writer.WriteNumber("machineId", m.MachineId);
+			writer.WriteString("serverName", m.ServerName);
+			writer.WriteString("name", m.ServerName);
+			writer.WriteString("displayname", m.ServerName);
+			writer.WriteString("firstSeenUtc", m.FirstSeenUtc);
+			writer.WriteString("lastSeenUtc", m.LastSeenUtc);
+			writer.WriteEndObject();
+
+			writer.WriteEndObject();
+		}
+
+		private static void WriteOpenGraphPrincipalNode(Utf8JsonWriter writer, TboCacheDatabase.GraphPrincipalRow p)
+		{
+			writer.WriteStartObject();
+			writer.WriteString("id", $"principal:{p.PrincipalId}");
+
+			var primaryKind = MapPrincipalKind(p.Type);
+
+			writer.WriteStartArray("kinds");
+			writer.WriteStringValue(primaryKind);
+			if (!string.Equals(primaryKind, "TBO.Principal", StringComparison.Ordinal))
+				writer.WriteStringValue("TBO.Principal");
+			writer.WriteEndArray();
+
+			var display = BuildPrincipalDisplay(p.PrincipalId, p.Sid, p.Domain, p.Name);
+
+			writer.WriteStartObject("properties");
+			writer.WriteString("objectid", $"principal:{p.PrincipalId}");
+			writer.WriteNumber("principalId", p.PrincipalId);
+			writer.WriteString("name", display);
+			writer.WriteString("displayname", display);
+			if (!string.IsNullOrWhiteSpace(p.Sid))
+				writer.WriteString("sid", p.Sid);
+			if (!string.IsNullOrWhiteSpace(p.Domain))
+				writer.WriteString("domain", p.Domain);
+			if (!string.IsNullOrWhiteSpace(p.Name))
+				writer.WriteString("accountName", p.Name);
+			if (!string.IsNullOrWhiteSpace(p.Type))
+				writer.WriteString("principalType", p.Type);
+			writer.WriteString("firstSeenUtc", p.FirstSeenUtc);
+			writer.WriteString("lastSeenUtc", p.LastSeenUtc);
+			writer.WriteEndObject();
+
+			writer.WriteEndObject();
+		}
+
+		private static void WriteOpenGraphCredentialNode(Utf8JsonWriter writer, TboCacheDatabase.GraphCredentialRow c)
+		{
+			writer.WriteStartObject();
+			writer.WriteString("id", $"credential:{c.CredentialId}");
+
+			writer.WriteStartArray("kinds");
+			writer.WriteStringValue("TBO.Credential");
+			writer.WriteEndArray();
+
+			var display = $"{c.Kind}:{c.Identifier}";
+
+			writer.WriteStartObject("properties");
+			writer.WriteString("objectid", $"credential:{c.CredentialId}");
+			writer.WriteNumber("credentialId", c.CredentialId);
+			writer.WriteString("kind", c.Kind);
+			writer.WriteString("identifier", c.Identifier);
+			writer.WriteString("name", display);
+			writer.WriteString("displayname", display);
+			writer.WriteString("firstSeenUtc", c.FirstSeenUtc);
+			writer.WriteString("lastSeenUtc", c.LastSeenUtc);
+			writer.WriteEndObject();
+
+			writer.WriteEndObject();
+		}
+
+		private static void WriteOpenGraphObservationEdge(
+			Utf8JsonWriter writer,
+			TboCacheDatabase.GraphObservationRow o,
+			string edgeKind,
+			string targetNodeId,
+			string targetKind)
+		{
+			writer.WriteStartObject();
+			writer.WriteString("kind", edgeKind);
+
+			writer.WriteStartObject("start");
+			writer.WriteString("match_by", "id");
+			writer.WriteString("value", $"machine:{o.MachineId}");
+			writer.WriteString("kind", "TBO.Machine");
+			writer.WriteEndObject();
+
+			writer.WriteStartObject("end");
+			writer.WriteString("match_by", "id");
+			writer.WriteString("value", targetNodeId);
+			writer.WriteString("kind", targetKind);
+			writer.WriteEndObject();
+
+			// Keep properties flat (no nested objects), per OpenGraph schema requirements.
+			writer.WriteStartObject("properties");
+			writer.WriteNumber("observationId", o.ObservationId);
+			writer.WriteString("observedUtc", o.ObservedUtc);
+			writer.WriteString("sourceKind", o.SourceKind);
+			if (!string.IsNullOrWhiteSpace(o.SourcePath))
+				writer.WriteString("sourcePath", o.SourcePath);
+			if (o.Confidence.HasValue)
+				writer.WriteNumber("confidence", o.Confidence.Value);
+			if (!string.IsNullOrWhiteSpace(o.ContextJson))
+				writer.WriteString("contextJson", o.ContextJson);
+			writer.WriteEndObject();
+
+			writer.WriteEndObject();
+		}
+
+		private static string MapPrincipalKind(string? principalType)
+		{
+			if (string.IsNullOrWhiteSpace(principalType))
+				return "TBO.Principal";
+
+			// These are just for better UI icons/labels in BloodHound; they are not semantics for TBO.
+			return principalType.Trim() switch
+			{
+				"User" => "User",
+				"Group" => "Group",
+				"Computer" => "Computer",
+				_ => "TBO.Principal"
+			};
+		}
+
+		private static string BuildPrincipalDisplay(long principalId, string? sid, string? domain, string? name)
+		{
+			var dn = string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(name)
+				? null
+				: $"{domain}\\{name}";
+
+			if (!string.IsNullOrWhiteSpace(dn))
+				return dn;
+
+			if (!string.IsNullOrWhiteSpace(sid))
+				return sid;
+
+			return $"principal:{principalId}";
 		}
 
 		private static string RenderJson(TboCacheDatabase.GraphData graph)
