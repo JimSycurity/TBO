@@ -41,6 +41,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public string ShareName { get; set; } = DpapiMasterKeyLocator.DefaultShareName;
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		private CancellationTokenSource? _cancelSource;
 
 		protected override void ProcessRecord(ISmbProviderInfo smb)
@@ -59,7 +65,28 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (this.Scope == DpapiMasterKeyScope.None)
 				return;
 
-			var domainCache = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
+			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
+			TboCacheDatabase? cacheDb = null;
+			long cacheMachineId = 0;
+			if (ingestCache)
+			{
+				try
+				{
+					cacheDb = TboCacheDatabase.Open(this.CachePath, msg => this.WriteVerbose(msg));
+					cacheMachineId = cacheDb.UpsertMachine(serverName);
+				}
+				catch (Exception ex)
+				{
+					cacheDb?.Dispose();
+					cacheDb = null;
+					this.LogException(smb, $"Get-TBODpapiMasterKeyHashes failed to open cache DB for {serverName}", ex, emitWarning: false);
+					this.LogWarning(smb, $"Get-TBODpapiMasterKeyHashes cache write disabled: {ex.Message}");
+				}
+			}
+
+			try
+			{
+				var domainCache = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
 
 			bool? TryGetIsDomainDir(string directoryPath, out string? failure)
 			{
@@ -145,7 +172,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				if (string.IsNullOrWhiteSpace(location.UserSid))
 				{
-					this.WriteObject(new TboDpapiMasterKeyHashInfo
+					var info = new TboDpapiMasterKeyHashInfo
 					{
 						ServerName = this.ServerName,
 						Scope = location.Scope,
@@ -155,7 +182,33 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						IsPreferred = location.IsPreferred,
 						HashContext = 0,
 						FailureReason = "UserSid was missing; cannot format master key hash."
-					});
+					};
+
+					if (cacheDb != null && !string.IsNullOrWhiteSpace(info.MasterKeyGuid))
+					{
+						try
+						{
+							cacheDb.UpsertDpapiMasterKey(
+								machineId: cacheMachineId,
+								scope: info.Scope,
+								userSid: info.UserSid,
+								keyPath: info.KeyPath,
+								masterKeyGuid: info.MasterKeyGuid,
+								isPreferred: info.IsPreferred,
+								isDomain: info.IsDomain,
+								hashContext: info.HashContext,
+								hash: info.Hash,
+								hashLine: info.HashLine,
+								failureReason: info.FailureReason);
+						}
+						catch (Exception ex)
+						{
+							this.LogException(smb, $"Get-TBODpapiMasterKeyHashes failed to write cache master key record for {serverName}", ex, emitWarning: false);
+							this.LogWarning(smb, $"Get-TBODpapiMasterKeyHashes cache write failed: {ex.Message}");
+						}
+					}
+
+					this.WriteObject(info);
 					continue;
 				}
 
@@ -194,7 +247,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				catch (Exception ex)
 				{
 					this.LogException(smb, $"Get-TBODpapiMasterKeyHashes failed to read {location.KeyPath}", ex, emitWarning: false);
-					this.WriteObject(new TboDpapiMasterKeyHashInfo
+					var info = new TboDpapiMasterKeyHashInfo
 					{
 						ServerName = this.ServerName,
 						Scope = location.Scope,
@@ -205,7 +258,33 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						IsDomain = isDomain,
 						HashContext = context,
 						FailureReason = $"Failed to read master key file: {ex.Message}"
-					});
+					};
+
+					if (cacheDb != null && !string.IsNullOrWhiteSpace(info.MasterKeyGuid))
+					{
+						try
+						{
+							cacheDb.UpsertDpapiMasterKey(
+								machineId: cacheMachineId,
+								scope: info.Scope,
+								userSid: info.UserSid,
+								keyPath: info.KeyPath,
+								masterKeyGuid: info.MasterKeyGuid,
+								isPreferred: info.IsPreferred,
+								isDomain: info.IsDomain,
+								hashContext: info.HashContext,
+								hash: info.Hash,
+								hashLine: info.HashLine,
+								failureReason: info.FailureReason);
+						}
+						catch (Exception cacheEx)
+						{
+							this.LogException(smb, $"Get-TBODpapiMasterKeyHashes failed to write cache master key record for {serverName}", cacheEx, emitWarning: false);
+							this.LogWarning(smb, $"Get-TBODpapiMasterKeyHashes cache write failed: {cacheEx.Message}");
+						}
+					}
+
+					this.WriteObject(info);
 					continue;
 				}
 
@@ -217,7 +296,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				catch (Exception ex)
 				{
 					this.LogException(smb, $"Get-TBODpapiMasterKeyHashes failed to parse {location.KeyPath}", ex, emitWarning: false);
-					this.WriteObject(new TboDpapiMasterKeyHashInfo
+					var info = new TboDpapiMasterKeyHashInfo
 					{
 						ServerName = this.ServerName,
 						Scope = location.Scope,
@@ -228,7 +307,33 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						IsDomain = isDomain,
 						HashContext = context,
 						FailureReason = $"Failed to parse master key file: {ex.Message}"
-					});
+					};
+
+					if (cacheDb != null && !string.IsNullOrWhiteSpace(info.MasterKeyGuid))
+					{
+						try
+						{
+							cacheDb.UpsertDpapiMasterKey(
+								machineId: cacheMachineId,
+								scope: info.Scope,
+								userSid: info.UserSid,
+								keyPath: info.KeyPath,
+								masterKeyGuid: info.MasterKeyGuid,
+								isPreferred: info.IsPreferred,
+								isDomain: info.IsDomain,
+								hashContext: info.HashContext,
+								hash: info.Hash,
+								hashLine: info.HashLine,
+								failureReason: info.FailureReason);
+						}
+						catch (Exception cacheEx)
+						{
+							this.LogException(smb, $"Get-TBODpapiMasterKeyHashes failed to write cache master key record for {serverName}", cacheEx, emitWarning: false);
+							this.LogWarning(smb, $"Get-TBODpapiMasterKeyHashes cache write failed: {cacheEx.Message}");
+						}
+					}
+
+					this.WriteObject(info);
 					continue;
 				}
 
@@ -247,7 +352,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				if (!DpapiMasterKeyHashFormatter.TryFormatDpapiMkHash(masterKeyFile, location.UserSid, context, out var guidWithBraces, out var hashText, out var formatFailure))
 				{
-					this.WriteObject(new TboDpapiMasterKeyHashInfo
+					var info = new TboDpapiMasterKeyHashInfo
 					{
 						ServerName = this.ServerName,
 						Scope = location.Scope,
@@ -258,11 +363,37 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						IsDomain = isDomain,
 						HashContext = context,
 						FailureReason = formatFailure
-					});
+					};
+
+					if (cacheDb != null && !string.IsNullOrWhiteSpace(info.MasterKeyGuid))
+					{
+						try
+						{
+							cacheDb.UpsertDpapiMasterKey(
+								machineId: cacheMachineId,
+								scope: info.Scope,
+								userSid: info.UserSid,
+								keyPath: info.KeyPath,
+								masterKeyGuid: info.MasterKeyGuid,
+								isPreferred: info.IsPreferred,
+								isDomain: info.IsDomain,
+								hashContext: info.HashContext,
+								hash: info.Hash,
+								hashLine: info.HashLine,
+								failureReason: info.FailureReason);
+						}
+						catch (Exception cacheEx)
+						{
+							this.LogException(smb, $"Get-TBODpapiMasterKeyHashes failed to write cache master key record for {serverName}", cacheEx, emitWarning: false);
+							this.LogWarning(smb, $"Get-TBODpapiMasterKeyHashes cache write failed: {cacheEx.Message}");
+						}
+					}
+
+					this.WriteObject(info);
 					continue;
 				}
 
-				this.WriteObject(new TboDpapiMasterKeyHashInfo
+				var successInfo = new TboDpapiMasterKeyHashInfo
 				{
 					ServerName = this.ServerName,
 					Scope = location.Scope,
@@ -274,7 +405,38 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					HashContext = context,
 					Hash = hashText,
 					HashLine = $"{guidWithBraces}:{hashText}"
-				});
+				};
+
+				if (cacheDb != null && !string.IsNullOrWhiteSpace(successInfo.MasterKeyGuid))
+				{
+					try
+					{
+						cacheDb.UpsertDpapiMasterKey(
+							machineId: cacheMachineId,
+							scope: successInfo.Scope,
+							userSid: successInfo.UserSid,
+							keyPath: successInfo.KeyPath,
+							masterKeyGuid: successInfo.MasterKeyGuid,
+							isPreferred: successInfo.IsPreferred,
+							isDomain: successInfo.IsDomain,
+							hashContext: successInfo.HashContext,
+							hash: successInfo.Hash,
+							hashLine: successInfo.HashLine,
+							failureReason: successInfo.FailureReason);
+					}
+					catch (Exception cacheEx)
+					{
+						this.LogException(smb, $"Get-TBODpapiMasterKeyHashes failed to write cache master key record for {serverName}", cacheEx, emitWarning: false);
+						this.LogWarning(smb, $"Get-TBODpapiMasterKeyHashes cache write failed: {cacheEx.Message}");
+					}
+				}
+
+				this.WriteObject(successInfo);
+			}
+			}
+			finally
+			{
+				cacheDb?.Dispose();
 			}
 		}
 

@@ -18,6 +18,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public long PrincipalCount { get; init; }
 		public long CredentialCount { get; init; }
 		public long ObservationCount { get; init; }
+
+		public long DpapiMasterKeyCount { get; init; }
+		public long DpapiBlobCount { get; init; }
 	}
 
 	public sealed class TboCacheCredentialReuse
@@ -79,6 +82,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				PrincipalCount = GetCount("principals"),
 				CredentialCount = GetCount("credentials"),
 				ObservationCount = GetCount("observations"),
+				DpapiMasterKeyCount = GetCount("dpapi_masterkeys"),
+				DpapiBlobCount = GetCount("dpapi_blobs"),
 			});
 		}
 	}
@@ -731,6 +736,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			using var db = TboCacheDatabase.Open(this.Path, msg => this.WriteVerbose(msg));
 			var (schemaVersion, resolvedPath) = db.GetInfo(this.Path);
 			var graph = db.QueryGraphData();
+			var dpapiMasterKeys = db.QueryDpapiMasterKeys();
+			var dpapiBlobs = db.QueryDpapiBlobs();
 
 			using var ms = new MemoryStream();
 			using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
@@ -807,6 +814,73 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						writer.WriteNumber("confidence", o.Confidence.Value);
 					if (!string.IsNullOrWhiteSpace(o.ContextJson))
 						writer.WriteString("contextJson", o.ContextJson);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
+
+				writer.WriteStartArray("dpapiMasterKeys");
+				foreach (var mk in dpapiMasterKeys)
+				{
+					writer.WriteStartObject();
+					writer.WriteNumber("dpapiMasterKeyId", mk.DpapiMasterKeyId);
+					writer.WriteNumber("machineId", mk.MachineId);
+					writer.WriteString("scope", mk.Scope);
+					if (!string.IsNullOrWhiteSpace(mk.UserSid))
+						writer.WriteString("userSid", mk.UserSid);
+					writer.WriteString("keyPath", mk.KeyPath);
+					writer.WriteString("masterKeyGuid", mk.MasterKeyGuid);
+					writer.WriteBoolean("isPreferred", mk.IsPreferred);
+					if (mk.IsDomain.HasValue)
+						writer.WriteBoolean("isDomain", mk.IsDomain.Value);
+					if (mk.HashContext.HasValue)
+						writer.WriteNumber("hashContext", mk.HashContext.Value);
+					if (!string.IsNullOrWhiteSpace(mk.Hash))
+						writer.WriteString("hash", mk.Hash);
+					if (!string.IsNullOrWhiteSpace(mk.HashLine))
+						writer.WriteString("hashLine", mk.HashLine);
+					if (!string.IsNullOrWhiteSpace(mk.FailureReason))
+						writer.WriteString("failureReason", mk.FailureReason);
+					writer.WriteString("firstSeenUtc", mk.FirstSeenUtc);
+					writer.WriteString("lastSeenUtc", mk.LastSeenUtc);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
+
+				writer.WriteStartArray("dpapiBlobs");
+				foreach (var b in dpapiBlobs)
+				{
+					writer.WriteStartObject();
+					writer.WriteNumber("dpapiBlobId", b.DpapiBlobId);
+					writer.WriteNumber("machineId", b.MachineId);
+					writer.WriteString("blobKey", b.BlobKey);
+					writer.WriteString("source", b.Source);
+					writer.WriteString("path", b.Path);
+					if (!string.IsNullOrWhiteSpace(b.ValueName))
+						writer.WriteString("valueName", b.ValueName);
+					if (b.ValueType.HasValue)
+						writer.WriteNumber("valueType", b.ValueType.Value);
+					if (b.DataLength.HasValue)
+						writer.WriteNumber("dataLength", b.DataLength.Value);
+					if (b.FileSize.HasValue)
+						writer.WriteNumber("fileSize", b.FileSize.Value);
+					writer.WriteNumber("matchOffset", b.MatchOffset);
+					writer.WriteNumber("bytesScanned", b.BytesScanned);
+					if (!string.IsNullOrWhiteSpace(b.CredentialGuid))
+						writer.WriteString("credentialGuid", b.CredentialGuid);
+					if (!string.IsNullOrWhiteSpace(b.MasterKeyGuid))
+						writer.WriteString("masterKeyGuid", b.MasterKeyGuid);
+					if (b.Flags.HasValue)
+						writer.WriteNumber("flags", b.Flags.Value);
+					if (!string.IsNullOrWhiteSpace(b.Description))
+						writer.WriteString("description", b.Description);
+					if (b.CryptAlgorithmId.HasValue)
+						writer.WriteNumber("cryptAlgorithmId", b.CryptAlgorithmId.Value);
+					if (b.HashAlgorithmId.HasValue)
+						writer.WriteNumber("hashAlgorithmId", b.HashAlgorithmId.Value);
+					if (!string.IsNullOrWhiteSpace(b.ParseFailureReason))
+						writer.WriteString("parseFailureReason", b.ParseFailureReason);
+					writer.WriteString("firstSeenUtc", b.FirstSeenUtc);
+					writer.WriteString("lastSeenUtc", b.LastSeenUtc);
 					writer.WriteEndObject();
 				}
 				writer.WriteEndArray();

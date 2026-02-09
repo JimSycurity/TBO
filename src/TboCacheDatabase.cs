@@ -16,7 +16,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		internal const string CachePathEnvVar = "TITANIS_TBO_CACHE";
 
-		private const int SchemaVersion = 2;
+		private const int SchemaVersion = 3;
 		private readonly SqliteConnection _connection;
 
 		internal enum PrincipalScope
@@ -138,7 +138,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (userVersion == 0)
 			{
 				logDiagnostic($"TBO cache: initializing new DB (schema v{SchemaVersion}).");
-				ApplySchemaV2();
+				ApplySchemaV3();
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -153,6 +153,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				logDiagnostic("TBO cache: migrating DB schema v1 -> v2.");
 				MigrateSchemaV1ToV2(logDiagnostic);
+				SetUserVersion(2);
+				userVersion = 2;
+			}
+
+			if (userVersion == 2)
+			{
+				logDiagnostic("TBO cache: migrating DB schema v2 -> v3.");
+				MigrateSchemaV2ToV3(logDiagnostic);
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -175,7 +183,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			cmd.ExecuteNonQuery();
 		}
 
-		private void ApplySchemaV2()
+		private void ApplySchemaV3()
 		{
 			using var tx = _connection.BeginTransaction();
 
@@ -264,6 +272,59 @@ CREATE TABLE IF NOT EXISTS observations(
 			Exec("CREATE INDEX IF NOT EXISTS idx_observations_credential_id ON observations(credential_id);", tx);
 			Exec("CREATE INDEX IF NOT EXISTS idx_credentials_kind_identifier ON credentials(kind, identifier);", tx);
 
+			Exec(@"
+CREATE TABLE IF NOT EXISTS dpapi_masterkeys(
+  dpapi_masterkey_id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  scope TEXT NOT NULL,
+  user_sid TEXT NULL COLLATE NOCASE,
+  key_path TEXT NOT NULL,
+  master_key_guid TEXT NOT NULL COLLATE NOCASE,
+  is_preferred INTEGER NOT NULL,
+  is_domain INTEGER NULL,
+  hash_context INTEGER NULL,
+  hash TEXT NULL,
+  hash_line TEXT NULL,
+  failure_reason TEXT NULL,
+  first_seen_utc TEXT NOT NULL,
+  last_seen_utc TEXT NOT NULL,
+  UNIQUE(machine_id, master_key_guid)
+);
+", tx);
+
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_masterkeys_machine_id ON dpapi_masterkeys(machine_id);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_masterkeys_master_key_guid ON dpapi_masterkeys(master_key_guid);", tx);
+
+			Exec(@"
+CREATE TABLE IF NOT EXISTS dpapi_blobs(
+  dpapi_blob_id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  blob_key TEXT NOT NULL,
+  source TEXT NOT NULL,
+  path TEXT NOT NULL,
+  value_name TEXT NOT NULL DEFAULT '',
+  value_type INTEGER NULL,
+  data_length INTEGER NULL,
+  file_size INTEGER NULL,
+  match_offset INTEGER NOT NULL,
+  bytes_scanned INTEGER NOT NULL,
+  credential_guid TEXT NULL COLLATE NOCASE,
+  master_key_guid TEXT NULL COLLATE NOCASE,
+  flags INTEGER NULL,
+  description TEXT NULL,
+  crypt_algorithm_id INTEGER NULL,
+  hash_algorithm_id INTEGER NULL,
+  parse_failure_reason TEXT NULL,
+  first_seen_utc TEXT NOT NULL,
+  last_seen_utc TEXT NOT NULL,
+  UNIQUE(machine_id, blob_key)
+);
+", tx);
+
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_blobs_machine_id ON dpapi_blobs(machine_id);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_blobs_master_key_guid ON dpapi_blobs(master_key_guid);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_blobs_blob_key ON dpapi_blobs(blob_key);", tx);
+
 			tx.Commit();
 		}
 
@@ -342,6 +403,68 @@ WHERE scope = 'Machine' AND sid IS NULL AND scope_machine_id IS NOT NULL AND dom
 			}
 
 			logDiagnostic("TBO cache: migration to schema v2 complete.");
+		}
+
+		private void MigrateSchemaV2ToV3(Action<string> logDiagnostic)
+		{
+			using var tx = _connection.BeginTransaction();
+
+			Exec(@"
+CREATE TABLE IF NOT EXISTS dpapi_masterkeys(
+  dpapi_masterkey_id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  scope TEXT NOT NULL,
+  user_sid TEXT NULL COLLATE NOCASE,
+  key_path TEXT NOT NULL,
+  master_key_guid TEXT NOT NULL COLLATE NOCASE,
+  is_preferred INTEGER NOT NULL,
+  is_domain INTEGER NULL,
+  hash_context INTEGER NULL,
+  hash TEXT NULL,
+  hash_line TEXT NULL,
+  failure_reason TEXT NULL,
+  first_seen_utc TEXT NOT NULL,
+  last_seen_utc TEXT NOT NULL,
+  UNIQUE(machine_id, master_key_guid)
+);
+", tx);
+
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_masterkeys_machine_id ON dpapi_masterkeys(machine_id);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_masterkeys_master_key_guid ON dpapi_masterkeys(master_key_guid);", tx);
+
+			Exec(@"
+CREATE TABLE IF NOT EXISTS dpapi_blobs(
+  dpapi_blob_id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  blob_key TEXT NOT NULL,
+  source TEXT NOT NULL,
+  path TEXT NOT NULL,
+  value_name TEXT NOT NULL DEFAULT '',
+  value_type INTEGER NULL,
+  data_length INTEGER NULL,
+  file_size INTEGER NULL,
+  match_offset INTEGER NOT NULL,
+  bytes_scanned INTEGER NOT NULL,
+  credential_guid TEXT NULL COLLATE NOCASE,
+  master_key_guid TEXT NULL COLLATE NOCASE,
+  flags INTEGER NULL,
+  description TEXT NULL,
+  crypt_algorithm_id INTEGER NULL,
+  hash_algorithm_id INTEGER NULL,
+  parse_failure_reason TEXT NULL,
+  first_seen_utc TEXT NOT NULL,
+  last_seen_utc TEXT NOT NULL,
+  UNIQUE(machine_id, blob_key)
+);
+", tx);
+
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_blobs_machine_id ON dpapi_blobs(machine_id);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_blobs_master_key_guid ON dpapi_blobs(master_key_guid);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_blobs_blob_key ON dpapi_blobs(blob_key);", tx);
+
+			tx.Commit();
+
+			logDiagnostic("TBO cache: migration to schema v3 complete.");
 		}
 
 		private void Exec(string sql, SqliteTransaction tx)
@@ -573,6 +696,143 @@ RETURNING observation_id;";
 			return (long)cmd.ExecuteScalar()!;
 		}
 
+		internal long UpsertDpapiMasterKey(
+			long machineId,
+			string scope,
+			string? userSid,
+			string keyPath,
+			string masterKeyGuid,
+			bool isPreferred,
+			bool? isDomain,
+			int? hashContext,
+			string? hash,
+			string? hashLine,
+			string? failureReason)
+		{
+			if (machineId <= 0)
+				throw new ArgumentOutOfRangeException(nameof(machineId));
+			if (string.IsNullOrWhiteSpace(scope))
+				throw new ArgumentException("Scope must be provided.", nameof(scope));
+			if (string.IsNullOrWhiteSpace(keyPath))
+				throw new ArgumentException("KeyPath must be provided.", nameof(keyPath));
+			if (string.IsNullOrWhiteSpace(masterKeyGuid))
+				throw new ArgumentException("MasterKeyGuid must be provided.", nameof(masterKeyGuid));
+
+			var now = UtcNowIso8601();
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+INSERT INTO dpapi_masterkeys(machine_id, scope, user_sid, key_path, master_key_guid, is_preferred, is_domain, hash_context, hash, hash_line, failure_reason, first_seen_utc, last_seen_utc)
+VALUES ($machine_id, $scope, $user_sid, $key_path, $master_key_guid, $is_preferred, $is_domain, $hash_context, $hash, $hash_line, $failure_reason, $now, $now)
+ON CONFLICT(machine_id, master_key_guid) DO UPDATE SET
+  scope=excluded.scope,
+  user_sid=COALESCE(excluded.user_sid, user_sid),
+  key_path=COALESCE(excluded.key_path, key_path),
+  is_preferred=excluded.is_preferred,
+  is_domain=COALESCE(excluded.is_domain, is_domain),
+  hash_context=COALESCE(excluded.hash_context, hash_context),
+  hash=COALESCE(excluded.hash, hash),
+  hash_line=COALESCE(excluded.hash_line, hash_line),
+  failure_reason=CASE WHEN excluded.failure_reason IS NOT NULL THEN excluded.failure_reason ELSE failure_reason END,
+  last_seen_utc=$now
+RETURNING dpapi_masterkey_id;";
+
+			cmd.Parameters.AddWithValue("$machine_id", machineId);
+			cmd.Parameters.AddWithValue("$scope", scope.Trim());
+			cmd.Parameters.AddWithValue("$user_sid", (object?)userSid ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$key_path", keyPath.Trim());
+			cmd.Parameters.AddWithValue("$master_key_guid", masterKeyGuid.Trim());
+			cmd.Parameters.AddWithValue("$is_preferred", isPreferred ? 1 : 0);
+			cmd.Parameters.AddWithValue("$is_domain", isDomain.HasValue ? (isDomain.Value ? 1 : 0) : (object)DBNull.Value);
+			cmd.Parameters.AddWithValue("$hash_context", (object?)hashContext ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$hash", (object?)hash ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$hash_line", (object?)hashLine ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$failure_reason", (object?)failureReason ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$now", now);
+
+			return (long)cmd.ExecuteScalar()!;
+		}
+
+		internal long UpsertDpapiBlob(
+			long machineId,
+			string blobKey,
+			string source,
+			string path,
+			string? valueName,
+			int? valueType,
+			int? dataLength,
+			long? fileSize,
+			int matchOffset,
+			int bytesScanned,
+			string? credentialGuid,
+			string? masterKeyGuid,
+			uint? flags,
+			string? description,
+			uint? cryptAlgorithmId,
+			uint? hashAlgorithmId,
+			string? parseFailureReason)
+		{
+			if (machineId <= 0)
+				throw new ArgumentOutOfRangeException(nameof(machineId));
+			if (string.IsNullOrWhiteSpace(blobKey))
+				throw new ArgumentException("BlobKey must be provided.", nameof(blobKey));
+			if (string.IsNullOrWhiteSpace(source))
+				throw new ArgumentException("Source must be provided.", nameof(source));
+			if (string.IsNullOrWhiteSpace(path))
+				throw new ArgumentException("Path must be provided.", nameof(path));
+			if (matchOffset < 0)
+				throw new ArgumentOutOfRangeException(nameof(matchOffset));
+			if (bytesScanned < 0)
+				throw new ArgumentOutOfRangeException(nameof(bytesScanned));
+
+			var now = UtcNowIso8601();
+			var normalizedValueName = valueName ?? string.Empty;
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+INSERT INTO dpapi_blobs(machine_id, blob_key, source, path, value_name, value_type, data_length, file_size, match_offset, bytes_scanned, credential_guid, master_key_guid, flags, description, crypt_algorithm_id, hash_algorithm_id, parse_failure_reason, first_seen_utc, last_seen_utc)
+VALUES ($machine_id, $blob_key, $source, $path, $value_name, $value_type, $data_length, $file_size, $match_offset, $bytes_scanned, $credential_guid, $master_key_guid, $flags, $description, $crypt_algorithm_id, $hash_algorithm_id, $parse_failure_reason, $now, $now)
+ON CONFLICT(machine_id, blob_key) DO UPDATE SET
+  source=excluded.source,
+  path=excluded.path,
+  value_name=excluded.value_name,
+  value_type=COALESCE(excluded.value_type, value_type),
+  data_length=COALESCE(excluded.data_length, data_length),
+  file_size=COALESCE(excluded.file_size, file_size),
+  match_offset=excluded.match_offset,
+  bytes_scanned=excluded.bytes_scanned,
+  credential_guid=COALESCE(excluded.credential_guid, credential_guid),
+  master_key_guid=COALESCE(excluded.master_key_guid, master_key_guid),
+  flags=COALESCE(excluded.flags, flags),
+  description=COALESCE(excluded.description, description),
+  crypt_algorithm_id=COALESCE(excluded.crypt_algorithm_id, crypt_algorithm_id),
+  hash_algorithm_id=COALESCE(excluded.hash_algorithm_id, hash_algorithm_id),
+  parse_failure_reason=CASE WHEN excluded.parse_failure_reason IS NOT NULL THEN excluded.parse_failure_reason ELSE parse_failure_reason END,
+  last_seen_utc=$now
+RETURNING dpapi_blob_id;";
+
+			cmd.Parameters.AddWithValue("$machine_id", machineId);
+			cmd.Parameters.AddWithValue("$blob_key", blobKey.Trim());
+			cmd.Parameters.AddWithValue("$source", source.Trim());
+			cmd.Parameters.AddWithValue("$path", path.Trim());
+			cmd.Parameters.AddWithValue("$value_name", normalizedValueName.Trim());
+			cmd.Parameters.AddWithValue("$value_type", (object?)valueType ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$data_length", (object?)dataLength ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$file_size", (object?)fileSize ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$match_offset", matchOffset);
+			cmd.Parameters.AddWithValue("$bytes_scanned", bytesScanned);
+			cmd.Parameters.AddWithValue("$credential_guid", (object?)credentialGuid ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$master_key_guid", (object?)masterKeyGuid ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$flags", flags.HasValue ? unchecked((long)flags.Value) : (object)DBNull.Value);
+			cmd.Parameters.AddWithValue("$description", (object?)description ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$crypt_algorithm_id", cryptAlgorithmId.HasValue ? unchecked((long)cryptAlgorithmId.Value) : (object)DBNull.Value);
+			cmd.Parameters.AddWithValue("$hash_algorithm_id", hashAlgorithmId.HasValue ? unchecked((long)hashAlgorithmId.Value) : (object)DBNull.Value);
+			cmd.Parameters.AddWithValue("$parse_failure_reason", (object?)parseFailureReason ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$now", now);
+
+			return (long)cmd.ExecuteScalar()!;
+		}
+
 		internal sealed class CredentialReuseRow
 		{
 			internal long CredentialId { get; init; }
@@ -734,6 +994,156 @@ ORDER BY
 			internal IReadOnlyList<GraphObservationRow> Observations { get; init; } = Array.Empty<GraphObservationRow>();
 		}
 
+		internal sealed class DpapiMasterKeyRow
+		{
+			internal long DpapiMasterKeyId { get; init; }
+			internal long MachineId { get; init; }
+			internal string Scope { get; init; } = "";
+			internal string? UserSid { get; init; }
+			internal string KeyPath { get; init; } = "";
+			internal string MasterKeyGuid { get; init; } = "";
+			internal bool IsPreferred { get; init; }
+			internal bool? IsDomain { get; init; }
+			internal int? HashContext { get; init; }
+			internal string? Hash { get; init; }
+			internal string? HashLine { get; init; }
+			internal string? FailureReason { get; init; }
+			internal string FirstSeenUtc { get; init; } = "";
+			internal string LastSeenUtc { get; init; } = "";
+		}
+
+		internal sealed class DpapiBlobRow
+		{
+			internal long DpapiBlobId { get; init; }
+			internal long MachineId { get; init; }
+			internal string BlobKey { get; init; } = "";
+			internal string Source { get; init; } = "";
+			internal string Path { get; init; } = "";
+			internal string ValueName { get; init; } = "";
+			internal int? ValueType { get; init; }
+			internal int? DataLength { get; init; }
+			internal long? FileSize { get; init; }
+			internal int MatchOffset { get; init; }
+			internal int BytesScanned { get; init; }
+			internal string? CredentialGuid { get; init; }
+			internal string? MasterKeyGuid { get; init; }
+			internal uint? Flags { get; init; }
+			internal string? Description { get; init; }
+			internal uint? CryptAlgorithmId { get; init; }
+			internal uint? HashAlgorithmId { get; init; }
+			internal string? ParseFailureReason { get; init; }
+			internal string FirstSeenUtc { get; init; } = "";
+			internal string LastSeenUtc { get; init; } = "";
+		}
+
+		internal IReadOnlyList<DpapiMasterKeyRow> QueryDpapiMasterKeys()
+		{
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT
+  dpapi_masterkey_id,
+  machine_id,
+  scope,
+  user_sid,
+  key_path,
+  master_key_guid,
+  is_preferred,
+  is_domain,
+  hash_context,
+  hash,
+  hash_line,
+  failure_reason,
+  first_seen_utc,
+  last_seen_utc
+FROM dpapi_masterkeys
+ORDER BY dpapi_masterkey_id;";
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<DpapiMasterKeyRow>();
+			while (reader.Read())
+			{
+				results.Add(new DpapiMasterKeyRow
+				{
+					DpapiMasterKeyId = reader.GetInt64(0),
+					MachineId = reader.GetInt64(1),
+					Scope = reader.GetString(2),
+					UserSid = reader.IsDBNull(3) ? null : reader.GetString(3),
+					KeyPath = reader.GetString(4),
+					MasterKeyGuid = reader.GetString(5),
+					IsPreferred = reader.GetInt64(6) != 0,
+					IsDomain = reader.IsDBNull(7) ? null : reader.GetInt64(7) != 0,
+					HashContext = reader.IsDBNull(8) ? null : reader.GetInt32(8),
+					Hash = reader.IsDBNull(9) ? null : reader.GetString(9),
+					HashLine = reader.IsDBNull(10) ? null : reader.GetString(10),
+					FailureReason = reader.IsDBNull(11) ? null : reader.GetString(11),
+					FirstSeenUtc = reader.GetString(12),
+					LastSeenUtc = reader.GetString(13),
+				});
+			}
+
+			return results;
+		}
+
+		internal IReadOnlyList<DpapiBlobRow> QueryDpapiBlobs()
+		{
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT
+  dpapi_blob_id,
+  machine_id,
+  blob_key,
+  source,
+  path,
+  value_name,
+  value_type,
+  data_length,
+  file_size,
+  match_offset,
+  bytes_scanned,
+  credential_guid,
+  master_key_guid,
+  flags,
+  description,
+  crypt_algorithm_id,
+  hash_algorithm_id,
+  parse_failure_reason,
+  first_seen_utc,
+  last_seen_utc
+FROM dpapi_blobs
+ORDER BY dpapi_blob_id;";
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<DpapiBlobRow>();
+			while (reader.Read())
+			{
+				results.Add(new DpapiBlobRow
+				{
+					DpapiBlobId = reader.GetInt64(0),
+					MachineId = reader.GetInt64(1),
+					BlobKey = reader.GetString(2),
+					Source = reader.GetString(3),
+					Path = reader.GetString(4),
+					ValueName = reader.GetString(5),
+					ValueType = reader.IsDBNull(6) ? null : reader.GetInt32(6),
+					DataLength = reader.IsDBNull(7) ? null : reader.GetInt32(7),
+					FileSize = reader.IsDBNull(8) ? null : reader.GetInt64(8),
+					MatchOffset = reader.GetInt32(9),
+					BytesScanned = reader.GetInt32(10),
+					CredentialGuid = reader.IsDBNull(11) ? null : reader.GetString(11),
+					MasterKeyGuid = reader.IsDBNull(12) ? null : reader.GetString(12),
+					Flags = reader.IsDBNull(13) ? null : unchecked((uint)reader.GetInt64(13)),
+					Description = reader.IsDBNull(14) ? null : reader.GetString(14),
+					CryptAlgorithmId = reader.IsDBNull(15) ? null : unchecked((uint)reader.GetInt64(15)),
+					HashAlgorithmId = reader.IsDBNull(16) ? null : unchecked((uint)reader.GetInt64(16)),
+					ParseFailureReason = reader.IsDBNull(17) ? null : reader.GetString(17),
+					FirstSeenUtc = reader.GetString(18),
+					LastSeenUtc = reader.GetString(19),
+				});
+			}
+
+			return results;
+		}
+
 		internal GraphData QueryGraphData()
 		{
 			return new GraphData
@@ -859,7 +1269,9 @@ ORDER BY observation_id;";
 				"machines",
 				"principals",
 				"credentials",
-				"observations"
+				"observations",
+				"dpapi_masterkeys",
+				"dpapi_blobs"
 			};
 
 			var counts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -883,6 +1295,8 @@ ORDER BY observation_id;";
 			// Delete edges first to satisfy FK constraints.
 			cmd.CommandText =
 				"DELETE FROM observations;" +
+				"DELETE FROM dpapi_blobs;" +
+				"DELETE FROM dpapi_masterkeys;" +
 				"DELETE FROM credentials;" +
 				"DELETE FROM principals;" +
 				"DELETE FROM machines;";

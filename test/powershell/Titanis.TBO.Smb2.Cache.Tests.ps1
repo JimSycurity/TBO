@@ -75,8 +75,8 @@ Describe 'TBO cache principal identity' {
 	}
 }
 
-Describe 'TBO cache schema v2' {
-	It 'migrates a v1 cache DB to schema v2 on open' {
+Describe 'TBO cache schema v3' {
+	It 'migrates a v1 cache DB to schema v3 on open' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
 			return
@@ -153,7 +153,7 @@ CREATE TABLE observations(
 		$env:TITANIS_TBO_CACHE = $cachePath
 
 		$info = Get-TBOCacheInfo
-		$info.SchemaVersion | Should -Be 2
+		$info.SchemaVersion | Should -Be 3
 
 		# Ensure the principals table has the v2 scope columns after migration.
 		$conn2 = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$cachePath;Mode=ReadWrite;Pooling=False")
@@ -170,6 +170,12 @@ CREATE TABLE observations(
 
 			$cols | Should -Contain 'scope'
 			$cols | Should -Contain 'scope_machine_id'
+
+			# Ensure new v3 DPAPI tables exist after migration.
+			$cmd2.CommandText = "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='dpapi_masterkeys';"
+			([int]$cmd2.ExecuteScalar()) | Should -Be 1
+			$cmd2.CommandText = "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='dpapi_blobs';"
+			([int]$cmd2.ExecuteScalar()) | Should -Be 1
 		} finally {
 			$conn2.Dispose()
 		}
