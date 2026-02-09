@@ -718,4 +718,103 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 	}
+
+	[Cmdlet(VerbsData.Export, "TBOCacheJson")]
+	[OutputType(typeof(string))]
+	public sealed class ExportTBOCacheJson : PSCmdlet
+	{
+		[Parameter]
+		public string? Path { get; set; }
+
+		protected override void ProcessRecord()
+		{
+			using var db = TboCacheDatabase.Open(this.Path, msg => this.WriteVerbose(msg));
+			var (schemaVersion, resolvedPath) = db.GetInfo(this.Path);
+			var graph = db.QueryGraphData();
+
+			using var ms = new MemoryStream();
+			using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
+			{
+				writer.WriteStartObject();
+
+				writer.WriteString("schema", "tbo.cache.export.v1");
+				writer.WriteString("exportedUtc", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+				writer.WriteNumber("schemaVersion", schemaVersion);
+				writer.WriteString("cachePath", resolvedPath);
+
+				writer.WriteStartArray("machines");
+				foreach (var m in graph.Machines)
+				{
+					writer.WriteStartObject();
+					writer.WriteNumber("machineId", m.MachineId);
+					writer.WriteString("serverName", m.ServerName);
+					writer.WriteString("firstSeenUtc", m.FirstSeenUtc);
+					writer.WriteString("lastSeenUtc", m.LastSeenUtc);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
+
+				writer.WriteStartArray("principals");
+				foreach (var p in graph.Principals)
+				{
+					writer.WriteStartObject();
+					writer.WriteNumber("principalId", p.PrincipalId);
+					writer.WriteString("scope", p.Scope);
+					if (p.ScopeMachineId.HasValue)
+						writer.WriteNumber("scopeMachineId", p.ScopeMachineId.Value);
+					if (!string.IsNullOrWhiteSpace(p.Sid))
+						writer.WriteString("sid", p.Sid);
+					if (!string.IsNullOrWhiteSpace(p.Domain))
+						writer.WriteString("domain", p.Domain);
+					if (!string.IsNullOrWhiteSpace(p.Name))
+						writer.WriteString("name", p.Name);
+					if (!string.IsNullOrWhiteSpace(p.Type))
+						writer.WriteString("principalType", p.Type);
+					writer.WriteString("firstSeenUtc", p.FirstSeenUtc);
+					writer.WriteString("lastSeenUtc", p.LastSeenUtc);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
+
+				writer.WriteStartArray("credentials");
+				foreach (var c in graph.Credentials)
+				{
+					writer.WriteStartObject();
+					writer.WriteNumber("credentialId", c.CredentialId);
+					writer.WriteString("kind", c.Kind);
+					writer.WriteString("identifier", c.Identifier);
+					writer.WriteString("firstSeenUtc", c.FirstSeenUtc);
+					writer.WriteString("lastSeenUtc", c.LastSeenUtc);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
+
+				writer.WriteStartArray("observations");
+				foreach (var o in graph.Observations)
+				{
+					writer.WriteStartObject();
+					writer.WriteNumber("observationId", o.ObservationId);
+					writer.WriteNumber("machineId", o.MachineId);
+					if (o.PrincipalId.HasValue)
+						writer.WriteNumber("principalId", o.PrincipalId.Value);
+					if (o.CredentialId.HasValue)
+						writer.WriteNumber("credentialId", o.CredentialId.Value);
+					writer.WriteString("sourceKind", o.SourceKind);
+					if (!string.IsNullOrWhiteSpace(o.SourcePath))
+						writer.WriteString("sourcePath", o.SourcePath);
+					writer.WriteString("observedUtc", o.ObservedUtc);
+					if (o.Confidence.HasValue)
+						writer.WriteNumber("confidence", o.Confidence.Value);
+					if (!string.IsNullOrWhiteSpace(o.ContextJson))
+						writer.WriteString("contextJson", o.ContextJson);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
+
+				writer.WriteEndObject();
+			}
+
+			this.WriteObject(Encoding.UTF8.GetString(ms.ToArray()));
+		}
+	}
 }

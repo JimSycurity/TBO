@@ -212,6 +212,18 @@ Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol `
   -SourceKind Manual
 ```
 
+### Export-TBOCacheJson
+
+Exports the persistent cache as a JSON document (machines, principals, credentials, observations) for offline ingestion (for example, Nemesis).
+
+```powershell
+# Export as JSON.
+Export-TBOCacheJson | Set-Content -Path .\tbo-cache-export.json -Encoding utf8
+
+# Export a specific cache file.
+Export-TBOCacheJson -Path C:\Temp\tbo-cache.sqlite3 | Set-Content -Path .\tbo-cache-export.json -Encoding utf8
+```
+
 ### Export-TBOCacheGraph
 
 Exports the persistent cache as a graph for external visualization. Supports `Json` (nodes+edges), GraphViz `Dot`, and BloodHound `OpenGraph` (https://bloodhound.specterops.io/opengraph/schema).
