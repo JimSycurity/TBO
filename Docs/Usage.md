@@ -308,13 +308,48 @@ $sd2 = [Titanis.Tbo.Smb2.PowerShell.TBOSD]::FromRegistryBase64($base64)
 $raw = [Titanis.Tbo.Smb2.PowerShell.TBOSD]::FromRegistryBinaryAsWindows($sdBytes)
 ```
 
-### Remote Registry Cmdlets (MS-RRP)
+### Registry Cmdlets (Remote + Local)
 
-Remote registry cmdlets use the winreg pipe with backup/restore semantics. Session caching behavior is documented in `Docs/WinregSessionCaching.md`.
+Registry cmdlets support:
+- Remote registry access via MS-RRP (`-ServerName <host>`), using the winreg pipe with backup/restore semantics. Session caching behavior is documented in `Docs/WinregSessionCaching.md`.
+- Local registry access (`-ServerName localhost`), using local Win32 registry APIs (no MS-RRP/SMB).
+
+#### Local Registry Mode (localhost)
+
+Cmdlets:
+
+```powershell
+Get-TBORegKey -ServerName localhost -Path HKLM\SOFTWARE
+Get-TBORegChildItem -ServerName localhost -Path HKLM\SOFTWARE -IncludeValues -IncludeData
+```
+
+Provider:
+
+```powershell
+New-PSDrive -Name tbo-reg-local -PSProvider 'TBO.Reg' -Root localhost
+Get-ChildItem tbo-reg-local:\HKLM\SOFTWARE -IncludeValues -IncludeData
+```
+
+Write examples (safe path under HKCU):
+
+```powershell
+New-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test
+Set-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId -Type String -Value "abc123"
+Get-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId
+Remove-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId
+Remove-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test
+```
+
+Security descriptors (SACL is not implemented yet for local mode; see `TBO-twi.9`):
+
+```powershell
+$sd = Get-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE -Sections Dacl
+Set-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -SecurityDescriptor $sd -Sections Dacl
+```
 
 #### Get-TBORegKey
 
-Gets metadata for a remote registry key.
+Gets metadata for a registry key.
 
 ```powershell
 Get-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
@@ -323,7 +358,7 @@ Get-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWAR
 
 #### Get-TBORegSecurityDescriptor
 
-Reads a security descriptor for a remote registry key. Use `-AsSddl`, `-AsBytes`, or `-AsWindows` (Windows only) to change output format.
+Reads a security descriptor for a registry key. Use `-AsSddl`, `-AsBytes`, or `-AsWindows` (Windows only) to change output format.
 
 ```powershell
 Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE
@@ -332,7 +367,7 @@ Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
 
 #### Set-TBORegSecurityDescriptor
 
-Writes a security descriptor to a remote registry key. Input can be a portable `SecurityDescriptor`, SDDL string, raw bytes, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only. Use `-Sections` to limit which parts are applied (default: `Dacl`).
+Writes a security descriptor to a registry key. Input can be a portable `SecurityDescriptor`, SDDL string, raw bytes, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only. Use `-Sections` to limit which parts are applied (default: `Dacl`).
 
 ```powershell
 $sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -Sections Dacl

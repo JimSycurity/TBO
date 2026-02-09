@@ -30,7 +30,7 @@ All registry operations currently flow through `RegistryRetryHelper.Execute(...)
 
 To minimize refactoring:
 - Add a local routing branch in `RegistryRetryHelper.OpenRegistrySession(...)`.
-- When the target `serverName` is local, return a `LocalRegistrySession` rather than opening a remote winreg session.
+- When `-ServerName localhost` is used, return a `LocalRegistrySession` rather than opening a remote winreg session.
 
 The remainder of the cmdlet/provider logic should stay unchanged.
 
@@ -60,24 +60,48 @@ Remote registry operations use `RegistryKeyOptions.BackupRestore` (protocol opti
 For local mode, the implementation should:
 - Enable `SeBackupPrivilege` / `SeRestorePrivilege` before key open/create when `BackupRestore` is requested.
 - Enable `SeSecurityPrivilege` only when SACL is requested (SecurityInfo includes SACL).
-- Request the closest equivalent to `REG_OPTION_BACKUP_RESTORE` via Win32 APIs where supported.
+- Use Win32 APIs that support `REG_OPTION_BACKUP_RESTORE` (`RegCreateKeyEx`) when backup/restore semantics are required.
 
-Note: Some Win32 APIs document option parameters as "reserved" for `RegOpenKeyEx`. Validate the correct open path during implementation (see TBO-twi.3).
+Implementation notes:
+- `RegOpenKeyEx` is used as a no-side-effects existence test (it cannot create missing keys).
+- If access is denied and `BackupRestore` is requested, fall back to `RegCreateKeyEx` with `REG_OPTION_BACKUP_RESTORE` after enabling the relevant token privileges.
+- For create operations, `RegCreateKeyEx` is used directly.
 
 ### Registry View (WOW64)
 Registry access can be impacted by 32/64-bit view redirection.
 
-Initial implementation should follow process default behavior (no explicit `KEY_WOW64_*` flags). If parity with remote behavior requires forcing a specific view, add that as a follow-up issue rather than guessing.
+To keep local output consistent with remote MS-RRP behavior, local mode defaults to the **64-bit registry view** on 64-bit hosts unless the caller explicitly requests `KEY_WOW64_32KEY`/`KEY_WOW64_64KEY` (via `RegistryAccessRights.Wow64_Use32/Wow64_Use64`).
 
 ## Logging and Errors
 - Use existing module logging helpers (`LogDiagnostic`, `LogWarning`, `LogException`) for consistency.
 - Preserve Win32 error codes in thrown exceptions (use `Win32Exception` where possible) so existing error handling remains useful.
 
-## Open Questions
-1. Local server name detection:
-   - Should local mode trigger for `localhost` only, or also `.` / machine name / `127.0.0.1` / `::1`?
-2. Backup/restore open semantics:
-   - Which Win32 open/create pattern gives the closest behavior to remote `BackupRestore` semantics without creating missing keys?
-3. Security descriptor support:
-   - Do we want to support SACL reads/writes when `SeSecurityPrivilege` is present, or treat SACL as a separate future enhancement?
+## Follow-Ups
+- Local registry SACL support is deferred to `TBO-twi.9`.
+- Supporting additional local aliases (for example `.` or `127.0.0.1`) is tracked as `TBO-twi.10`.
 
+## Manual Test Checklist
+
+Read:
+
+```powershell
+Get-TBORegKey -ServerName localhost -Path HKLM\SOFTWARE
+Get-TBORegChildItem -ServerName localhost -Path HKLM\SOFTWARE -IncludeValues -IncludeData
+```
+
+Write (use a safe HKCU path):
+
+```powershell
+New-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test
+Set-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId -Type String -Value "abc123"
+Get-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId
+Remove-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId
+Remove-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test
+```
+
+Security descriptors (Owner/Group/DACL; SACL deferred):
+
+```powershell
+$sd = Get-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE -Sections Dacl
+Set-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -SecurityDescriptor $sd -Sections Dacl
+```
