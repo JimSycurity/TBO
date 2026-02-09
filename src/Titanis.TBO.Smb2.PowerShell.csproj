@@ -42,7 +42,11 @@
 
   <ItemGroup>
     <PackageReference Include="PowerShellStandard.Library" />
-    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!--
+      Explicit version required. If omitted, NuGet may restore the oldest available version (observed: 1.0.0),
+      which requires a system sqlite3 DLL and breaks cache operations/tests on Windows.
+    -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
     <PackageReference Include="plist-cil" />
     <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>

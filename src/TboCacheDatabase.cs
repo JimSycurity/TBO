@@ -85,6 +85,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			logDiagnostic ??= _ => { };
 
+			SqliteBootstrap.EnsureInitialized(logDiagnostic);
+
 			var path = ResolveCachePath(explicitPath);
 			var parent = Path.GetDirectoryName(path);
 			if (string.IsNullOrWhiteSpace(parent))
@@ -96,7 +98,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				DataSource = path,
 				Mode = SqliteOpenMode.ReadWriteCreate,
-				Cache = SqliteCacheMode.Shared
+				Cache = SqliteCacheMode.Shared,
+				// Keep cache cmdlets "one-shot". Pooling can keep the file handle open (breaking test cleanup
+				// and surprising users who want to move/delete the cache).
+				Pooling = false
 			};
 
 			var conn = new SqliteConnection(builder.ToString());
@@ -271,7 +276,61 @@ RETURNING principal_id;";
 				return (long)cmd.ExecuteScalar()!;
 			}
 
-			// If SID is unknown, create a new principal record. Callers can later merge by SID if discovered.
+			// Best-effort de-dupe for principals without a SID.
+			//
+			// Rationale:
+			// - SID is the safest identifier, but we don't always have it (for example: SAM hashing by account name).
+			// - Dedupe by RID alone is not safe (local Administrator is commonly RID 500).
+			// - Dedupe by name alone is not safe without a namespace/domain (collisions across machines).
+			//
+			// Strategy:
+			// - If domain+name are present, reuse an existing SID-less principal for (domain,name,type), allowing type upgrades.
+			// - Otherwise, insert a new row. Callers can later merge by SID if discovered.
+			if (!string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(name))
+			{
+				long? existingId = null;
+				using (var select = _connection.CreateCommand())
+				{
+					select.CommandText = @"
+SELECT principal_id
+FROM principals
+WHERE sid IS NULL
+  AND domain = $domain COLLATE NOCASE
+  AND name = $name COLLATE NOCASE
+  AND (
+    ($type IS NOT NULL AND (type IS NULL OR type = $type COLLATE NOCASE))
+    OR ($type IS NULL AND type IS NULL)
+  )
+ORDER BY principal_id
+LIMIT 1;";
+
+					select.Parameters.AddWithValue("$domain", domain);
+					select.Parameters.AddWithValue("$name", name);
+					select.Parameters.AddWithValue("$type", (object?)type ?? DBNull.Value);
+
+					var result = select.ExecuteScalar();
+					if (result != null && result != DBNull.Value)
+						existingId = (long)result;
+				}
+
+				if (existingId.HasValue)
+				{
+					using var update = _connection.CreateCommand();
+					update.CommandText = @"
+UPDATE principals
+SET
+  type=COALESCE($type, type),
+  last_seen_utc=$now
+WHERE principal_id=$principal_id;";
+					update.Parameters.AddWithValue("$principal_id", existingId.Value);
+					update.Parameters.AddWithValue("$type", (object?)type ?? DBNull.Value);
+					update.Parameters.AddWithValue("$now", now);
+					update.ExecuteNonQuery();
+					return existingId.Value;
+				}
+			}
+
+			// If SID is unknown (or the best-effort dedupe key was not usable), create a new principal record.
 			using (var insert = _connection.CreateCommand())
 			{
 				insert.CommandText = @"

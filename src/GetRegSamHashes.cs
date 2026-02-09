@@ -119,6 +119,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 							ServerName = this.ServerName,
 							SourceKind = "Get-TBORegSamHashes",
 
+							// SAM hashing does not currently derive the full SID (machine SID + RID).
+							// Scope identity to the current machine to avoid cross-host collisions on common local names.
+							PrincipalDomain = this.ServerName,
 							PrincipalName = info.AccountName,
 							PrincipalType = "LocalUser",
 

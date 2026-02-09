@@ -1259,6 +1259,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				Cache = SqliteCacheMode.Shared
 			};
 
+			SqliteBootstrap.EnsureInitialized();
+
 			using var conn = new SqliteConnection(builder.ToString());
 			conn.Open();
 
@@ -1492,6 +1494,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				Mode = SqliteOpenMode.ReadOnly,
 				Cache = SqliteCacheMode.Shared
 			};
+
+			SqliteBootstrap.EnsureInitialized();
 
 			using var conn = new SqliteConnection(builder.ToString());
 			conn.Open();
