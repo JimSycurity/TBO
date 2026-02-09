@@ -425,6 +425,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (!string.IsNullOrWhiteSpace(usedKeyLabel))
 						this.WriteVerbose($"Get-TBODpapiMasterKeys decrypted {location.KeyPath} using {usedKeyLabel}.");
 
+					if (!string.IsNullOrWhiteSpace(masterKeyGuid)
+						&& Guid.TryParse(masterKeyGuid, out var parsedMasterKeyGuid))
+					{
+						TboDpapiMasterKeyCache.TrySet(smb, serverName, parsedMasterKeyGuid, bestResult.MasterKey);
+					}
+
 					this.WriteObject(new TboDpapiMasterKeyInfo
 					{
 						ServerName = this.ServerName,

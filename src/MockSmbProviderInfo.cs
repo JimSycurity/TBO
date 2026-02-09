@@ -5,10 +5,12 @@ using Titanis.Smb2;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
-	public sealed class MockSmbProviderInfo : ISmbProviderInfo, ISmbFileSystemProvider, IRegistrySessionProvider, IRegistrySessionInvalidator
+	public sealed class MockSmbProviderInfo : ISmbProviderInfo, ISmbFileSystemProvider, IRegistrySessionProvider, IRegistrySessionInvalidator, IRegistrySecretCacheStore
 	{
 		public Smb2Client? SmbClient { get; set; }
 		public ISmbFileSystem? FileSystem { get; set; }
+		private readonly object _secretCacheLock = new();
+		private readonly Dictionary<string, RegistrySecretCache> _secretCaches = new(StringComparer.OrdinalIgnoreCase);
 		private SmbConnectionParameters? _defaultConnectParameters = SmbConnectionParameters.GetDefault();
 		public object? DefaultConnectParameters
 		{
@@ -97,5 +99,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			=> this.LogExceptionAction?.Invoke(context, ex);
 
 		ISmbFileSystem? ISmbFileSystemProvider.FileSystem => this.FileSystem;
+
+		RegistrySecretCache IRegistrySecretCacheStore.GetOrCreateRegistrySecretCache(string serverName)
+		{
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("Server name must be provided.", nameof(serverName));
+
+			lock (_secretCacheLock)
+			{
+				if (!_secretCaches.TryGetValue(serverName, out var cache))
+				{
+					cache = new RegistrySecretCache();
+					_secretCaches.Add(serverName, cache);
+				}
+
+				return cache;
+			}
+		}
+
+		// Convenience for Pester tests to pre-populate the per-connection secret cache.
+		public void AddCachedDpapiMasterKey(string serverName, string masterKeyGuid, byte[] masterKey)
+		{
+			if (string.IsNullOrWhiteSpace(masterKeyGuid))
+				throw new ArgumentException("Master key GUID must be provided.", nameof(masterKeyGuid));
+			if (!Guid.TryParse(masterKeyGuid, out var guid))
+				throw new ArgumentException("Master key GUID was invalid.", nameof(masterKeyGuid));
+
+			var cache = ((IRegistrySecretCacheStore)this).GetOrCreateRegistrySecretCache(serverName);
+			cache.SetDpapiMasterKey(guid, masterKey);
+		}
 	}
 }
