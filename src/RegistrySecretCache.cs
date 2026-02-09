@@ -9,6 +9,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private byte[]? _lsaKey;
 		private string? _lsaKeySource;
 		private byte[]? _samMasterKey;
+		private string? _samAccountDomainSid;
 
 		internal bool TryGetBootKey(out byte[]? bootKey)
 		{
@@ -91,6 +92,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
+		internal bool TryGetSamAccountDomainSid(out string domainSid)
+		{
+			lock (_lock)
+			{
+				if (string.IsNullOrWhiteSpace(_samAccountDomainSid))
+				{
+					domainSid = string.Empty;
+					return false;
+				}
+
+				domainSid = _samAccountDomainSid;
+				return true;
+			}
+		}
+
+		internal void SetSamAccountDomainSid(string domainSid)
+		{
+			if (string.IsNullOrWhiteSpace(domainSid))
+				return;
+
+			lock (_lock)
+			{
+				_samAccountDomainSid = domainSid.Trim();
+			}
+		}
+
 		internal void Clear()
 		{
 			lock (_lock)
@@ -99,6 +126,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				_lsaKey = null;
 				_lsaKeySource = null;
 				_samMasterKey = null;
+				_samAccountDomainSid = null;
 			}
 		}
 	}

