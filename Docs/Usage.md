@@ -201,6 +201,18 @@ Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol `
   -SourceKind Manual
 ```
 
+### Export-TBOCacheGraph
+
+Exports the persistent cache as a graph for external visualization. Supports `Json` (nodes+edges) and GraphViz `Dot`.
+
+```powershell
+# Export as JSON.
+Export-TBOCacheGraph -Format Json | Set-Content -Path .\tbo-cache-graph.json -Encoding utf8
+
+# Export as GraphViz DOT.
+Export-TBOCacheGraph -Format Dot | Set-Content -Path .\tbo-cache-graph.dot -Encoding ascii
+```
+
 ### Set-TBOSmbConnectOptions (Deprecated)
 
 Deprecated shim for `Set-TBOConnectOptions`. Uses the same dynamic parameters and behavior.

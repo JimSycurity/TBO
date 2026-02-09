@@ -456,6 +456,171 @@ ORDER BY
 			return results;
 		}
 
+		internal sealed class GraphMachineRow
+		{
+			internal long MachineId { get; init; }
+			internal string ServerName { get; init; } = "";
+			internal string FirstSeenUtc { get; init; } = "";
+			internal string LastSeenUtc { get; init; } = "";
+		}
+
+		internal sealed class GraphPrincipalRow
+		{
+			internal long PrincipalId { get; init; }
+			internal string? Sid { get; init; }
+			internal string? Domain { get; init; }
+			internal string? Name { get; init; }
+			internal string? Type { get; init; }
+			internal string FirstSeenUtc { get; init; } = "";
+			internal string LastSeenUtc { get; init; } = "";
+		}
+
+		internal sealed class GraphCredentialRow
+		{
+			internal long CredentialId { get; init; }
+			internal string Kind { get; init; } = "";
+			internal string Identifier { get; init; } = "";
+			internal string FirstSeenUtc { get; init; } = "";
+			internal string LastSeenUtc { get; init; } = "";
+		}
+
+		internal sealed class GraphObservationRow
+		{
+			internal long ObservationId { get; init; }
+			internal long MachineId { get; init; }
+			internal long? PrincipalId { get; init; }
+			internal long? CredentialId { get; init; }
+			internal string SourceKind { get; init; } = "";
+			internal string? SourcePath { get; init; }
+			internal string ObservedUtc { get; init; } = "";
+			internal string? ContextJson { get; init; }
+			internal int? Confidence { get; init; }
+		}
+
+		internal sealed class GraphData
+		{
+			internal IReadOnlyList<GraphMachineRow> Machines { get; init; } = Array.Empty<GraphMachineRow>();
+			internal IReadOnlyList<GraphPrincipalRow> Principals { get; init; } = Array.Empty<GraphPrincipalRow>();
+			internal IReadOnlyList<GraphCredentialRow> Credentials { get; init; } = Array.Empty<GraphCredentialRow>();
+			internal IReadOnlyList<GraphObservationRow> Observations { get; init; } = Array.Empty<GraphObservationRow>();
+		}
+
+		internal GraphData QueryGraphData()
+		{
+			return new GraphData
+			{
+				Machines = QueryGraphMachines(),
+				Principals = QueryGraphPrincipals(),
+				Credentials = QueryGraphCredentials(),
+				Observations = QueryGraphObservations(),
+			};
+		}
+
+		private IReadOnlyList<GraphMachineRow> QueryGraphMachines()
+		{
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT machine_id, server_name, first_seen_utc, last_seen_utc
+FROM machines
+ORDER BY machine_id;";
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<GraphMachineRow>();
+			while (reader.Read())
+			{
+				results.Add(new GraphMachineRow
+				{
+					MachineId = reader.GetInt64(0),
+					ServerName = reader.GetString(1),
+					FirstSeenUtc = reader.GetString(2),
+					LastSeenUtc = reader.GetString(3),
+				});
+			}
+
+			return results;
+		}
+
+		private IReadOnlyList<GraphPrincipalRow> QueryGraphPrincipals()
+		{
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT principal_id, sid, domain, name, type, first_seen_utc, last_seen_utc
+FROM principals
+ORDER BY principal_id;";
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<GraphPrincipalRow>();
+			while (reader.Read())
+			{
+				results.Add(new GraphPrincipalRow
+				{
+					PrincipalId = reader.GetInt64(0),
+					Sid = reader.IsDBNull(1) ? null : reader.GetString(1),
+					Domain = reader.IsDBNull(2) ? null : reader.GetString(2),
+					Name = reader.IsDBNull(3) ? null : reader.GetString(3),
+					Type = reader.IsDBNull(4) ? null : reader.GetString(4),
+					FirstSeenUtc = reader.GetString(5),
+					LastSeenUtc = reader.GetString(6),
+				});
+			}
+
+			return results;
+		}
+
+		private IReadOnlyList<GraphCredentialRow> QueryGraphCredentials()
+		{
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT credential_id, kind, identifier, first_seen_utc, last_seen_utc
+FROM credentials
+ORDER BY credential_id;";
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<GraphCredentialRow>();
+			while (reader.Read())
+			{
+				results.Add(new GraphCredentialRow
+				{
+					CredentialId = reader.GetInt64(0),
+					Kind = reader.GetString(1),
+					Identifier = reader.GetString(2),
+					FirstSeenUtc = reader.GetString(3),
+					LastSeenUtc = reader.GetString(4),
+				});
+			}
+
+			return results;
+		}
+
+		private IReadOnlyList<GraphObservationRow> QueryGraphObservations()
+		{
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT observation_id, machine_id, principal_id, credential_id, source_kind, source_path, observed_utc, context_json, confidence
+FROM observations
+ORDER BY observation_id;";
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<GraphObservationRow>();
+			while (reader.Read())
+			{
+				results.Add(new GraphObservationRow
+				{
+					ObservationId = reader.GetInt64(0),
+					MachineId = reader.GetInt64(1),
+					PrincipalId = reader.IsDBNull(2) ? null : reader.GetInt64(2),
+					CredentialId = reader.IsDBNull(3) ? null : reader.GetInt64(3),
+					SourceKind = reader.GetString(4),
+					SourcePath = reader.IsDBNull(5) ? null : reader.GetString(5),
+					ObservedUtc = reader.GetString(6),
+					ContextJson = reader.IsDBNull(7) ? null : reader.GetString(7),
+					Confidence = reader.IsDBNull(8) ? null : reader.GetInt32(8),
+				});
+			}
+
+			return results;
+		}
+
 		internal IReadOnlyDictionary<string, long> GetCountsByTable()
 		{
 			var tables = new[]

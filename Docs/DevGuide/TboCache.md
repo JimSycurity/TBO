@@ -24,7 +24,7 @@ Primary initial use case: detect credential reuse across hosts by comparing norm
 
 - Distributed/synchronized cache across multiple operators.
 - Full fidelity logon event modeling.
-- BloodHound/OpenGraph-specific graph export (tracked as follow-on).
+- BloodHound OpenGraph-specific export (tracked as follow-on).
 
 ## Storage Backend
 
@@ -161,10 +161,11 @@ Ingestion:
 
 ## Open Questions
 
-- What does “OpenGraph” mean in this context:
-  - GraphViz DOT / generic nodes+edges JSON
-  - BloodHound graph mapping
-  - Something else
-- Should caching be opt-in per cmdlet (`-Cache`) or controlled by a global toggle (env var + `Set-TBOCacheOptions`)?
-- Should principal de-duplication require SID, or do we allow best-effort `(domain, name)` matching?
-
+- OpenGraph meaning:
+  - For TBO cache export, OpenGraph means the BloodHound OpenGraph schema: https://bloodhound.specterops.io/opengraph/schema
+  - GraphViz DOT and generic nodes+edges JSON are still useful for quick visualization and are implemented.
+- Caching enablement:
+  - Prefer a global toggle to enable observation ingestion by default, while still allowing per-cmdlet overrides.
+- Principal identity:
+  - A full SID is generally safe for correlation. Do not correlate on RID alone (for example, local Administrator is commonly RID 500).
+  - Some well-known/builtin SIDs are shared across machines (for example, SYSTEM). If we later model machine-scoped local groups (like BUILTIN\\Administrators), the same SID may need machine scoping to avoid collapsing distinct per-host membership graphs.
