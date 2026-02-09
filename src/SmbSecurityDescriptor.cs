@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Management.Automation;
 using System.Security.AccessControl;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading;
 using Titanis;
 using Titanis.Smb2;
@@ -175,11 +176,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public SecurityInfo Sections { get; set; } = SecurityInfo.Owner | SecurityInfo.Group | SecurityInfo.Dacl;
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		private CancellationTokenSource? _cancelSource;
 
 		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
+
+			var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
 
 			var resolvedDescriptor = SecurityDescriptorInputHelpers.ResolveSecurityDescriptor(this.SecurityDescriptor, allowRegistryBinaryBytes: false);
 			var securityInfo = SecurityDescriptorInputHelpers.ResolveSecurityInfo(resolvedDescriptor, this.Sections);
@@ -189,7 +198,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var uncPath = ResolveToUncPath(path, this.ParameterSetName);
 				if (!this.ShouldProcess(uncPath.ToString(), "Set security descriptor"))
 					continue;
-				WriteSecurityDescriptor(smb, uncPath, resolvedDescriptor, securityInfo, this._cancelSource.Token);
+				WriteSecurityDescriptor(smb, uncPath, resolvedDescriptor, securityInfo, recordActivity, this.CachePath, this._cancelSource.Token);
 			}
 		}
 
@@ -211,13 +220,45 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			UncPath uncPath,
 			SecurityDescriptor securityDescriptor,
 			SecurityInfo securityInfo,
+			bool recordActivity,
+			string? cachePath,
 			CancellationToken cancellationToken)
 		{
-			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			var target = uncPath.ToString();
+			var afterBytes = securityDescriptor.ToByteArray();
+			byte[]? beforeBytes = null;
+			string? beforeReadFailure = null;
+			Exception? operationFailure = null;
+			Smb2OpenFileObjectBase? file = null;
+
+			try
 			{
-				var provider = smb as SmbProviderInfo;
-				Action<string>? logDiagnostic = provider != null ? provider.LogDiagnostic : null;
-				Action<string>? logWarning = provider != null ? provider.LogWarning : null;
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+				{
+					var provider = smb as SmbProviderInfo;
+					Action<string>? logDiagnostic = provider != null ? provider.LogDiagnostic : null;
+					Action<string>? logWarning = provider != null ? provider.LogWarning : null;
+
+					if (recordActivity)
+					{
+						try
+						{
+							var existing = LocalNtfsSecurityDescriptor.Read(
+								uncPath,
+								timeWarpToken: null,
+								securityInfo,
+								logDiagnostic: logDiagnostic,
+								logWarning: logWarning,
+								cancellationToken: cancellationToken);
+							beforeBytes = existing.ToByteArray();
+						}
+						catch (Exception ex)
+						{
+							beforeReadFailure = ex.Message;
+							beforeBytes = null;
+						}
+					}
+
 					LocalNtfsSecurityDescriptor.Write(
 						uncPath,
 						timeWarpToken: null,
@@ -227,11 +268,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						logWarning: logWarning,
 						cancellationToken: cancellationToken);
 					return;
-			}
+				}
 
-			Smb2OpenFileObjectBase? file = null;
-			try
-			{
 				var desiredAccess = Smb2AccessRights.WriteDac | Smb2AccessRights.WriteOwner | Smb2AccessRights.ReadControl;
 				if (securityInfo.HasFlag(SecurityInfo.Sacl))
 					desiredAccess |= Smb2AccessRights.AccessSystemSecurity;
@@ -247,12 +285,64 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				};
 
 				file = smb.SmbClient.CreateFileAsync(uncPath, createInfo, FileAccess.ReadWrite, cancellationToken).GetAwaiter().GetResult();
+				if (file == null)
+					throw new InvalidOperationException($"SMB CreateFile returned null for '{uncPath}'.");
+
+				if (recordActivity)
+				{
+					try
+					{
+						var existing = file.GetSecurityAsync(securityInfo, 8192, cancellationToken).GetAwaiter().GetResult();
+						beforeBytes = existing.ToByteArray();
+					}
+					catch (Exception ex)
+					{
+						beforeReadFailure = ex.Message;
+						beforeBytes = null;
+					}
+				}
+
 				file.SetSecurityAsync(securityDescriptor, securityInfo, cancellationToken).GetAwaiter().GetResult();
+			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
 			}
 			finally
 			{
 				if (file != null)
 					file.CloseAsync(cancellationToken).GetAwaiter().GetResult();
+
+				string? contextJson = null;
+				if (recordActivity)
+				{
+					contextJson = JsonSerializer.Serialize(new
+					{
+						sections = securityInfo.ToString(),
+						beforeReadFailure
+					});
+				}
+
+				TboCacheWriteActivities.TryRecord(
+					cmdlet: this,
+					smb: smb,
+					enabled: recordActivity,
+					cachePath: cachePath,
+					serverName: uncPath.ServerName,
+					kind: TboCacheWriteActivities.KindFileSystem,
+					action: TboCacheWriteActivities.ActionSetSecurityDescriptor,
+					target: target,
+					path: target,
+					valueName: null,
+					valueType: null,
+					beforeBlobKind: beforeBytes != null ? TboCacheWriteActivities.BlobKindSecurityDescriptor : null,
+					beforeBlob: beforeBytes,
+					afterBlobKind: TboCacheWriteActivities.BlobKindSecurityDescriptor,
+					afterBlob: afterBytes,
+					contextJson: contextJson,
+					success: operationFailure == null,
+					failureReason: operationFailure?.Message);
 			}
 		}
 

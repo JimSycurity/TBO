@@ -21,6 +21,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		public long DpapiMasterKeyCount { get; init; }
 		public long DpapiBlobCount { get; init; }
+
+		public long WriteActivityCount { get; init; }
 	}
 
 	public sealed class TboCacheCredentialReuse
@@ -84,6 +86,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				ObservationCount = GetCount("observations"),
 				DpapiMasterKeyCount = GetCount("dpapi_masterkeys"),
 				DpapiBlobCount = GetCount("dpapi_blobs"),
+				WriteActivityCount = GetCount("write_activities"),
 			});
 		}
 	}
@@ -738,6 +741,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var graph = db.QueryGraphData();
 			var dpapiMasterKeys = db.QueryDpapiMasterKeys();
 			var dpapiBlobs = db.QueryDpapiBlobs();
+			var writeActivities = db.QueryWriteActivities();
 
 			using var ms = new MemoryStream();
 			using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
@@ -881,6 +885,39 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						writer.WriteString("parseFailureReason", b.ParseFailureReason);
 					writer.WriteString("firstSeenUtc", b.FirstSeenUtc);
 					writer.WriteString("lastSeenUtc", b.LastSeenUtc);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
+
+				writer.WriteStartArray("writeActivities");
+				foreach (var a in writeActivities)
+				{
+					writer.WriteStartObject();
+					writer.WriteNumber("writeActivityId", a.WriteActivityId);
+					writer.WriteNumber("machineId", a.MachineId);
+					writer.WriteString("cmdlet", a.Cmdlet);
+					writer.WriteString("kind", a.Kind);
+					writer.WriteString("action", a.Action);
+					writer.WriteString("target", a.Target);
+					writer.WriteString("path", a.Path);
+					if (!string.IsNullOrWhiteSpace(a.ValueName))
+						writer.WriteString("valueName", a.ValueName);
+					if (a.ValueType.HasValue)
+						writer.WriteNumber("valueType", a.ValueType.Value);
+					if (!string.IsNullOrWhiteSpace(a.BeforeBlobKind))
+						writer.WriteString("beforeBlobKind", a.BeforeBlobKind);
+					if (a.BeforeBlob != null)
+						writer.WriteBase64String("beforeBlobBase64", a.BeforeBlob);
+					if (!string.IsNullOrWhiteSpace(a.AfterBlobKind))
+						writer.WriteString("afterBlobKind", a.AfterBlobKind);
+					if (a.AfterBlob != null)
+						writer.WriteBase64String("afterBlobBase64", a.AfterBlob);
+					if (!string.IsNullOrWhiteSpace(a.ContextJson))
+						writer.WriteString("contextJson", a.ContextJson);
+					writer.WriteBoolean("success", a.Success);
+					if (!string.IsNullOrWhiteSpace(a.FailureReason))
+						writer.WriteString("failureReason", a.FailureReason);
+					writer.WriteString("activityUtc", a.ActivityUtc);
 					writer.WriteEndObject();
 				}
 				writer.WriteEndArray();

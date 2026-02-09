@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Management.Automation;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Titanis.IO;
@@ -38,11 +39,19 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		[Parameter]
 		public int ChunkSize { get; set; } = Smb2Client.DefaultChunkSize;
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		private CancellationTokenSource? _cancelSource;
+		private ISmbProviderInfo? _smb;
 
 		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
+			this._smb = smb;
 			CopyAsync(smb, this._cancelSource.Token).ConfigureAwait(false).GetAwaiter().GetResult();
 		}
 
@@ -139,12 +148,33 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		if (!ShouldProcessCopy(sourcePath.ToString(), destinationRoot.ToString()))
 			return;
 
-		await CopySmbDirectoryToSmbCoreAsync(
-			smbClient,
-			sourcePath,
-			sourceTimeWarpToken,
-			destinationRoot,
-			cancellationToken).ConfigureAwait(false);
+		var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+		Exception? operationFailure = null;
+		try
+		{
+			await CopySmbDirectoryToSmbCoreAsync(
+				smbClient,
+				sourcePath,
+				sourceTimeWarpToken,
+				destinationRoot,
+				cancellationToken).ConfigureAwait(false);
+		}
+		catch (Exception ex)
+		{
+			operationFailure = ex;
+			throw;
+		}
+		finally
+		{
+			RecordCopyActivity(
+				enabled: recordActivity,
+				destinationServerName: destinationRoot.ServerName,
+				sourceDisplay: sourcePath.ToString(),
+				destinationDisplay: destinationRoot.ToString(),
+				isDirectory: true,
+				success: operationFailure == null,
+				failureReason: operationFailure?.Message);
+		}
 	}
 
 	private async Task CopySmbDirectoryToLocalAsync(
@@ -184,11 +214,32 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		if (!ShouldProcessCopy(sourcePath, destinationRoot.ToString()))
 			return;
 
-		await CopyLocalDirectoryToSmbCoreAsync(
-			smbClient,
-			sourcePath,
-			destinationRoot,
-			cancellationToken).ConfigureAwait(false);
+		var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+		Exception? operationFailure = null;
+		try
+		{
+			await CopyLocalDirectoryToSmbCoreAsync(
+				smbClient,
+				sourcePath,
+				destinationRoot,
+				cancellationToken).ConfigureAwait(false);
+		}
+		catch (Exception ex)
+		{
+			operationFailure = ex;
+			throw;
+		}
+		finally
+		{
+			RecordCopyActivity(
+				enabled: recordActivity,
+				destinationServerName: destinationRoot.ServerName,
+				sourceDisplay: sourcePath,
+				destinationDisplay: destinationRoot.ToString(),
+				isDirectory: true,
+				success: operationFailure == null,
+				failureReason: operationFailure?.Message);
+		}
 	}
 
 	private async Task CopySmbDirectoryToSmbCoreAsync(
@@ -472,6 +523,10 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			if (string.IsNullOrEmpty(sourcePath.ShareRelativePath))
 				throw new ArgumentException($"Source path must include a file name: {sourcePath}", nameof(Source));
 
+			var recordActivity = shouldProcess && this.ResolveCacheIngestionEnabled(this.Cache);
+			var approved = false;
+			Exception? operationFailure = null;
+
 			Smb2OpenFile? sourceFile = null;
 			Smb2OpenFile? destFile = null;
 			try
@@ -488,6 +543,8 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 
 				if (shouldProcess && !ShouldProcessCopy(sourcePath.ToString(), destinationPath.ToString()))
 					return;
+
+				approved = recordActivity;
 
 				if (this.CreateDirectories.IsPresent)
 					await EnsureRemoteDirectoryAsync(smbClient, destinationPath.GetDirectoryPath(), cancellationToken).ConfigureAwait(false);
@@ -544,12 +601,29 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 						cancellationToken).ConfigureAwait(false);
 				}
 			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
+			}
 			finally
 			{
 				if (destFile != null)
 					await destFile.CloseAsync(cancellationToken).ConfigureAwait(false);
 				if (sourceFile != null)
 					await sourceFile.CloseAsync(cancellationToken).ConfigureAwait(false);
+
+				if (approved)
+				{
+					RecordCopyActivity(
+						enabled: recordActivity,
+						destinationServerName: destinationPath.ServerName,
+						sourceDisplay: sourcePath.ToString(),
+						destinationDisplay: destinationPath.ToString(),
+						isDirectory: false,
+						success: operationFailure == null,
+						failureReason: operationFailure?.Message);
+				}
 			}
 		}
 
@@ -619,6 +693,10 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			if (0 != (sourceInfo.Attributes & FileAttributes.Directory))
 				throw new IOException($"Source path '{sourcePath}' is a directory. Copy-TBOSmbItem supports files only.");
 
+			var recordActivity = shouldProcess && this.ResolveCacheIngestionEnabled(this.Cache);
+			var approved = false;
+			Exception? operationFailure = null;
+
 			Smb2OpenFile? destFile = null;
 			try
 			{
@@ -634,6 +712,8 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 
 				if (shouldProcess && !ShouldProcessCopy(sourcePath, destinationPath.ToString()))
 					return;
+
+				approved = recordActivity;
 
 				if (this.CreateDirectories.IsPresent)
 					await EnsureRemoteDirectoryAsync(smbClient, destinationPath.GetDirectoryPath(), cancellationToken).ConfigureAwait(false);
@@ -675,11 +755,78 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 						cancellationToken).ConfigureAwait(false);
 				}
 			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
+			}
 			finally
 			{
 				if (destFile != null)
 					await destFile.CloseAsync(cancellationToken).ConfigureAwait(false);
+
+				if (approved)
+				{
+					RecordCopyActivity(
+						enabled: recordActivity,
+						destinationServerName: destinationPath.ServerName,
+						sourceDisplay: sourcePath,
+						destinationDisplay: destinationPath.ToString(),
+						isDirectory: false,
+						success: operationFailure == null,
+						failureReason: operationFailure?.Message);
+				}
 			}
+		}
+
+		private void RecordCopyActivity(
+			bool enabled,
+			string destinationServerName,
+			string sourceDisplay,
+			string destinationDisplay,
+			bool isDirectory,
+			bool success,
+			string? failureReason)
+		{
+			if (!enabled)
+				return;
+
+			var smb = this._smb;
+			if (smb == null)
+				return;
+
+			string? contextJson = null;
+			contextJson = JsonSerializer.Serialize(new
+			{
+				source = sourceDisplay,
+				destination = destinationDisplay,
+				isDirectory,
+				force = this.Force.IsPresent,
+				createDirectories = this.CreateDirectories.IsPresent,
+				preserveTimestamps = this.PreserveTimestamps.IsPresent,
+				preserveSecurityDescriptor = this.PreserveSecurityDescriptor.IsPresent,
+				chunkSize = this.ChunkSize
+			});
+
+			TboCacheWriteActivities.TryRecord(
+				cmdlet: this,
+				smb: smb,
+				enabled: enabled,
+				cachePath: this.CachePath,
+				serverName: destinationServerName,
+				kind: TboCacheWriteActivities.KindFileSystem,
+				action: TboCacheWriteActivities.ActionCopyItem,
+				target: destinationDisplay,
+				path: destinationDisplay,
+				valueName: null,
+				valueType: null,
+				beforeBlobKind: null,
+				beforeBlob: null,
+				afterBlobKind: null,
+				afterBlob: null,
+				contextJson: contextJson,
+				success: success,
+				failureReason: failureReason);
 		}
 
 		private static Smb2CreateDisposition GetCreateDisposition(bool destExists, bool preserveSecurityDescriptor)

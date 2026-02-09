@@ -11,12 +11,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	/// </summary>
 	/// <remarks>
 	/// This is intentionally minimal and internal. Cmdlets and other collectors should not execute SQL directly.
-	/// </remarks>
-	internal sealed class TboCacheDatabase : IDisposable
+		/// </remarks>
+		internal sealed class TboCacheDatabase : IDisposable
 	{
 		internal const string CachePathEnvVar = "TITANIS_TBO_CACHE";
 
-		private const int SchemaVersion = 3;
+		private const int SchemaVersion = 4;
 		private readonly SqliteConnection _connection;
 
 		internal enum PrincipalScope
@@ -138,7 +138,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (userVersion == 0)
 			{
 				logDiagnostic($"TBO cache: initializing new DB (schema v{SchemaVersion}).");
-				ApplySchemaV3();
+				ApplySchemaV4();
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -161,6 +161,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				logDiagnostic("TBO cache: migrating DB schema v2 -> v3.");
 				MigrateSchemaV2ToV3(logDiagnostic);
+				SetUserVersion(3);
+				userVersion = 3;
+			}
+
+			if (userVersion == 3)
+			{
+				logDiagnostic("TBO cache: migrating DB schema v3 -> v4.");
+				MigrateSchemaV3ToV4(logDiagnostic);
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -183,7 +191,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			cmd.ExecuteNonQuery();
 		}
 
-		private void ApplySchemaV3()
+		private void ApplySchemaV4()
 		{
 			using var tx = _connection.BeginTransaction();
 
@@ -325,6 +333,31 @@ CREATE TABLE IF NOT EXISTS dpapi_blobs(
 			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_blobs_master_key_guid ON dpapi_blobs(master_key_guid);", tx);
 			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_blobs_blob_key ON dpapi_blobs(blob_key);", tx);
 
+			Exec(@"
+CREATE TABLE IF NOT EXISTS write_activities(
+  write_activity_id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  cmdlet TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target TEXT NOT NULL,
+  path TEXT NOT NULL,
+  value_name TEXT NOT NULL DEFAULT '',
+  value_type INTEGER NULL,
+  before_blob_kind TEXT NULL,
+  before_blob BLOB NULL,
+  after_blob_kind TEXT NULL,
+  after_blob BLOB NULL,
+  context_json TEXT NULL,
+  success INTEGER NOT NULL,
+  failure_reason TEXT NULL,
+  activity_utc TEXT NOT NULL
+);
+", tx);
+
+			Exec("CREATE INDEX IF NOT EXISTS idx_write_activities_machine_id ON write_activities(machine_id);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_write_activities_activity_utc ON write_activities(activity_utc);", tx);
+
 			tx.Commit();
 		}
 
@@ -465,6 +498,40 @@ CREATE TABLE IF NOT EXISTS dpapi_blobs(
 			tx.Commit();
 
 			logDiagnostic("TBO cache: migration to schema v3 complete.");
+		}
+
+		private void MigrateSchemaV3ToV4(Action<string> logDiagnostic)
+		{
+			using var tx = _connection.BeginTransaction();
+
+			Exec(@"
+CREATE TABLE IF NOT EXISTS write_activities(
+  write_activity_id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  cmdlet TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target TEXT NOT NULL,
+  path TEXT NOT NULL,
+  value_name TEXT NOT NULL DEFAULT '',
+  value_type INTEGER NULL,
+  before_blob_kind TEXT NULL,
+  before_blob BLOB NULL,
+  after_blob_kind TEXT NULL,
+  after_blob BLOB NULL,
+  context_json TEXT NULL,
+  success INTEGER NOT NULL,
+  failure_reason TEXT NULL,
+  activity_utc TEXT NOT NULL
+);
+", tx);
+
+			Exec("CREATE INDEX IF NOT EXISTS idx_write_activities_machine_id ON write_activities(machine_id);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_write_activities_activity_utc ON write_activities(activity_utc);", tx);
+
+			tx.Commit();
+
+			logDiagnostic("TBO cache: migration to schema v4 complete.");
 		}
 
 		private void Exec(string sql, SqliteTransaction tx)
@@ -833,6 +900,100 @@ RETURNING dpapi_blob_id;";
 			return (long)cmd.ExecuteScalar()!;
 		}
 
+		internal long InsertWriteActivity(
+			long machineId,
+			string cmdlet,
+			string kind,
+			string action,
+			string target,
+			string path,
+			string? valueName,
+			int? valueType,
+			string? beforeBlobKind,
+			byte[]? beforeBlob,
+			string? afterBlobKind,
+			byte[]? afterBlob,
+			string? contextJson,
+			bool success,
+			string? failureReason,
+			DateTime? activityUtc = null)
+		{
+			if (machineId <= 0)
+				throw new ArgumentOutOfRangeException(nameof(machineId));
+			if (string.IsNullOrWhiteSpace(cmdlet))
+				throw new ArgumentException("Cmdlet must be provided.", nameof(cmdlet));
+			if (string.IsNullOrWhiteSpace(kind))
+				throw new ArgumentException("Kind must be provided.", nameof(kind));
+			if (string.IsNullOrWhiteSpace(action))
+				throw new ArgumentException("Action must be provided.", nameof(action));
+			if (string.IsNullOrWhiteSpace(target))
+				throw new ArgumentException("Target must be provided.", nameof(target));
+			if (string.IsNullOrWhiteSpace(path))
+				throw new ArgumentException("Path must be provided.", nameof(path));
+
+			var now = (activityUtc ?? DateTime.UtcNow).ToString("O", CultureInfo.InvariantCulture);
+			var normalizedValueName = valueName ?? string.Empty;
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+INSERT INTO write_activities(
+  machine_id,
+  cmdlet,
+  kind,
+  action,
+  target,
+  path,
+  value_name,
+  value_type,
+  before_blob_kind,
+  before_blob,
+  after_blob_kind,
+  after_blob,
+  context_json,
+  success,
+  failure_reason,
+  activity_utc
+)
+VALUES (
+  $machine_id,
+  $cmdlet,
+  $kind,
+  $action,
+  $target,
+  $path,
+  $value_name,
+  $value_type,
+  $before_blob_kind,
+  $before_blob,
+  $after_blob_kind,
+  $after_blob,
+  $context_json,
+  $success,
+  $failure_reason,
+  $activity_utc
+)
+RETURNING write_activity_id;";
+
+			cmd.Parameters.AddWithValue("$machine_id", machineId);
+			cmd.Parameters.AddWithValue("$cmdlet", cmdlet.Trim());
+			cmd.Parameters.AddWithValue("$kind", kind.Trim());
+			cmd.Parameters.AddWithValue("$action", action.Trim());
+			cmd.Parameters.AddWithValue("$target", target.Trim());
+			cmd.Parameters.AddWithValue("$path", path.Trim());
+			cmd.Parameters.AddWithValue("$value_name", normalizedValueName.Trim());
+			cmd.Parameters.AddWithValue("$value_type", (object?)valueType ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$before_blob_kind", (object?)beforeBlobKind ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$before_blob", (object?)beforeBlob ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$after_blob_kind", (object?)afterBlobKind ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$after_blob", (object?)afterBlob ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$context_json", (object?)contextJson ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$success", success ? 1 : 0);
+			cmd.Parameters.AddWithValue("$failure_reason", (object?)failureReason ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$activity_utc", now);
+
+			return (long)cmd.ExecuteScalar()!;
+		}
+
 		internal sealed class CredentialReuseRow
 		{
 			internal long CredentialId { get; init; }
@@ -1144,6 +1305,81 @@ ORDER BY dpapi_blob_id;";
 			return results;
 		}
 
+		internal sealed class WriteActivityRow
+		{
+			internal long WriteActivityId { get; init; }
+			internal long MachineId { get; init; }
+			internal string Cmdlet { get; init; } = "";
+			internal string Kind { get; init; } = "";
+			internal string Action { get; init; } = "";
+			internal string Target { get; init; } = "";
+			internal string Path { get; init; } = "";
+			internal string ValueName { get; init; } = "";
+			internal int? ValueType { get; init; }
+			internal string? BeforeBlobKind { get; init; }
+			internal byte[]? BeforeBlob { get; init; }
+			internal string? AfterBlobKind { get; init; }
+			internal byte[]? AfterBlob { get; init; }
+			internal string? ContextJson { get; init; }
+			internal bool Success { get; init; }
+			internal string? FailureReason { get; init; }
+			internal string ActivityUtc { get; init; } = "";
+		}
+
+		internal IReadOnlyList<WriteActivityRow> QueryWriteActivities()
+		{
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT
+  write_activity_id,
+  machine_id,
+  cmdlet,
+  kind,
+  action,
+  target,
+  path,
+  value_name,
+  value_type,
+  before_blob_kind,
+  before_blob,
+  after_blob_kind,
+  after_blob,
+  context_json,
+  success,
+  failure_reason,
+  activity_utc
+FROM write_activities
+ORDER BY write_activity_id;";
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<WriteActivityRow>();
+			while (reader.Read())
+			{
+				results.Add(new WriteActivityRow
+				{
+					WriteActivityId = reader.GetInt64(0),
+					MachineId = reader.GetInt64(1),
+					Cmdlet = reader.GetString(2),
+					Kind = reader.GetString(3),
+					Action = reader.GetString(4),
+					Target = reader.GetString(5),
+					Path = reader.GetString(6),
+					ValueName = reader.GetString(7),
+					ValueType = reader.IsDBNull(8) ? null : reader.GetInt32(8),
+					BeforeBlobKind = reader.IsDBNull(9) ? null : reader.GetString(9),
+					BeforeBlob = reader.IsDBNull(10) ? null : reader.GetFieldValue<byte[]>(10),
+					AfterBlobKind = reader.IsDBNull(11) ? null : reader.GetString(11),
+					AfterBlob = reader.IsDBNull(12) ? null : reader.GetFieldValue<byte[]>(12),
+					ContextJson = reader.IsDBNull(13) ? null : reader.GetString(13),
+					Success = reader.GetInt64(14) != 0,
+					FailureReason = reader.IsDBNull(15) ? null : reader.GetString(15),
+					ActivityUtc = reader.GetString(16),
+				});
+			}
+
+			return results;
+		}
+
 		internal GraphData QueryGraphData()
 		{
 			return new GraphData
@@ -1271,7 +1507,8 @@ ORDER BY observation_id;";
 				"credentials",
 				"observations",
 				"dpapi_masterkeys",
-				"dpapi_blobs"
+				"dpapi_blobs",
+				"write_activities"
 			};
 
 			var counts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -1295,6 +1532,7 @@ ORDER BY observation_id;";
 			// Delete edges first to satisfy FK constraints.
 			cmd.CommandText =
 				"DELETE FROM observations;" +
+				"DELETE FROM write_activities;" +
 				"DELETE FROM dpapi_blobs;" +
 				"DELETE FROM dpapi_masterkeys;" +
 				"DELETE FROM credentials;" +

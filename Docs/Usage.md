@@ -141,7 +141,7 @@ Shows information about the persistent TBO cache (schema version and row counts)
 
 Cache path resolution order:
 
-- `-Path` parameter
+- `-Path` parameter (cache cmdlets) or `-CachePath` (cmdlets that support `-Cache`)
 - `TITANIS_TBO_CACHE` environment variable (file path, or `1/true/yes` to use default)
 - Default: `%LOCALAPPDATA%\TBO\cache.sqlite3` (Windows)
 
@@ -154,11 +154,13 @@ $env:TITANIS_TBO_CACHE = 'C:\Temp\tbo-cache.sqlite3'; Get-TBOCacheInfo
 Cache ingestion defaults:
 
 - Set `TITANIS_TBO_CACHE_INGEST` to `1/true/yes` to enable cache writes by default for cmdlets that support `-Cache`.
+- Use `-CachePath` to write to a specific cache file for a single invocation.
 - Use `-Cache:$false` to suppress cache writes for a single invocation when global ingestion is enabled.
 
 ```powershell
 $env:TITANIS_TBO_CACHE_INGEST = 'true'
 Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -CachePath C:\Temp\tbo-cache.sqlite3
 Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache:$false
 ```
 
@@ -214,7 +216,7 @@ Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol `
 
 ### Export-TBOCacheJson
 
-Exports the persistent cache as a JSON document (machines, principals, credentials, observations, DPAPI master keys, DPAPI blob hits) for offline ingestion (for example, Nemesis).
+Exports the persistent cache as a JSON document (machines, principals, credentials, observations, DPAPI master keys, DPAPI blob hits, write activities) for offline ingestion (for example, Nemesis).
 
 ```powershell
 # Export as JSON.
@@ -263,6 +265,7 @@ Copies files or directories between local paths and SMB paths using backup inten
 Copy-TBOSmbItem -Source tbo:\Windows\System32\config\SAM -Destination C:\Temp\SAM.bak
 Copy-TBOSmbItem -Source tbo:\Windows\System32\Microsoft\Protect\S-1-5-18 -Destination C:\Temp\MasterKeys -CreateDirectories
 Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -CreateDirectories
+Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -CreateDirectories -Cache -CachePath C:\Temp\tbo-cache.sqlite3
 Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -Force
 ```
 
@@ -272,6 +275,7 @@ Writes text content to an SMB path using backup intent. Accepts UNC or `tbo:\` p
 
 ```powershell
 'testing' | Out-TBOSmbFile -Path tbo:\Temp\test.txt
+'testing' | Out-TBOSmbFile -Path tbo:\Temp\test.txt -Cache -CachePath C:\Temp\tbo-cache.sqlite3
 Get-Content tbo:\Temp\test.txt
 'more' | Out-TBOSmbFile -Path tbo:\Temp\test.txt -Append
 ```
@@ -391,7 +395,7 @@ The input can be a portable `SecurityDescriptor`, an SDDL string, raw bytes, or 
 
 ```powershell
 $sd = Get-TBOSmbSecurityDescriptor -Path tbo:\Windows
-Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sd
+Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sd -Cache
 Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sd -Sections Dacl
 $sddl = "O:BAG:BAD:(A;;FA;;;SY)"
 Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Sections Dacl
@@ -437,18 +441,18 @@ Get-ChildItem tbo-reg-local:\HKLM\SOFTWARE -IncludeValues -IncludeData
 Write examples (safe path under HKCU):
 
 ```powershell
-New-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test
-Set-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId -Type String -Value "abc123"
+New-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Cache
+Set-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId -Type String -Value "abc123" -Cache
 Get-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId
-Remove-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId
-Remove-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test
+Remove-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name InstallId -Cache
+Remove-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Cache
 ```
 
 Security descriptors (SACL is not implemented yet for local mode; see `TBO-twi.9`):
 
 ```powershell
 $sd = Get-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE -Sections Dacl
-Set-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -SecurityDescriptor $sd -Sections Dacl
+Set-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -SecurityDescriptor $sd -Sections Dacl -Cache
 ```
 
 #### Get-TBORegKey
@@ -475,7 +479,7 @@ Writes a security descriptor to a registry key. Input can be a portable `Securit
 
 ```powershell
 $sd = Get-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -Sections Dacl
-Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd -Sections Dacl
+Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sd -Sections Dacl -Cache
 
 $sddl = "O:BAG:BAD:(A;;KR;;;SY)"
 Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE -SecurityDescriptor $sddl -Sections Dacl
@@ -599,7 +603,7 @@ Writes the TaskCache registry security descriptor for a task. This modifies the 
 # View the TaskCache SD as SDDL, then write it back (edit the SDDL to modify permissions).
 $task = Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask' -AsSddl
 $task.TaskSecurityDescriptor
-Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.TaskPath -SecurityDescriptor $task.TaskSecurityDescriptor -Confirm:$false
+Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.TaskPath -SecurityDescriptor $task.TaskSecurityDescriptor -Cache -Confirm:$false
 ```
 
 #### Get-TBORegTCPIP
@@ -937,7 +941,7 @@ Get-TBORegChildItem -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\S
 Creates a remote registry key.
 
 ```powershell
-New-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO
+New-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Cache
 ```
 
 #### Remove-TBORegKey
@@ -945,7 +949,7 @@ New-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWAR
 Removes a remote registry key.
 
 ```powershell
-Remove-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO
+Remove-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Cache
 ```
 
 #### Get-TBORegValue
@@ -962,8 +966,8 @@ Get-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path 'HKLM\SOFT
 Sets a remote registry value.
 
 ```powershell
-Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name InstallId -Type String -Value "abc123"
-Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name Flags -Type DwordLE -Value 1
+Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name InstallId -Type String -Value "abc123" -Cache
+Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name Flags -Type DwordLE -Value 1 -Cache
 ```
 
 #### Remove-TBORegValue
@@ -971,7 +975,7 @@ Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTW
 Removes a remote registry value.
 
 ```powershell
-Remove-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name InstallId
+Remove-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name InstallId -Cache
 ```
 
 ## Local Logging

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Management.Automation;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
@@ -227,8 +228,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Alias("KeyPath")]
 		public string Path { get; set; } = string.Empty;
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 			if (parsedPath.IsRoot)
 				throw new InvalidOperationException("Cannot create a root key.");
@@ -242,19 +251,77 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var subkeyName = RegistryPath.GetSubkeyNameFromPath(subkeyPath);
 			var parentSpec = new RegistryPathSpec(parsedPath.RootKey, parsedPath.RootName, parentPath);
 
-			ExecuteRegistryOperation(smb, cancellationToken, session =>
-			{
-				using var parentKey = OpenRegistryKey(
-					session.Client,
-					parentSpec,
-					RegistryAccessRights.CreateSubkey,
-					RegistryAccessRights.EnumerateSubkeys,
-					cancellationToken);
+			bool existedBefore = false;
+			string? beforeReadFailure = null;
+			Exception? operationFailure = null;
 
-				var createAccess = RegistryAccessRights.CreateSubkey | RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys;
-				using var created = parentKey.CreateSubkey(subkeyName, createAccess, RegistryHelpers.BackupOptions, cancellationToken).GetAwaiter().GetResult();
-				this.WriteObject(new TboRegistryKeyInfo(this.ServerName, parsedPath.KeyPath, created.QueryInfo(cancellationToken).GetAwaiter().GetResult()));
-			});
+			try
+			{
+				ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					if (recordActivity)
+					{
+						try
+						{
+							using var existing = RegistryHelpers.TryOpenKey(session.Client, parsedPath, RegistryAccessRights.QueryValue, cancellationToken);
+							existedBefore = existing != null;
+						}
+						catch (Exception ex)
+						{
+							beforeReadFailure = ex.Message;
+							existedBefore = false;
+						}
+					}
+
+					using var parentKey = OpenRegistryKey(
+						session.Client,
+						parentSpec,
+						RegistryAccessRights.CreateSubkey,
+						RegistryAccessRights.EnumerateSubkeys,
+						cancellationToken);
+
+					var createAccess = RegistryAccessRights.CreateSubkey | RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys;
+					using var created = parentKey.CreateSubkey(subkeyName, createAccess, RegistryHelpers.BackupOptions, cancellationToken).GetAwaiter().GetResult();
+					this.WriteObject(new TboRegistryKeyInfo(this.ServerName, parsedPath.KeyPath, created.QueryInfo(cancellationToken).GetAwaiter().GetResult()));
+				});
+			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
+			}
+			finally
+			{
+				string? contextJson = null;
+				if (recordActivity)
+				{
+					contextJson = JsonSerializer.Serialize(new
+					{
+						existedBefore,
+						beforeReadFailure
+					});
+				}
+
+				TboCacheWriteActivities.TryRecord(
+					cmdlet: this,
+					smb: smb,
+					enabled: recordActivity,
+					cachePath: this.CachePath,
+					serverName: this.ServerName,
+					kind: TboCacheWriteActivities.KindRegistry,
+					action: TboCacheWriteActivities.ActionCreateKey,
+					target: target,
+					path: parsedPath.KeyPath,
+					valueName: null,
+					valueType: null,
+					beforeBlobKind: null,
+					beforeBlob: null,
+					afterBlobKind: null,
+					afterBlob: null,
+					contextJson: contextJson,
+					success: operationFailure == null,
+					failureReason: operationFailure?.Message);
+			}
 		}
 	}
 
@@ -265,8 +332,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Alias("KeyPath")]
 		public string Path { get; set; } = string.Empty;
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 			if (parsedPath.IsRoot)
 				throw new InvalidOperationException("Cannot remove a root key.");
@@ -280,17 +355,75 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var subkeyName = RegistryPath.GetSubkeyNameFromPath(subkeyPath);
 			var parentSpec = new RegistryPathSpec(parsedPath.RootKey, parsedPath.RootName, parentPath);
 
-			ExecuteRegistryOperation(smb, cancellationToken, session =>
-			{
-				using var parentKey = OpenRegistryKey(
-					session.Client,
-					parentSpec,
-					RegistryAccessRights.CreateSubkey,
-					RegistryAccessRights.EnumerateSubkeys,
-					cancellationToken);
+			bool existedBefore = false;
+			string? beforeReadFailure = null;
+			Exception? operationFailure = null;
 
-				parentKey.DeleteSubkey(subkeyName, cancellationToken).GetAwaiter().GetResult();
-			});
+			try
+			{
+				ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					if (recordActivity)
+					{
+						try
+						{
+							using var existing = RegistryHelpers.TryOpenKey(session.Client, parsedPath, RegistryAccessRights.QueryValue, cancellationToken);
+							existedBefore = existing != null;
+						}
+						catch (Exception ex)
+						{
+							beforeReadFailure = ex.Message;
+							existedBefore = false;
+						}
+					}
+
+					using var parentKey = OpenRegistryKey(
+						session.Client,
+						parentSpec,
+						RegistryAccessRights.CreateSubkey,
+						RegistryAccessRights.EnumerateSubkeys,
+						cancellationToken);
+
+					parentKey.DeleteSubkey(subkeyName, cancellationToken).GetAwaiter().GetResult();
+				});
+			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
+			}
+			finally
+			{
+				string? contextJson = null;
+				if (recordActivity)
+				{
+					contextJson = JsonSerializer.Serialize(new
+					{
+						existedBefore,
+						beforeReadFailure
+					});
+				}
+
+				TboCacheWriteActivities.TryRecord(
+					cmdlet: this,
+					smb: smb,
+					enabled: recordActivity,
+					cachePath: this.CachePath,
+					serverName: this.ServerName,
+					kind: TboCacheWriteActivities.KindRegistry,
+					action: TboCacheWriteActivities.ActionDeleteKey,
+					target: target,
+					path: parsedPath.KeyPath,
+					valueName: null,
+					valueType: null,
+					beforeBlobKind: null,
+					beforeBlob: null,
+					afterBlobKind: null,
+					afterBlob: null,
+					contextJson: contextJson,
+					success: operationFailure == null,
+					failureReason: operationFailure?.Message);
+			}
 		}
 	}
 
@@ -459,8 +592,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public RegistryValueType? Type { get; set; }
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 			var valueType = RegistryHelpers.ResolveValueType(this.Value, this.Type);
 			var data = RegistryHelpers.EncodeValue(valueType, this.Value);
@@ -469,17 +610,101 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (!this.ShouldProcess(target, "Set registry value"))
 				return;
 
-			ExecuteRegistryOperation(smb, cancellationToken, session =>
-			{
-				using var key = OpenRegistryKey(
-					session.Client,
-					parsedPath,
-					RegistryAccessRights.SetValue,
-					RegistryAccessRights.EnumerateSubkeys,
-					cancellationToken);
+			RegistryValueType? beforeValueType = null;
+			byte[]? beforeBytes = null;
+			string? beforeReadFailure = null;
+			Exception? operationFailure = null;
 
-				key.SetValue(this.Name, valueType, data, cancellationToken).GetAwaiter().GetResult();
-			});
+			try
+			{
+				ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					// Try to open with QueryValue so we can read the pre-image for rollback. Fall back to SetValue-only.
+					IRegistryKey key;
+					try
+					{
+						key = OpenRegistryKey(
+							session.Client,
+							parsedPath,
+							RegistryAccessRights.SetValue | RegistryAccessRights.QueryValue,
+							RegistryAccessRights.EnumerateSubkeys,
+							cancellationToken);
+					}
+					catch
+					{
+						key = OpenRegistryKey(
+							session.Client,
+							parsedPath,
+							RegistryAccessRights.SetValue,
+							RegistryAccessRights.EnumerateSubkeys,
+							cancellationToken);
+					}
+
+					using (key)
+					{
+						if (recordActivity)
+						{
+							try
+							{
+								var existing = key.GetValue(this.Name!, cancellationToken).GetAwaiter().GetResult();
+								beforeValueType = existing.ValueType;
+								if (existing.Bytes != null)
+									beforeBytes = existing.Bytes;
+								else if (existing.TypedValue != null)
+									beforeBytes = RegistryHelpers.EncodeValue(existing.ValueType, existing.TypedValue);
+								else
+									beforeBytes = RegistryHelpers.EncodeValue(existing.ValueType, existing.Bytes);
+							}
+							catch (Exception ex)
+							{
+								beforeReadFailure = ex.Message;
+								beforeValueType = null;
+								beforeBytes = null;
+							}
+						}
+
+						key.SetValue(this.Name, valueType, data, cancellationToken).GetAwaiter().GetResult();
+					}
+				});
+			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
+			}
+			finally
+			{
+				string? contextJson = null;
+				if (recordActivity)
+				{
+					contextJson = JsonSerializer.Serialize(new
+					{
+						beforeValueType = beforeValueType.HasValue ? (int)beforeValueType.Value : (int?)null,
+						afterValueType = (int)valueType,
+						beforeReadFailure
+					});
+				}
+
+				TboCacheWriteActivities.TryRecord(
+					cmdlet: this,
+					smb: smb,
+					enabled: recordActivity,
+					cachePath: this.CachePath,
+					serverName: this.ServerName,
+					kind: TboCacheWriteActivities.KindRegistry,
+					action: TboCacheWriteActivities.ActionSetValue,
+					target: target,
+					path: parsedPath.KeyPath,
+					valueName: this.Name,
+					valueType: (int)valueType,
+					beforeBlobKind: beforeBytes != null ? TboCacheWriteActivities.BlobKindRegistryValue : null,
+					beforeBlob: beforeBytes,
+					afterBlobKind: TboCacheWriteActivities.BlobKindRegistryValue,
+					afterBlob: data,
+					contextJson: contextJson,
+					success: operationFailure == null,
+					failureReason: operationFailure?.Message);
+			}
 		}
 
 	}
@@ -494,24 +719,114 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter(Mandatory = true, Position = 2, ValueFromPipelineByPropertyName = true)]
 		public string? Name { get; set; }
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
 			var target = $"{this.ServerName}\\{parsedPath.KeyPath}\\{this.Name}";
 			if (!this.ShouldProcess(target, "Remove registry value"))
 				return;
 
-			ExecuteRegistryOperation(smb, cancellationToken, session =>
-			{
-				using var key = OpenRegistryKey(
-					session.Client,
-					parsedPath,
-					RegistryAccessRights.SetValue,
-					RegistryAccessRights.EnumerateSubkeys,
-					cancellationToken);
+			RegistryValueType? beforeValueType = null;
+			byte[]? beforeBytes = null;
+			string? beforeReadFailure = null;
+			Exception? operationFailure = null;
 
-				key.DeleteValue(this.Name, cancellationToken).GetAwaiter().GetResult();
-			});
+			try
+			{
+				ExecuteRegistryOperation(smb, cancellationToken, session =>
+				{
+					IRegistryKey key;
+					try
+					{
+						key = OpenRegistryKey(
+							session.Client,
+							parsedPath,
+							RegistryAccessRights.SetValue | RegistryAccessRights.QueryValue,
+							RegistryAccessRights.EnumerateSubkeys,
+							cancellationToken);
+					}
+					catch
+					{
+						key = OpenRegistryKey(
+							session.Client,
+							parsedPath,
+							RegistryAccessRights.SetValue,
+							RegistryAccessRights.EnumerateSubkeys,
+							cancellationToken);
+					}
+
+					using (key)
+					{
+						if (recordActivity)
+						{
+							try
+							{
+								var existing = key.GetValue(this.Name!, cancellationToken).GetAwaiter().GetResult();
+								beforeValueType = existing.ValueType;
+								if (existing.Bytes != null)
+									beforeBytes = existing.Bytes;
+								else if (existing.TypedValue != null)
+									beforeBytes = RegistryHelpers.EncodeValue(existing.ValueType, existing.TypedValue);
+								else
+									beforeBytes = RegistryHelpers.EncodeValue(existing.ValueType, existing.Bytes);
+							}
+							catch (Exception ex)
+							{
+								beforeReadFailure = ex.Message;
+								beforeValueType = null;
+								beforeBytes = null;
+							}
+						}
+
+						key.DeleteValue(this.Name, cancellationToken).GetAwaiter().GetResult();
+					}
+				});
+			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
+			}
+			finally
+			{
+				string? contextJson = null;
+				if (recordActivity)
+				{
+					contextJson = JsonSerializer.Serialize(new
+					{
+						beforeValueType = beforeValueType.HasValue ? (int)beforeValueType.Value : (int?)null,
+						beforeReadFailure
+					});
+				}
+
+				TboCacheWriteActivities.TryRecord(
+					cmdlet: this,
+					smb: smb,
+					enabled: recordActivity,
+					cachePath: this.CachePath,
+					serverName: this.ServerName,
+					kind: TboCacheWriteActivities.KindRegistry,
+					action: TboCacheWriteActivities.ActionDeleteValue,
+					target: target,
+					path: parsedPath.KeyPath,
+					valueName: this.Name,
+					valueType: beforeValueType.HasValue ? (int)beforeValueType.Value : (int?)null,
+					beforeBlobKind: beforeBytes != null ? TboCacheWriteActivities.BlobKindRegistryValue : null,
+					beforeBlob: beforeBytes,
+					afterBlobKind: null,
+					afterBlob: null,
+					contextJson: contextJson,
+					success: operationFailure == null,
+					failureReason: operationFailure?.Message);
+			}
 		}
 	}
 }

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Management.Automation;
 using System.Text;
+using System.Text.Json;
 using Titanis;
 using Titanis.Smb2;
 using Winterop = Titanis.Winterop;
@@ -39,6 +40,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		[Parameter]
 		public Encoding? Encoding { get; set; }
+
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
 
 		private Smb2OpenFile? _file;
 		private Smb2FileStream? _stream;
@@ -85,6 +92,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private void InitializeWriter(ISmbProviderInfo smb)
 		{
+			var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+
 			if (this.Append.IsPresent && this.NoClobber.IsPresent)
 				throw new ArgumentException("NoClobber cannot be used with Append.", nameof(NoClobber));
 
@@ -159,6 +168,39 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var encoding = this.Encoding ?? Encoding.UTF8;
 			this._writer = new StreamWriter(this._stream, encoding, 4096, false);
+
+			string? contextJson = null;
+			if (recordActivity)
+			{
+				contextJson = JsonSerializer.Serialize(new
+				{
+					append = this.Append.IsPresent,
+					noClobber = this.NoClobber.IsPresent,
+					force = this.Force.IsPresent,
+					noNewline = this.NoNewline.IsPresent,
+					encoding = encoding.WebName
+				});
+			}
+
+			TboCacheWriteActivities.TryRecord(
+				cmdlet: this,
+				smb: smb,
+				enabled: recordActivity,
+				cachePath: this.CachePath,
+				serverName: snapshotPath.ResolvedPath.ServerName,
+				kind: TboCacheWriteActivities.KindFileSystem,
+				action: TboCacheWriteActivities.ActionWriteFile,
+				target: snapshotPath.ResolvedPath.ToString(),
+				path: snapshotPath.ResolvedPath.ToString(),
+				valueName: null,
+				valueType: null,
+				beforeBlobKind: null,
+				beforeBlob: null,
+				afterBlobKind: null,
+				afterBlob: null,
+				contextJson: contextJson,
+				success: true,
+				failureReason: null);
 		}
 
 		private void WriteValue(object? value)
