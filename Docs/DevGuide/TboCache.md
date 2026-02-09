@@ -169,18 +169,24 @@ Ingestion:
 
 ## Principal Identity Strategy
 
-Schema v1 behavior:
+Schema v2 behavior (current):
 
-- Primary identity: `sid` (when present). This is treated as globally unique.
-- SID-less principals: best-effort identity key `(domain, name, type)` when `domain` and `name` are present. Type can be upgraded from NULL.
+- Principals have a `scope` column: `Global` (default) or `Machine`.
+- Primary identity when `sid` is present:
+  - Global scope: `sid` (unique within Global scope).
+  - Machine scope: `(scope_machine_id, sid)` (unique within Machine scope).
+- SID-less principals: best-effort identity key `(scope, scope_machine_id, domain, name, type)` when `domain` and `name` are present. Type can be upgraded from NULL.
 - Do not correlate on RID alone (for example, local Administrator is commonly RID 500).
 - When a cmdlet only knows a local principal name (no SID), it should scope `domain` to the current machine (for example `ServerName`) to avoid cross-host collisions.
 
-Known limitation:
+Migration:
 
-- Some well-known/builtin SIDs are shared across machines (for example, `SYSTEM` and `BUILTIN` groups). Schema v1 treats these as global principals, which can collapse per-host local-group semantics.
+- Opening a schema v1 cache will automatically migrate the principals table to schema v2.
+
+Notes:
+
+- Some well-known/builtin SIDs are shared across machines (for example, `SYSTEM` and `BUILTIN` groups). Schema v2 allows representing them as Machine-scoped principals to avoid cross-host merges, but collectors must choose the appropriate scope.
 
 Roadmap:
 
-- Schema v2 scoped principals (Global vs Machine), with updated unique indexes and migration: `TBO-ha0.1`.
 - SAM ingestion: derive full local account SIDs (machine SID + RID) and ingest `PrincipalSid`: `TBO-ha0.2`.

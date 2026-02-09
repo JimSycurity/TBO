@@ -16,8 +16,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		internal const string CachePathEnvVar = "TITANIS_TBO_CACHE";
 
-		private const int SchemaVersion = 1;
+		private const int SchemaVersion = 2;
 		private readonly SqliteConnection _connection;
+
+		internal enum PrincipalScope
+		{
+			Global = 1,
+			Machine = 2
+		}
+
+		private const string PrincipalScopeGlobal = "Global";
+		private const string PrincipalScopeMachine = "Machine";
 
 		private TboCacheDatabase(SqliteConnection connection)
 		{
@@ -129,7 +138,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (userVersion == 0)
 			{
 				logDiagnostic($"TBO cache: initializing new DB (schema v{SchemaVersion}).");
-				ApplySchemaV1();
+				ApplySchemaV2();
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -140,7 +149,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					$"Cache DB schema version {userVersion} is newer than this build supports (max {SchemaVersion}).");
 			}
 
-			// Future: apply migrations here.
+			if (userVersion == 1)
+			{
+				logDiagnostic("TBO cache: migrating DB schema v1 -> v2.");
+				MigrateSchemaV1ToV2(logDiagnostic);
+				SetUserVersion(SchemaVersion);
+				return;
+			}
+
+			// Schema is current.
 		}
 
 		private int GetUserVersion()
@@ -158,7 +175,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			cmd.ExecuteNonQuery();
 		}
 
-		private void ApplySchemaV1()
+		private void ApplySchemaV2()
 		{
 			using var tx = _connection.BeginTransaction();
 
@@ -174,13 +191,46 @@ CREATE TABLE IF NOT EXISTS machines(
 			Exec(@"
 CREATE TABLE IF NOT EXISTS principals(
   principal_id INTEGER PRIMARY KEY,
-  sid TEXT NULL UNIQUE COLLATE NOCASE,
+  scope TEXT NOT NULL DEFAULT 'Global',
+  scope_machine_id INTEGER NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  sid TEXT NULL COLLATE NOCASE,
   domain TEXT NULL,
   name TEXT NULL,
   type TEXT NULL,
   first_seen_utc TEXT NOT NULL,
   last_seen_utc TEXT NOT NULL
 );
+", tx);
+
+			// Principals uniqueness rules (v2):
+			// - Global principals: unique by SID when SID is present.
+			// - Machine-scoped principals: unique by (machine_id,SID) when SID is present.
+			//
+			// Note: we intentionally avoid a single UNIQUE(scope, scope_machine_id, sid) index because
+			// SQLite UNIQUE indexes treat NULL values as distinct (breaking global uniqueness where scope_machine_id is NULL).
+			Exec(@"
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_principals_global_sid
+ON principals(sid)
+WHERE scope = 'Global' AND sid IS NOT NULL;
+", tx);
+
+			Exec(@"
+CREATE UNIQUE INDEX IF NOT EXISTS uidx_principals_machine_sid
+ON principals(scope_machine_id, sid)
+WHERE scope = 'Machine' AND scope_machine_id IS NOT NULL AND sid IS NOT NULL;
+", tx);
+
+			// Non-unique helper indexes for best-effort SID-less lookups.
+			Exec(@"
+CREATE INDEX IF NOT EXISTS idx_principals_global_domain_name_type
+ON principals(domain, name, type)
+WHERE scope = 'Global' AND sid IS NULL AND domain IS NOT NULL AND name IS NOT NULL;
+", tx);
+
+			Exec(@"
+CREATE INDEX IF NOT EXISTS idx_principals_machine_domain_name_type
+ON principals(scope_machine_id, domain, name, type)
+WHERE scope = 'Machine' AND sid IS NULL AND scope_machine_id IS NOT NULL AND domain IS NOT NULL AND name IS NOT NULL;
 ", tx);
 
 			Exec(@"
@@ -217,6 +267,83 @@ CREATE TABLE IF NOT EXISTS observations(
 			tx.Commit();
 		}
 
+		private void MigrateSchemaV1ToV2(Action<string> logDiagnostic)
+		{
+			// Schema v1 had a UNIQUE constraint directly on principals.sid, which prevents representing machine-scoped
+			// principals that share well-known/builtin SIDs across hosts (for example, SYSTEM and BUILTIN groups).
+			//
+			// Migration approach:
+			// - Rebuild the principals table (SQLite cannot drop a column-level UNIQUE constraint).
+			// - Preserve principal_id values so existing observations remain valid.
+			// - Backfill existing principals as Global scope.
+			//
+			// Foreign keys must be disabled while dropping/replacing the referenced principals table.
+			using (var fk = _connection.CreateCommand())
+			{
+				fk.CommandText = "PRAGMA foreign_keys=OFF;";
+				fk.ExecuteNonQuery();
+			}
+
+			using var tx = _connection.BeginTransaction();
+
+			Exec(@"
+CREATE TABLE principals_v2(
+  principal_id INTEGER PRIMARY KEY,
+  scope TEXT NOT NULL DEFAULT 'Global',
+  scope_machine_id INTEGER NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  sid TEXT NULL COLLATE NOCASE,
+  domain TEXT NULL,
+  name TEXT NULL,
+  type TEXT NULL,
+  first_seen_utc TEXT NOT NULL,
+  last_seen_utc TEXT NOT NULL
+);
+", tx);
+
+			Exec(@"
+INSERT INTO principals_v2(principal_id, scope, scope_machine_id, sid, domain, name, type, first_seen_utc, last_seen_utc)
+SELECT principal_id, 'Global', NULL, sid, domain, name, type, first_seen_utc, last_seen_utc
+FROM principals;
+", tx);
+
+			Exec("DROP TABLE principals;", tx);
+			Exec("ALTER TABLE principals_v2 RENAME TO principals;", tx);
+
+			Exec(@"
+CREATE UNIQUE INDEX uidx_principals_global_sid
+ON principals(sid)
+WHERE scope = 'Global' AND sid IS NOT NULL;
+", tx);
+
+			Exec(@"
+CREATE UNIQUE INDEX uidx_principals_machine_sid
+ON principals(scope_machine_id, sid)
+WHERE scope = 'Machine' AND scope_machine_id IS NOT NULL AND sid IS NOT NULL;
+", tx);
+
+			Exec(@"
+CREATE INDEX idx_principals_global_domain_name_type
+ON principals(domain, name, type)
+WHERE scope = 'Global' AND sid IS NULL AND domain IS NOT NULL AND name IS NOT NULL;
+", tx);
+
+			Exec(@"
+CREATE INDEX idx_principals_machine_domain_name_type
+ON principals(scope_machine_id, domain, name, type)
+WHERE scope = 'Machine' AND sid IS NULL AND scope_machine_id IS NOT NULL AND domain IS NOT NULL AND name IS NOT NULL;
+", tx);
+
+			tx.Commit();
+
+			using (var fk = _connection.CreateCommand())
+			{
+				fk.CommandText = "PRAGMA foreign_keys=ON;";
+				fk.ExecuteNonQuery();
+			}
+
+			logDiagnostic("TBO cache: migration to schema v2 complete.");
+		}
+
 		private void Exec(string sql, SqliteTransaction tx)
 		{
 			using var cmd = _connection.CreateCommand();
@@ -251,22 +378,55 @@ RETURNING machine_id;";
 		}
 
 		internal long UpsertPrincipal(string? sid, string? domain, string? name, string? type)
+			=> UpsertPrincipal(sid, domain, name, type, PrincipalScope.Global, scopeMachineId: null);
+
+		internal long UpsertPrincipal(string? sid, string? domain, string? name, string? type, PrincipalScope scope, long? scopeMachineId)
 		{
 			var now = UtcNowIso8601();
+
+			var scopeValue = scope == PrincipalScope.Machine
+				? PrincipalScopeMachine
+				: PrincipalScopeGlobal;
+
+			long? machineId = null;
+			if (scope == PrincipalScope.Machine)
+			{
+				if (!scopeMachineId.HasValue || scopeMachineId.Value <= 0)
+					throw new ArgumentOutOfRangeException(nameof(scopeMachineId), scopeMachineId, "Machine-scoped principals require a valid scope machine id.");
+
+				machineId = scopeMachineId.Value;
+			}
 
 			// Prefer SID-based identity when available.
 			if (!string.IsNullOrWhiteSpace(sid))
 			{
 				using var cmd = _connection.CreateCommand();
-				cmd.CommandText = @"
-INSERT INTO principals(sid, domain, name, type, first_seen_utc, last_seen_utc)
-VALUES ($sid, $domain, $name, $type, $now, $now)
-ON CONFLICT(sid) DO UPDATE SET
+
+				if (scope == PrincipalScope.Machine)
+				{
+					cmd.CommandText = @"
+INSERT INTO principals(scope, scope_machine_id, sid, domain, name, type, first_seen_utc, last_seen_utc)
+VALUES ('Machine', $scope_machine_id, $sid, $domain, $name, $type, $now, $now)
+ON CONFLICT(scope_machine_id, sid) WHERE scope = 'Machine' AND sid IS NOT NULL DO UPDATE SET
   domain=COALESCE(excluded.domain, domain),
   name=COALESCE(excluded.name, name),
   type=COALESCE(excluded.type, type),
   last_seen_utc=$now
 RETURNING principal_id;";
+					cmd.Parameters.AddWithValue("$scope_machine_id", machineId!.Value);
+				}
+				else
+				{
+					cmd.CommandText = @"
+INSERT INTO principals(scope, scope_machine_id, sid, domain, name, type, first_seen_utc, last_seen_utc)
+VALUES ('Global', NULL, $sid, $domain, $name, $type, $now, $now)
+ON CONFLICT(sid) WHERE scope = 'Global' AND sid IS NOT NULL DO UPDATE SET
+  domain=COALESCE(excluded.domain, domain),
+  name=COALESCE(excluded.name, name),
+  type=COALESCE(excluded.type, type),
+  last_seen_utc=$now
+RETURNING principal_id;";
+				}
 
 				cmd.Parameters.AddWithValue("$sid", sid);
 				cmd.Parameters.AddWithValue("$domain", (object?)domain ?? DBNull.Value);
@@ -284,17 +444,22 @@ RETURNING principal_id;";
 			// - Dedupe by name alone is not safe without a namespace/domain (collisions across machines).
 			//
 			// Strategy:
-			// - If domain+name are present, reuse an existing SID-less principal for (domain,name,type), allowing type upgrades.
+			// - If domain+name are present, reuse an existing SID-less principal for (scope,domain,name,type), allowing type upgrades.
 			// - Otherwise, insert a new row. Callers can later merge by SID if discovered.
 			if (!string.IsNullOrWhiteSpace(domain) && !string.IsNullOrWhiteSpace(name))
 			{
+				var scopePredicate = scope == PrincipalScope.Machine
+					? "scope = 'Machine' AND scope_machine_id = $scope_machine_id"
+					: "scope = 'Global' AND scope_machine_id IS NULL";
+
 				long? existingId = null;
 				using (var select = _connection.CreateCommand())
 				{
-					select.CommandText = @"
+					select.CommandText = $@"
 SELECT principal_id
 FROM principals
 WHERE sid IS NULL
+  AND {scopePredicate}
   AND domain = $domain COLLATE NOCASE
   AND name = $name COLLATE NOCASE
   AND (
@@ -304,6 +469,7 @@ WHERE sid IS NULL
 ORDER BY principal_id
 LIMIT 1;";
 
+					select.Parameters.AddWithValue("$scope_machine_id", (object?)machineId ?? DBNull.Value);
 					select.Parameters.AddWithValue("$domain", domain);
 					select.Parameters.AddWithValue("$name", name);
 					select.Parameters.AddWithValue("$type", (object?)type ?? DBNull.Value);
@@ -334,9 +500,11 @@ WHERE principal_id=$principal_id;";
 			using (var insert = _connection.CreateCommand())
 			{
 				insert.CommandText = @"
-INSERT INTO principals(sid, domain, name, type, first_seen_utc, last_seen_utc)
-VALUES (NULL, $domain, $name, $type, $now, $now)
+INSERT INTO principals(scope, scope_machine_id, sid, domain, name, type, first_seen_utc, last_seen_utc)
+VALUES ($scope, $scope_machine_id, NULL, $domain, $name, $type, $now, $now)
 RETURNING principal_id;";
+				insert.Parameters.AddWithValue("$scope", scopeValue);
+				insert.Parameters.AddWithValue("$scope_machine_id", (object?)machineId ?? DBNull.Value);
 				insert.Parameters.AddWithValue("$domain", (object?)domain ?? DBNull.Value);
 				insert.Parameters.AddWithValue("$name", (object?)name ?? DBNull.Value);
 				insert.Parameters.AddWithValue("$type", (object?)type ?? DBNull.Value);
@@ -526,6 +694,8 @@ ORDER BY
 		internal sealed class GraphPrincipalRow
 		{
 			internal long PrincipalId { get; init; }
+			internal string Scope { get; init; } = PrincipalScopeGlobal;
+			internal long? ScopeMachineId { get; init; }
 			internal string? Sid { get; init; }
 			internal string? Domain { get; init; }
 			internal string? Name { get; init; }
@@ -603,7 +773,7 @@ ORDER BY machine_id;";
 		{
 			using var cmd = _connection.CreateCommand();
 			cmd.CommandText = @"
-SELECT principal_id, sid, domain, name, type, first_seen_utc, last_seen_utc
+SELECT principal_id, scope, scope_machine_id, sid, domain, name, type, first_seen_utc, last_seen_utc
 FROM principals
 ORDER BY principal_id;";
 
@@ -614,12 +784,14 @@ ORDER BY principal_id;";
 				results.Add(new GraphPrincipalRow
 				{
 					PrincipalId = reader.GetInt64(0),
-					Sid = reader.IsDBNull(1) ? null : reader.GetString(1),
-					Domain = reader.IsDBNull(2) ? null : reader.GetString(2),
-					Name = reader.IsDBNull(3) ? null : reader.GetString(3),
-					Type = reader.IsDBNull(4) ? null : reader.GetString(4),
-					FirstSeenUtc = reader.GetString(5),
-					LastSeenUtc = reader.GetString(6),
+					Scope = reader.GetString(1),
+					ScopeMachineId = reader.IsDBNull(2) ? null : reader.GetInt64(2),
+					Sid = reader.IsDBNull(3) ? null : reader.GetString(3),
+					Domain = reader.IsDBNull(4) ? null : reader.GetString(4),
+					Name = reader.IsDBNull(5) ? null : reader.GetString(5),
+					Type = reader.IsDBNull(6) ? null : reader.GetString(6),
+					FirstSeenUtc = reader.GetString(7),
+					LastSeenUtc = reader.GetString(8),
 				});
 			}
 
@@ -742,6 +914,8 @@ ORDER BY observation_id;";
 
 				case TboCacheEntryType.Machine:
 					cmd.CommandText = $"DELETE FROM observations WHERE machine_id IN ({inClause});";
+					cmd.ExecuteNonQuery();
+					cmd.CommandText = $"DELETE FROM principals WHERE scope = '{PrincipalScopeMachine}' AND scope_machine_id IN ({inClause});";
 					cmd.ExecuteNonQuery();
 					cmd.CommandText = $"DELETE FROM machines WHERE machine_id IN ({inClause});";
 					cmd.ExecuteNonQuery();

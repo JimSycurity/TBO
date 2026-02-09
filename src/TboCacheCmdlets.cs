@@ -250,6 +250,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			using var ms = new MemoryStream();
 
+			var principalNodeIds = BuildPrincipalNodeIds(graph);
+
 			using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
 			{
 				writer.WriteStartObject();
@@ -262,7 +264,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					WriteOpenGraphMachineNode(writer, m);
 
 				foreach (var p in graph.Principals)
-					WriteOpenGraphPrincipalNode(writer, p);
+					WriteOpenGraphPrincipalNode(writer, p, principalNodeIds);
 
 				foreach (var c in graph.Credentials)
 					WriteOpenGraphCredentialNode(writer, c);
@@ -279,7 +281,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 							writer,
 							o,
 							edgeKind: "ObservedPrincipal",
-							targetNodeId: $"principal:{o.PrincipalId.Value}",
+							targetNodeId: ResolvePrincipalNodeId(principalNodeIds, o.PrincipalId.Value),
 							targetKind: "TBO.Principal");
 					}
 
@@ -327,10 +329,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			writer.WriteEndObject();
 		}
 
-		private static void WriteOpenGraphPrincipalNode(Utf8JsonWriter writer, TboCacheDatabase.GraphPrincipalRow p)
+		private static void WriteOpenGraphPrincipalNode(
+			Utf8JsonWriter writer,
+			TboCacheDatabase.GraphPrincipalRow p,
+			IReadOnlyDictionary<long, string> principalNodeIds)
 		{
+			var nodeId = ResolvePrincipalNodeId(principalNodeIds, p.PrincipalId);
+
 			writer.WriteStartObject();
-			writer.WriteString("id", $"principal:{p.PrincipalId}");
+			writer.WriteString("id", nodeId);
 
 			var primaryKind = MapPrincipalKind(p.Type);
 
@@ -343,7 +350,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var display = BuildPrincipalDisplay(p.PrincipalId, p.Sid, p.Domain, p.Name);
 
 			writer.WriteStartObject("properties");
-			writer.WriteString("objectid", $"principal:{p.PrincipalId}");
+			writer.WriteString("objectid", nodeId);
 			writer.WriteNumber("principalId", p.PrincipalId);
 			writer.WriteString("name", display);
 			writer.WriteString("displayname", display);
@@ -459,10 +466,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			using var ms = new MemoryStream();
 
+			var principalNodeIds = BuildPrincipalNodeIds(graph);
+
 			using (var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
 			{
 				writer.WriteStartObject();
-				writer.WriteString("schema", "tbo.cache.graph.v1");
+				writer.WriteString("schema", "tbo.cache.graph.v2");
 
 				writer.WriteStartArray("nodes");
 				foreach (var m in graph.Machines)
@@ -479,10 +488,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				foreach (var p in graph.Principals)
 				{
+					var nodeId = ResolvePrincipalNodeId(principalNodeIds, p.PrincipalId);
 					writer.WriteStartObject();
-					writer.WriteString("id", $"principal:{p.PrincipalId}");
+					writer.WriteString("id", nodeId);
 					writer.WriteString("type", "principal");
 					writer.WriteNumber("principalId", p.PrincipalId);
+					writer.WriteString("scope", p.Scope);
+					if (p.ScopeMachineId.HasValue)
+						writer.WriteNumber("scopeMachineId", p.ScopeMachineId.Value);
 					if (!string.IsNullOrWhiteSpace(p.Sid))
 						writer.WriteString("sid", p.Sid);
 					if (!string.IsNullOrWhiteSpace(p.Domain))
@@ -520,7 +533,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 							o,
 							edgeKind: "observed_principal",
 							edgeIdSuffix: "principal",
-							targetNodeId: $"principal:{o.PrincipalId.Value}");
+							targetNodeId: ResolvePrincipalNodeId(principalNodeIds, o.PrincipalId.Value));
 					}
 
 					if (o.CredentialId.HasValue)
@@ -574,6 +587,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			sb.AppendLine("  edge [fontname=\"Consolas\", fontsize=9];");
 			sb.AppendLine();
 
+			var dotPrincipalNodeIds = new Dictionary<long, string>();
+			foreach (var p in graph.Principals)
+				dotPrincipalNodeIds[p.PrincipalId] = GetDotPrincipalNodeId(p);
+
 			foreach (var m in graph.Machines)
 			{
 				var label = $"machine\\n{m.ServerName}";
@@ -582,11 +599,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			foreach (var p in graph.Principals)
 			{
+				var nodeId = dotPrincipalNodeIds[p.PrincipalId];
 				var display = GetPrincipalDisplay(p.PrincipalId, p.Sid, p.Domain, p.Name);
 				var label = string.IsNullOrWhiteSpace(p.Type)
 					? $"principal\\n{display}"
 					: $"principal ({p.Type})\\n{display}";
-				sb.AppendLine($"  p{p.PrincipalId} [shape=ellipse, label=\"{DotEscape(label)}\"];");
+				sb.AppendLine($"  {nodeId} [shape=ellipse, label=\"{DotEscape(label)}\"];");
 			}
 
 			foreach (var c in graph.Credentials)
@@ -602,7 +620,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var label = BuildObservationEdgeLabel(o);
 
 				if (o.PrincipalId.HasValue)
-					sb.AppendLine($"  m{o.MachineId} -> p{o.PrincipalId.Value} [label=\"{DotEscape(label)}\"];");
+				{
+					var principalNodeId = dotPrincipalNodeIds.TryGetValue(o.PrincipalId.Value, out var nodeId)
+						? nodeId
+						: $"pg{o.PrincipalId.Value}";
+					sb.AppendLine($"  m{o.MachineId} -> {principalNodeId} [label=\"{DotEscape(label)}\"];");
+				}
 
 				if (o.CredentialId.HasValue)
 					sb.AppendLine($"  m{o.MachineId} -> c{o.CredentialId.Value} [label=\"{DotEscape(label)}\"];");
@@ -649,5 +672,50 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				.Replace("\r", string.Empty, StringComparison.Ordinal)
 				.Replace("\n", "\\n", StringComparison.Ordinal);
 		}
+
+		private static IReadOnlyDictionary<long, string> BuildPrincipalNodeIds(TboCacheDatabase.GraphData graph)
+		{
+			var ids = new Dictionary<long, string>();
+			foreach (var p in graph.Principals)
+				ids[p.PrincipalId] = GetPrincipalNodeId(p);
+
+			return ids;
+		}
+
+		private static string ResolvePrincipalNodeId(IReadOnlyDictionary<long, string> principalNodeIds, long principalId)
+		{
+			if (principalNodeIds.TryGetValue(principalId, out var nodeId))
+				return nodeId;
+
+			// Fallback for inconsistent caches.
+			return $"principal:unknown:{principalId}";
+		}
+
+		private static string GetPrincipalNodeId(TboCacheDatabase.GraphPrincipalRow p)
+		{
+			if (string.Equals(p.Scope, "Machine", StringComparison.OrdinalIgnoreCase))
+			{
+				var machinePart = p.ScopeMachineId.HasValue
+					? p.ScopeMachineId.Value.ToString(CultureInfo.InvariantCulture)
+					: "0";
+				return $"principal:machine:{machinePart}:{p.PrincipalId}";
+			}
+
+			return $"principal:global:{p.PrincipalId}";
+		}
+
+		private static string GetDotPrincipalNodeId(TboCacheDatabase.GraphPrincipalRow p)
+		{
+			if (string.Equals(p.Scope, "Machine", StringComparison.OrdinalIgnoreCase))
+			{
+				var machinePart = p.ScopeMachineId.HasValue
+					? p.ScopeMachineId.Value.ToString(CultureInfo.InvariantCulture)
+					: "0";
+				return $"pm{machinePart}_{p.PrincipalId}";
+			}
+
+			return $"pg{p.PrincipalId}";
+		}
+
 	}
 }
