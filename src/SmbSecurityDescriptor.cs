@@ -87,12 +87,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var provider = smb as SmbProviderInfo;
 				Action<string>? logDiagnostic = provider != null ? provider.LogDiagnostic : null;
 				Action<string>? logWarning = provider != null ? provider.LogWarning : null;
-				return LocalNtfsSecurityDescriptor.Read(
-					uncPath,
-					sections,
-					logDiagnostic: logDiagnostic,
-					logWarning: logWarning,
-					cancellationToken: cancellationToken);
+					return LocalNtfsSecurityDescriptor.Read(
+						uncPath,
+						timeWarpToken: null,
+						sections,
+						logDiagnostic: logDiagnostic,
+						logWarning: logWarning,
+						cancellationToken: cancellationToken);
 			}
 
 			Smb2OpenFileObjectBase? file = null;
@@ -217,14 +218,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var provider = smb as SmbProviderInfo;
 				Action<string>? logDiagnostic = provider != null ? provider.LogDiagnostic : null;
 				Action<string>? logWarning = provider != null ? provider.LogWarning : null;
-				LocalNtfsSecurityDescriptor.Write(
-					uncPath,
-					securityDescriptor,
-					securityInfo,
-					logDiagnostic: logDiagnostic,
-					logWarning: logWarning,
-					cancellationToken: cancellationToken);
-				return;
+					LocalNtfsSecurityDescriptor.Write(
+						uncPath,
+						timeWarpToken: null,
+						securityDescriptor,
+						securityInfo,
+						logDiagnostic: logDiagnostic,
+						logWarning: logWarning,
+						cancellationToken: cancellationToken);
+					return;
 			}
 
 			Smb2OpenFileObjectBase? file = null;

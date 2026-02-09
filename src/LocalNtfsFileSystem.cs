@@ -1,7 +1,9 @@
 using System;
 using System.IO;
 using System.Threading;
+using Titanis;
 using Titanis.Net;
+using Titanis.Smb2;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
@@ -18,17 +20,27 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		public ISmbDirectory OpenDirectory(UncPath path, CancellationToken cancellationToken)
 		{
+			return OpenDirectory(path, timeWarpToken: null, cancellationToken);
+		}
+
+		internal ISmbDirectory OpenDirectory(UncPath path, DateTime? timeWarpToken, CancellationToken cancellationToken)
+		{
 			cancellationToken.ThrowIfCancellationRequested();
 
-			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(path);
+			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(path, timeWarpToken, this._logDiagnostic, this._logWarning);
 			return new LocalNtfsDirectory(localPath, this._logDiagnostic, this._logWarning);
 		}
 
 		public ISmbFile OpenFileRead(UncPath path, CancellationToken cancellationToken)
 		{
+			return OpenFileRead(path, timeWarpToken: null, cancellationToken);
+		}
+
+		internal ISmbFile OpenFileRead(UncPath path, DateTime? timeWarpToken, CancellationToken cancellationToken)
+		{
 			cancellationToken.ThrowIfCancellationRequested();
 
-			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(path);
+			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(path, timeWarpToken, this._logDiagnostic, this._logWarning);
 			return new LocalNtfsFile(localPath, this._logDiagnostic, this._logWarning);
 		}
 
@@ -130,16 +142,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static string MapToLocalPath(UncPath path)
 		{
+			return MapToLocalPath(path, timeWarpToken: null, logDiagnostic: null, logWarning: null);
+		}
+
+		internal static string MapToLocalPath(UncPath path, DateTime? timeWarpToken, Action<string>? logDiagnostic, Action<string>? logWarning)
+		{
 			if (path is null)
 				throw new ArgumentNullException(nameof(path));
 
-			if (!TryMapToLocalPath(path, out var localPath, out var reason))
+			if (!TryMapToLocalPath(path, timeWarpToken, logDiagnostic, logWarning, out var localPath, out var reason))
 				throw new NotSupportedException(reason ?? $"UNC path '{path}' is not a supported local NTFS path.");
 
 			return localPath;
 		}
 
 		internal static bool TryMapToLocalPath(UncPath path, out string localPath, out string? failureReason)
+		{
+			return TryMapToLocalPath(path, timeWarpToken: null, logDiagnostic: null, logWarning: null, out localPath, out failureReason);
+		}
+
+		internal static bool TryMapToLocalPath(
+			UncPath path,
+			DateTime? timeWarpToken,
+			Action<string>? logDiagnostic,
+			Action<string>? logWarning,
+			out string localPath,
+			out string? failureReason)
 		{
 			localPath = string.Empty;
 			failureReason = null;
@@ -164,8 +192,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var root = $"{char.ToUpperInvariant(driveLetter)}:\\";
 
-			var relative = path.ShareRelativePath ?? string.Empty;
-			relative = relative.Replace('/', '\\').TrimStart('\\');
+			logDiagnostic ??= _ => { };
+			logWarning ??= _ => { };
+
+			var relative = (path.ShareRelativePath ?? string.Empty).Replace('/', '\\').TrimStart('\\');
+
+			// Support time-warp paths using @GMT- tokens by mapping the resolved drive-relative path into a
+			// local VSS snapshot device object (read-only).
+			var effectiveToken = timeWarpToken;
+			if (TrySplitTimeWarpToken(relative, out var parsedToken, out var remainder))
+			{
+				if (!effectiveToken.HasValue)
+					effectiveToken = parsedToken;
+
+				relative = remainder;
+			}
 
 			var combined = Path.GetFullPath(Path.Combine(root, relative));
 
@@ -173,10 +214,59 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (!combined.StartsWith(root, StringComparison.OrdinalIgnoreCase))
 			{
 				failureReason = $"UNC path '{path}' resolves outside of '{root}' and is not permitted.";
+					return false;
+				}
+
+			if (effectiveToken.HasValue)
+			{
+				var tokenUtc = effectiveToken.Value.Kind == DateTimeKind.Utc
+					? effectiveToken.Value
+					: effectiveToken.Value.ToUniversalTime();
+
+				if (!LocalVssShadowCopyResolver.TryResolveDeviceObject(root, tokenUtc, logDiagnostic, logWarning, out var deviceObject, out var resolveFailure))
+				{
+					failureReason = resolveFailure ?? $"No VSS snapshot could be resolved for '{root}'.";
+					return false;
+				}
+
+				var relativeUnderDrive = combined.Substring(root.Length).TrimStart('\\');
+				var deviceRoot = deviceObject.TrimEnd('\\');
+				localPath = string.IsNullOrEmpty(relativeUnderDrive)
+					? deviceRoot + "\\"
+					: deviceRoot + "\\" + relativeUnderDrive;
+			}
+			else
+			{
+				localPath = combined;
+			}
+
+			return true;
+		}
+
+		private static bool TrySplitTimeWarpToken(string relativePath, out DateTime timeWarpToken, out string remainder)
+		{
+			timeWarpToken = default;
+			remainder = string.Empty;
+
+			if (string.IsNullOrEmpty(relativePath))
+				return false;
+
+			var separatorIndex = relativePath.IndexOf('\\');
+			var firstSegment = separatorIndex >= 0 ? relativePath.Substring(0, separatorIndex) : relativePath;
+			if (!firstSegment.StartsWith("@GMT-", StringComparison.OrdinalIgnoreCase))
+				return false;
+
+			try
+			{
+				var snapshot = FileSnapshotInfo.Parse(firstSegment.ToUpperInvariant());
+				timeWarpToken = snapshot.Timestamp;
+			}
+			catch
+			{
 				return false;
 			}
 
-			localPath = combined;
+			remainder = separatorIndex >= 0 ? relativePath.Substring(separatorIndex + 1) : string.Empty;
 			return true;
 		}
 
@@ -233,4 +323,3 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 	}
 }
-

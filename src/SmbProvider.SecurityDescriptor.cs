@@ -82,19 +82,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			var securityInfo = MapSecurityInfo(sections);
 
-			// Local-mode (\\localhost\<Drive>$) uses handle-based Win32 APIs to read the security descriptor
-			// without establishing an SMB connection. Snapshot/time-warp tokens are not supported locally.
-			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(snapshotPath.ResolvedPath))
-			{
-				if (snapshotPath.HasTimeWarpToken)
-					throw new NotSupportedException("Snapshot paths are not supported in local NTFS mode.");
-
-				var sd = LocalNtfsSecurityDescriptor.Read(
-					snapshotPath.ResolvedPath,
-					securityInfo,
-					DefaultSecurityDescriptorBufferSize,
-					out var isDirectory,
-					this.LogDiagnostic,
+				// Local-mode (\\localhost\<Drive>$) uses handle-based Win32 APIs to read the security descriptor
+				// without establishing an SMB connection. When a snapshot time-warp token is present, the path
+				// is mapped to a local VSS shadow copy device object (read-only).
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(snapshotPath.ResolvedPath))
+				{
+					var sd = LocalNtfsSecurityDescriptor.Read(
+						snapshotPath.ResolvedPath,
+						snapshotPath.TimeWarpToken,
+						securityInfo,
+						DefaultSecurityDescriptorBufferSize,
+						out var isDirectory,
+						this.LogDiagnostic,
 					this.LogWarning,
 					cancellationToken);
 
@@ -149,15 +148,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			SecurityInfo securityInfo,
 			CancellationToken cancellationToken)
 		{
-			// Local-mode (\\localhost\<Drive>$) write uses SetKernelObjectSecurity with backup/restore privileges.
-			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
-			{
-				LocalNtfsSecurityDescriptor.Write(
-					uncPath,
-					securityDescriptor,
-					securityInfo,
-					this.LogDiagnostic,
-					this.LogWarning,
+				// Local-mode (\\localhost\<Drive>$) write uses SetKernelObjectSecurity with backup/restore privileges.
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+				{
+					LocalNtfsSecurityDescriptor.Write(
+						uncPath,
+						timeWarpToken: null,
+						securityDescriptor,
+						securityInfo,
+						this.LogDiagnostic,
+						this.LogWarning,
 					cancellationToken);
 				return;
 			}

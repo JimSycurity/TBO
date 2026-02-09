@@ -202,11 +202,16 @@ These are manual validation steps (not automated tests).
 5. Optionally, repeat the safe DACL round-trip test from the SYSTEM scenario to validate `Set-TBOSmbSecurityDescriptor` from this context.
 
 ### Limit / Negative Tests (Optional)
-1. Snapshot/time-warp tokens are not supported in local mode (tracked separately as `TBO-ilz.12`):
+1. Snapshot/time-warp tokens are supported in local mode for read-only navigation and reads when a matching local VSS snapshot exists:
    ```powershell
    Get-ChildItem TBO.Smb2::\\localhost\C$\@GMT-2001.01.01-00.00.00\Windows
    ```
-2. Non-admin shares (ex: `ADMIN$`, `IPC$`) are rejected for local mode:
+   Note: Replace the token with a timestamp that has a corresponding local shadow copy.
+2. Snapshot paths are read-only (writes/mutations are blocked):
+   ```powershell
+   New-Item TBO.Smb2::\\localhost\C$\@GMT-2001.01.01-00.00.00\Temp\should-fail.txt -ItemType File
+   ```
+3. Non-admin shares (ex: `ADMIN$`, `IPC$`) are rejected for local mode:
    ```powershell
    New-PSDrive -Name tbo-admin -PSProvider TBO.Smb2 -Root \\localhost\ADMIN$
    ```

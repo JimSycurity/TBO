@@ -257,7 +257,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			this.LogDiagnostic($"TBO: Removing local NTFS item '{originalPath}' (recurse={recurse}).");
 
-			if (!TryGetLocalItemEntry(uncPath, cancellationToken, out var entry))
+			if (!TryGetLocalItemEntry(uncPath, timeWarpToken: null, cancellationToken, out var entry))
 				throw new ItemNotFoundException($"Cannot find path '{originalPath}' because it does not exist.");
 
 			bool isDirectory = 0 != (entry.FileAttributes & Winterop.FileAttributes.Directory);

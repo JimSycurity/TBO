@@ -14,6 +14,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static SecurityDescriptor Read(
 			UncPath uncPath,
+			DateTime? timeWarpToken,
 			SecurityInfo securityInfo,
 			Action<string>? logDiagnostic,
 			Action<string>? logWarning,
@@ -21,6 +22,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			return Read(
 				uncPath,
+				timeWarpToken,
 				securityInfo,
 				DefaultInitialBufferSize,
 				out _,
@@ -31,6 +33,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static SecurityDescriptor Read(
 			UncPath uncPath,
+			DateTime? timeWarpToken,
 			SecurityInfo securityInfo,
 			int initialBufferSize,
 			out bool isDirectory,
@@ -47,13 +50,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (securityInfo == SecurityInfo.None)
 				throw new ArgumentException("SecurityInfo must include at least one flag.", nameof(securityInfo));
 
-			ThrowIfTimeWarpTokenPresent(uncPath);
-
 			isDirectory = false;
 			logDiagnostic ??= _ => { };
 			logWarning ??= _ => { };
 
-			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath);
+			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath, timeWarpToken, logDiagnostic, logWarning);
 
 			// Reading a file object's DACL/owner/group requires READ_CONTROL; reading SACL additionally requires
 			// ACCESS_SYSTEM_SECURITY and SeSecurityPrivilege. LocalNtfsCreateFile enables SeBackup/SeRestore and,
@@ -107,6 +108,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static void Write(
 			UncPath uncPath,
+			DateTime? timeWarpToken,
 			SecurityDescriptor securityDescriptor,
 			SecurityInfo securityInfo,
 			Action<string>? logDiagnostic,
@@ -124,12 +126,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (securityInfo == SecurityInfo.None)
 				throw new ArgumentException("SecurityInfo must include at least one flag.", nameof(securityInfo));
 
-			ThrowIfTimeWarpTokenPresent(uncPath);
+			if (timeWarpToken.HasValue || HasTimeWarpToken(uncPath))
+				throw new NotSupportedException("Snapshot paths are read-only.");
 
 			logDiagnostic ??= _ => { };
 			logWarning ??= _ => { };
 
-			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath);
+			var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath, timeWarpToken, logDiagnostic, logWarning);
 
 			var desiredAccess = LocalNtfsFileAccess.ReadControl;
 
@@ -222,18 +225,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			uint securityInformation,
 			IntPtr pSecurityDescriptor);
 
-		private static void ThrowIfTimeWarpTokenPresent(UncPath uncPath)
+		private static bool HasTimeWarpToken(UncPath uncPath)
 		{
 			var relativePath = uncPath.ShareRelativePath;
 			if (string.IsNullOrEmpty(relativePath))
-				return;
+				return false;
 
 			var separatorIndex = relativePath.IndexOf('\\');
 			var firstSegment = separatorIndex >= 0 ? relativePath.Substring(0, separatorIndex) : relativePath;
 			if (!firstSegment.StartsWith("@GMT-", StringComparison.OrdinalIgnoreCase))
-				return;
+				return false;
 
-			throw new NotSupportedException("Snapshot paths are not supported in local NTFS mode.");
+			return true;
 		}
 	}
 }

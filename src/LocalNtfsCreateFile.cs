@@ -179,17 +179,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			throw new Win32Exception(err, $"CreateFileW failed for '{path}': {FormatWin32Error(err)}.");
 		}
 
-		private static string NormalizeWin32Path(string path)
-		{
-			// Normalize to a full path and apply extended-length prefix to avoid MAX_PATH issues.
-			string fullPath = Path.GetFullPath(path);
-
-			if (fullPath.StartsWith(@"\\?\") || fullPath.StartsWith(@"\\.\"))
-				return fullPath;
-
-			if (fullPath.StartsWith(@"\\"))
+			private static string NormalizeWin32Path(string path)
 			{
-				// UNC path: \\server\share\... -> \\?\UNC\server\share\...
+				// Many local-mode paths are standard drive paths (C:\...), but snapshot paths may use device
+				// namespaces like \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyX\... which Path.GetFullPath()
+				// does not handle. Treat already-extended paths as normalized and leave them unchanged.
+				if (path.StartsWith(@"\\?\") || path.StartsWith(@"\\.\"))
+					return path;
+
+				// Normalize to a full path and apply extended-length prefix to avoid MAX_PATH issues.
+				string fullPath = Path.GetFullPath(path);
+
+				if (fullPath.StartsWith(@"\\"))
+				{
+					// UNC path: \\server\share\... -> \\?\UNC\server\share\...
 				return @"\\?\UNC\" + fullPath.Substring(2);
 			}
 
@@ -233,4 +236,3 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			IntPtr hTemplateFile);
 	}
 }
-

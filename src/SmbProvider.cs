@@ -257,21 +257,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			// Local NTFS mode treats \\localhost\<Drive>$ as a drive-backed share. Provider navigation must avoid SMB
 			// entirely for these paths to ensure backup-intent semantics work without network calls.
-			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
-			{
-				if (snapshotPath.HasTimeWarpToken)
-					throw new NotSupportedException("Snapshot paths are not supported in local NTFS mode.");
-
-				if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
-					return true;
-
-				return this.BeginOperation(cancellationToken =>
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
 				{
-					if (!TryGetLocalItemEntry(uncPath, cancellationToken, out var entry))
-						return false;
+					if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
+						return true;
 
-					return 0 != (entry.FileAttributes & Winterop.FileAttributes.Directory);
-				});
+					return this.BeginOperation(cancellationToken =>
+					{
+						if (!TryGetLocalItemEntry(uncPath, snapshotPath.TimeWarpToken, cancellationToken, out var entry))
+							return false;
+
+						return 0 != (entry.FileAttributes & Winterop.FileAttributes.Directory);
+					});
 			}
 
 			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
@@ -302,31 +299,28 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var snapshotPath = ResolveSnapshotPath(parsedPath!);
 			UncPath uncPath = snapshotPath.ResolvedPath;
 
-			if (!OperatingSystem.IsWindows() || !LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
-			{
-				base.GetItem(path);
-				return;
-			}
+				if (!OperatingSystem.IsWindows() || !LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+				{
+					base.GetItem(path);
+					return;
+				}
 
-			if (snapshotPath.HasTimeWarpToken)
-				throw new NotSupportedException("Snapshot paths are not supported in local NTFS mode.");
-
-			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
-			{
-				var entry = CreateLocalShareRootEntry(uncPath);
-				var smbItem = new SmbItem(snapshotPath.OriginalPath, entry);
+				if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
+				{
+					var entry = CreateLocalShareRootEntry(uncPath);
+					var smbItem = new SmbItem(snapshotPath.OriginalPath, entry);
 				this.WriteItemObject(smbItem, snapshotPath.OriginalPath.ToString(), isContainer: true);
 				return;
 			}
 
-			this.BeginOperation(cancellationToken =>
-			{
-				if (!TryGetLocalItemEntry(uncPath, cancellationToken, out var entry))
-					throw new ItemNotFoundException($"Cannot find path '{path}' because it does not exist.");
+				this.BeginOperation(cancellationToken =>
+				{
+					if (!TryGetLocalItemEntry(uncPath, snapshotPath.TimeWarpToken, cancellationToken, out var entry))
+						throw new ItemNotFoundException($"Cannot find path '{path}' because it does not exist.");
 
-				var smbItem = new SmbItem(snapshotPath.OriginalPath, entry);
-				this.WriteItemObject(smbItem, snapshotPath.OriginalPath.ToString(), 0 != (entry.FileAttributes & Winterop.FileAttributes.Directory));
-			});
+					var smbItem = new SmbItem(snapshotPath.OriginalPath, entry);
+					this.WriteItemObject(smbItem, snapshotPath.OriginalPath.ToString(), 0 != (entry.FileAttributes & Winterop.FileAttributes.Directory));
+				});
 		}
 
 		protected override void GetChildItems(string path, bool recurse)
@@ -346,21 +340,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var snapshotPath = ResolveSnapshotPath(path);
 			UncPath uncPath = snapshotPath.ResolvedPath;
 
-			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
-			{
-				if (snapshotPath.HasTimeWarpToken)
-					throw new NotSupportedException("Snapshot paths are not supported in local NTFS mode.");
-
-				this.BeginOperation(cancellationToken =>
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
 				{
-					this.LogDiagnostic($"TBO: Enumerating local NTFS directory '{snapshotPath.OriginalPath}'.");
-
-					var localFs = new LocalNtfsFileSystem(this.LogDiagnostic, this.LogWarning);
-					using var dir = localFs.OpenDirectory(uncPath, cancellationToken);
-					var entries = dir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken);
-
-					foreach (var entry in entries)
+					this.BeginOperation(cancellationToken =>
 					{
+						this.LogDiagnostic($"TBO: Enumerating local NTFS directory '{snapshotPath.OriginalPath}'.");
+
+						var localFs = new LocalNtfsFileSystem(this.LogDiagnostic, this.LogWarning);
+						using var dir = localFs.OpenDirectory(uncPath, snapshotPath.TimeWarpToken, cancellationToken);
+						var entries = dir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken);
+
+						foreach (var entry in entries)
+						{
 						if (string.IsNullOrEmpty(entry.FileName))
 							continue;
 						if (entry.FileName is "." or "..")
@@ -438,39 +429,39 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			};
 		}
 
-		private bool TryGetLocalItemEntry(UncPath uncPath, CancellationToken cancellationToken, out Smb2DirEntry entry)
-		{
-			entry = new Smb2DirEntry();
-
-			var relativePath = uncPath.ShareRelativePath ?? string.Empty;
-			relativePath = relativePath.Replace('/', '\\').TrimEnd('\\');
-			if (string.IsNullOrEmpty(relativePath))
-				return false;
-
-			var name = Path.GetFileName(relativePath);
-			if (string.IsNullOrEmpty(name))
-				return false;
-
-			var parentRelative = Path.GetDirectoryName(relativePath) ?? string.Empty;
-			var parentPath = new UncPath(uncPath.ServerName, uncPath.Port, uncPath.ShareName, parentRelative);
-
-			var localFs = new LocalNtfsFileSystem(this.LogDiagnostic, this.LogWarning);
-			using var parentDir = localFs.OpenDirectory(parentPath, cancellationToken);
-			var entries = parentDir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken);
-			foreach (var candidate in entries)
+			private bool TryGetLocalItemEntry(UncPath uncPath, DateTime? timeWarpToken, CancellationToken cancellationToken, out Smb2DirEntry entry)
 			{
-				if (string.IsNullOrEmpty(candidate.FileName))
-					continue;
+				entry = new Smb2DirEntry();
 
-				if (string.Equals(candidate.FileName, name, StringComparison.OrdinalIgnoreCase))
+				var relativePath = uncPath.ShareRelativePath ?? string.Empty;
+				relativePath = relativePath.Replace('/', '\\').TrimEnd('\\');
+				if (string.IsNullOrEmpty(relativePath))
+					return false;
+
+				var name = Path.GetFileName(relativePath);
+				if (string.IsNullOrEmpty(name))
+					return false;
+
+				var parentRelative = Path.GetDirectoryName(relativePath) ?? string.Empty;
+				var parentPath = new UncPath(uncPath.ServerName, uncPath.Port, uncPath.ShareName, parentRelative);
+
+				var localFs = new LocalNtfsFileSystem(this.LogDiagnostic, this.LogWarning);
+				using var parentDir = localFs.OpenDirectory(parentPath, timeWarpToken, cancellationToken);
+				var entries = parentDir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken);
+				foreach (var candidate in entries)
 				{
-					entry = candidate;
-					return true;
-				}
-			}
+					if (string.IsNullOrEmpty(candidate.FileName))
+						continue;
 
-			return false;
-		}
+					if (string.Equals(candidate.FileName, name, StringComparison.OrdinalIgnoreCase))
+					{
+						entry = candidate;
+						return true;
+					}
+				}
+
+				return false;
+			}
 
 		private bool TryReadReparseInfo(UncPath resolvedPath, DateTime? timeWarpToken, CancellationToken cancellationToken, out Winterop.ReparseTag? tag, out string? linkTarget)
 		{
@@ -516,24 +507,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var snapshotPath = ResolveSnapshotPath(uncPath);
 			uncPath = snapshotPath.ResolvedPath;
 
-			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
-			{
-				if (snapshotPath.HasTimeWarpToken)
-					throw new NotSupportedException("Snapshot paths are not supported in local NTFS mode.");
-
-				if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
-					return true;
-
-				return this.BeginOperation(cancellationToken =>
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
 				{
-					try
+					if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
+						return true;
+
+					return this.BeginOperation(cancellationToken =>
 					{
-						return TryGetLocalItemEntry(uncPath, cancellationToken, out _);
-					}
-					catch
-					{
-						return false;
-					}
+						try
+						{
+							return TryGetLocalItemEntry(uncPath, snapshotPath.TimeWarpToken, cancellationToken, out _);
+						}
+						catch
+						{
+							return false;
+						}
 				});
 			}
 
@@ -629,26 +617,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrEmpty(uncPath.ShareRelativePath))
 				throw new NotSupportedException("Get-Content requires a file path, not a share root.");
 
-			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
-			{
-				if (snapshotPath.HasTimeWarpToken)
-					throw new NotSupportedException("Snapshot paths are not supported in local NTFS mode.");
-
-				return this.BeginOperation(cancellationToken =>
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
 				{
-					cancellationToken.ThrowIfCancellationRequested();
+					return this.BeginOperation(cancellationToken =>
+					{
+						cancellationToken.ThrowIfCancellationRequested();
 
-					this.LogDiagnostic($"TBO: Opening local NTFS content reader for '{snapshotPath.OriginalPath}'.");
+						this.LogDiagnostic($"TBO: Opening local NTFS content reader for '{snapshotPath.OriginalPath}'.");
 
 					var parms = this.DynamicParameters as SmbGetContentParams;
 					var encoding = parms?.Encoding ?? Encoding.UTF8;
 					var raw = parms?.Raw.IsPresent ?? false;
 
-					var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath);
-					var access =
-						LocalNtfsFileAccess.ReadDataOrListDirectory |
-						LocalNtfsFileAccess.ReadAttributes |
-						LocalNtfsFileAccess.ReadExtendedAttributes |
+						var localPath = LocalNtfsUncPathMapper.MapToLocalPath(uncPath, snapshotPath.TimeWarpToken, this.LogDiagnostic, this.LogWarning);
+						var access =
+							LocalNtfsFileAccess.ReadDataOrListDirectory |
+							LocalNtfsFileAccess.ReadAttributes |
+							LocalNtfsFileAccess.ReadExtendedAttributes |
 						LocalNtfsFileAccess.Synchronize;
 
 					var stream = LocalNtfsCreateFile.OpenFileStream(
