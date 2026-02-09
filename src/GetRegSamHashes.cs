@@ -39,6 +39,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			maxDelayMs: 4000,
 			jitterMs: 250);
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
 			byte[]? syskey = null;
@@ -102,6 +108,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			foreach (var info in userInfos)
 			{
+				if (this.Cache.IsPresent && !string.IsNullOrWhiteSpace(info.NtlmHashText))
+				{
+					try
+					{
+						var contextJson = $"{{\"rid\":{info.Rid.ToString(CultureInfo.InvariantCulture)}}}";
+						TboCacheIngestion.AddObservation(new TboCacheIngestion.AddObservationArgs
+						{
+							ServerName = this.ServerName,
+							SourceKind = "Get-TBORegSamHashes",
+
+							PrincipalName = info.AccountName,
+							PrincipalType = "LocalUser",
+
+							CredentialKind = "NTHash",
+							CredentialIdentifier = info.NtlmHashText,
+
+							Confidence = 100,
+							ContextJson = contextJson,
+							CachePath = this.CachePath
+						}, msg => LogDiagnostic(smb, msg));
+					}
+					catch (Exception ex)
+					{
+						this.LogException(smb, $"Get-TBORegSamHashes failed to write cache observation for {this.ServerName}", ex);
+						this.LogWarning(smb, $"Get-TBORegSamHashes cache write failed: {ex.Message}");
+					}
+				}
+
 				this.WriteObject(info);
 			}
 		}

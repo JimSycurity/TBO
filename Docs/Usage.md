@@ -838,6 +838,11 @@ Derives local SAM account hashes using the remote registry (backup semantics req
 Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
 Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol |
   Select-Object AccountName, FullName, Rid, NtlmHashText
+
+# Cache SAM-derived NTHashes for later reuse queries.
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+Get-TBORegSamHashes -ServerName corp1-web02.corp1.lab.home-labs.lol -Cache
+Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2
 ```
 
 #### Get-TBONtHash
