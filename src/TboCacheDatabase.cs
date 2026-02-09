@@ -346,6 +346,116 @@ RETURNING observation_id;";
 			return (long)cmd.ExecuteScalar()!;
 		}
 
+		internal sealed class CredentialReuseRow
+		{
+			internal long CredentialId { get; init; }
+			internal string Kind { get; init; } = "";
+			internal string Identifier { get; init; } = "";
+			internal long MachineCount { get; init; }
+
+			internal string ServerName { get; init; } = "";
+			internal string? PrincipalSid { get; init; }
+			internal string? PrincipalDomain { get; init; }
+			internal string? PrincipalName { get; init; }
+			internal string? PrincipalType { get; init; }
+
+			internal long ObservationCount { get; init; }
+			internal string FirstObservedUtc { get; init; } = "";
+			internal string LastObservedUtc { get; init; } = "";
+		}
+
+		internal IReadOnlyList<CredentialReuseRow> QueryCredentialReuse(
+			string? kind,
+			string? identifier,
+			int minimumMachineCount)
+		{
+			if (minimumMachineCount < 2)
+				throw new ArgumentOutOfRangeException(nameof(minimumMachineCount), "Minimum machine count must be >= 2.");
+
+			kind = string.IsNullOrWhiteSpace(kind) ? null : kind.Trim();
+			identifier = string.IsNullOrWhiteSpace(identifier) ? null : identifier.Trim();
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+WITH reused AS (
+  SELECT
+    c.credential_id AS credential_id,
+    c.kind AS kind,
+    c.identifier AS identifier,
+    COUNT(DISTINCT o.machine_id) AS machine_count
+  FROM credentials c
+  JOIN observations o ON o.credential_id = c.credential_id
+  WHERE ($kind IS NULL OR c.kind = $kind COLLATE NOCASE)
+    AND ($identifier IS NULL OR c.identifier = $identifier COLLATE NOCASE)
+  GROUP BY c.credential_id, c.kind, c.identifier
+  HAVING machine_count >= $min_machine_count
+)
+SELECT
+  reused.credential_id,
+  reused.kind,
+  reused.identifier,
+  reused.machine_count,
+  m.server_name,
+  p.sid,
+  p.domain,
+  p.name,
+  p.type,
+  COUNT(1) AS observation_count,
+  MIN(o.observed_utc) AS first_observed_utc,
+  MAX(o.observed_utc) AS last_observed_utc
+FROM reused
+JOIN observations o ON o.credential_id = reused.credential_id
+JOIN machines m ON m.machine_id = o.machine_id
+LEFT JOIN principals p ON p.principal_id = o.principal_id
+GROUP BY
+  reused.credential_id,
+  reused.kind,
+  reused.identifier,
+  reused.machine_count,
+  m.server_name,
+  p.sid,
+  p.domain,
+  p.name,
+  p.type
+ORDER BY
+  reused.machine_count DESC,
+  reused.kind,
+  reused.identifier,
+  m.server_name,
+  p.domain,
+  p.name;";
+
+			cmd.Parameters.AddWithValue("$kind", (object?)kind ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$identifier", (object?)identifier ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$min_machine_count", minimumMachineCount);
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<CredentialReuseRow>();
+
+			while (reader.Read())
+			{
+				results.Add(new CredentialReuseRow
+				{
+					CredentialId = reader.GetInt64(0),
+					Kind = reader.GetString(1),
+					Identifier = reader.GetString(2),
+					MachineCount = reader.GetInt64(3),
+
+					ServerName = reader.GetString(4),
+					PrincipalSid = reader.IsDBNull(5) ? null : reader.GetString(5),
+					PrincipalDomain = reader.IsDBNull(6) ? null : reader.GetString(6),
+					PrincipalName = reader.IsDBNull(7) ? null : reader.GetString(7),
+					PrincipalType = reader.IsDBNull(8) ? null : reader.GetString(8),
+
+					ObservationCount = reader.GetInt64(9),
+					FirstObservedUtc = reader.GetString(10),
+					LastObservedUtc = reader.GetString(11),
+				});
+			}
+
+			return results;
+		}
+
 		internal IReadOnlyDictionary<string, long> GetCountsByTable()
 		{
 			var tables = new[]

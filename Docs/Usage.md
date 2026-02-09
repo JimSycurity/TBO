@@ -170,6 +170,18 @@ Remove-TBOCacheEntry -Type Observation -Id 1
 Remove-TBOCacheEntry -Type Credential -Id 12,13,14
 ```
 
+### Get-TBOCacheCredentialReuse
+
+Lists credentials observed on multiple machines, grouped by machine and principal context.
+
+```powershell
+# Show NTHashes observed on 2+ machines.
+Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2
+
+# Narrow to a specific credential identifier (ex: NTHash).
+Get-TBOCacheCredentialReuse -Kind NTHash -Identifier 8846f7eaee8fb117ad06bdd830b7586c -MinimumMachineCount 2
+```
+
 ### Set-TBOSmbConnectOptions (Deprecated)
 
 Deprecated shim for `Set-TBOConnectOptions`. Uses the same dynamic parameters and behavior.

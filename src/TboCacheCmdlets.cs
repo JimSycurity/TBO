@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Management.Automation;
 
@@ -14,6 +15,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public long PrincipalCount { get; init; }
 		public long CredentialCount { get; init; }
 		public long ObservationCount { get; init; }
+	}
+
+	public sealed class TboCacheCredentialReuse
+	{
+		public long CredentialId { get; init; }
+		public string CredentialKind { get; init; } = "";
+		public string CredentialIdentifier { get; init; } = "";
+		public long MachineCount { get; init; }
+
+		public string ServerName { get; init; } = "";
+		public string? PrincipalSid { get; init; }
+		public string? PrincipalDomain { get; init; }
+		public string? PrincipalName { get; init; }
+		public string? PrincipalType { get; init; }
+
+		public long ObservationCount { get; init; }
+		public DateTime FirstObservedUtc { get; init; }
+		public DateTime LastObservedUtc { get; init; }
 	}
 
 	public enum TboCacheEntryType
@@ -119,5 +138,67 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			db.RemoveEntries(this.Type, unique);
 		}
 	}
-}
 
+	[Cmdlet(VerbsCommon.Get, "TBOCacheCredentialReuse")]
+	[OutputType(typeof(TboCacheCredentialReuse))]
+	public sealed class GetTBOCacheCredentialReuse : PSCmdlet
+	{
+		[Parameter]
+		public string? Kind { get; set; }
+
+		[Parameter]
+		public string? Identifier { get; set; }
+
+		[Parameter]
+		[ValidateRange(2, int.MaxValue)]
+		public int MinimumMachineCount { get; set; } = 2;
+
+		[Parameter]
+		public string? Path { get; set; }
+
+		protected override void ProcessRecord()
+		{
+			using var db = TboCacheDatabase.Open(this.Path, msg => this.WriteVerbose(msg));
+			var rows = db.QueryCredentialReuse(this.Kind, this.Identifier, this.MinimumMachineCount);
+
+			foreach (var row in rows)
+			{
+				this.WriteObject(new TboCacheCredentialReuse
+				{
+					CredentialId = row.CredentialId,
+					CredentialKind = row.Kind,
+					CredentialIdentifier = row.Identifier,
+					MachineCount = row.MachineCount,
+
+					ServerName = row.ServerName,
+					PrincipalSid = row.PrincipalSid,
+					PrincipalDomain = row.PrincipalDomain,
+					PrincipalName = row.PrincipalName,
+					PrincipalType = row.PrincipalType,
+
+					ObservationCount = row.ObservationCount,
+					FirstObservedUtc = ParseDateTime(row.FirstObservedUtc),
+					LastObservedUtc = ParseDateTime(row.LastObservedUtc),
+				});
+			}
+		}
+
+		private static DateTime ParseDateTime(string value)
+		{
+			if (string.IsNullOrWhiteSpace(value))
+				return default;
+
+			if (DateTime.TryParseExact(
+				value,
+				"O",
+				CultureInfo.InvariantCulture,
+				DateTimeStyles.RoundtripKind,
+				out var parsed))
+			{
+				return parsed;
+			}
+
+			return DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+		}
+	}
+}

@@ -5159,4 +5159,81 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
       </command:example>
     </command:examples>
   </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOCacheCredentialReuse</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOCacheCredentialReuse</command:noun>
+      <maml:description>
+        <maml:para>Shows credentials observed on multiple machines, grouped by machine and principal context.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOCacheCredentialReuse</command:name>
+        <command:parameter required="false">
+          <maml:name>Kind</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Identifier</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>MinimumMachineCount</maml:name>
+          <command:parameterValue>Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false">
+        <maml:name>Kind</maml:name>
+        <maml:description>
+          <maml:para>Credential kind filter (for example, NTHash).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Identifier</maml:name>
+        <maml:description>
+          <maml:para>Credential identifier filter (for example, an NTHash).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>MinimumMachineCount</maml:name>
+        <maml:description>
+          <maml:para>Only return credentials observed on at least this many distinct machines.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2</maml:code>
+        <maml:remarks>
+          <maml:para>Lists NTHashes observed on at least two machines.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOCacheCredentialReuse -Kind NTHash -Identifier 8846f7eaee8fb117ad06bdd830b7586c -MinimumMachineCount 2</maml:code>
+        <maml:remarks>
+          <maml:para>Narrows results to a specific credential identifier.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
 </helpItems>
