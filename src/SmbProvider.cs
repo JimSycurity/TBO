@@ -828,7 +828,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			this.Provider = provider;
 
-			var socketService = new PlatformSocketService(this, null);
+			var directSocketService = new PlatformSocketService(this, null);
+			var socketService = new TboProxySocketService(this, directSocketService);
 			this._rpcClient = new RpcClient(socketService, this, this, null, null);
 
 			this._log = CreateLocalLog(out this._logWriter);

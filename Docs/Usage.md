@@ -129,8 +129,11 @@ Per-server settings take precedence over global defaults, and `New-PSDrive` dyna
 
 Changing options that affect the winreg fingerprint invalidates cached registry sessions for the target server (or all servers when updating global defaults). See `Docs/WinregSessionCaching.md` for details.
 
+To proxy SMB over SOCKS5, set `-Socks5Proxy` (or `TITANIS_TBO_SOCKS5_PROXY`) to `host:port` or `socks5://host:port`. SOCKS5 authentication is not currently supported. If a server already has cached SMB connections, run `Disconnect-TBOSmbServer` first to force a new connection through the proxy.
+
 ```powershell
 Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -HostName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -Password 'YourSecurePassword'
+Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -Socks5Proxy 127.0.0.1:1080
 Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName psx_l_backupop -UserDomain corp1.lab.home-labs.lol -NtlmHash "aad3b435b51404eeaad3b435b51404ee:0123456789abcdef0123456789abcdef"
 Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -TicketCache C:\temp\krb5cc
 Set-TBOConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -AesKey 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef -Kdc corp1-dc01.corp1.lab.home-labs.lol

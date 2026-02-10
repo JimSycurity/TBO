@@ -75,6 +75,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var builder = new StringBuilder(256);
 			AppendFingerprint(builder, parms.HostName);
 			AppendFingerprint(builder, parms.RemotePort);
+			AppendFingerprint(builder, parms.Socks5Proxy);
 			AppendFingerprint(builder, parms.UserName);
 			AppendFingerprint(builder, parms.UserDomain);
 			AppendFingerprint(builder, parms.Password);

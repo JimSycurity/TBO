@@ -2355,6 +2355,13 @@ Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name
         <command:parameterValue>Int32</command:parameterValue>
       </command:parameter>
       <command:parameter>
+        <maml:name>Socks5Proxy</maml:name>
+        <maml:description>
+          <maml:para>Optional SOCKS5 proxy for SMB connections. Use host:port (ex: 127.0.0.1:1080) or socks5://host:port. SOCKS5 authentication is not currently supported.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
         <maml:name>NameResolveOptions</maml:name>
         <maml:description>
           <maml:para>Name resolution options for the SMB target.</maml:para>
@@ -2581,6 +2588,13 @@ Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name
           <maml:para>Override the SMB port.</maml:para>
         </maml:description>
         <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Socks5Proxy</maml:name>
+        <maml:description>
+          <maml:para>Optional SOCKS5 proxy for SMB connections. Use host:port (ex: 127.0.0.1:1080) or socks5://host:port. SOCKS5 authentication is not currently supported.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>NameResolveOptions</maml:name>
