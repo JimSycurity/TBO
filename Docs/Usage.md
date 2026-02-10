@@ -426,21 +426,22 @@ $raw = [Titanis.Tbo.Smb2.PowerShell.TBOSD]::FromRegistryBinaryAsWindows($sdBytes
 
 Registry cmdlets support:
 - Remote registry access via MS-RRP (`-ServerName <host>`), using the winreg pipe with backup/restore semantics. Session caching behavior is documented in `Docs/WinregSessionCaching.md`.
-- Local registry access (`-ServerName localhost`), using local Win32 registry APIs (no MS-RRP/SMB).
+- Local registry access (`-ServerName localhost`/`.`/`127.0.0.1`/`::1` or the local machine name), using local Win32 registry APIs (no MS-RRP/SMB).
 
-#### Local Registry Mode (localhost)
+#### Local Registry Mode (localhost / . / loopback)
 
 Cmdlets:
 
 ```powershell
 Get-TBORegKey -ServerName localhost -Path HKLM\SOFTWARE
+Get-TBORegKey -ServerName . -Path HKLM\SOFTWARE
 Get-TBORegChildItem -ServerName localhost -Path HKLM\SOFTWARE -IncludeValues -IncludeData
 ```
 
 Provider:
 
 ```powershell
-New-PSDrive -Name tbo-reg-local -PSProvider 'TBO.Reg' -Root localhost
+New-PSDrive -Name tbo-reg-local -PSProvider 'TBO.Reg' -Root .
 Get-ChildItem tbo-reg-local:\HKLM\SOFTWARE -IncludeValues -IncludeData
 ```
 

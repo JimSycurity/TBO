@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -17,7 +18,47 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	internal sealed class LocalRegistrySession : IRegistrySession, IRegistrySecretCacheProvider
 	{
 		internal static bool IsLocalServerName(string serverName)
-			=> string.Equals(serverName, "localhost", StringComparison.OrdinalIgnoreCase);
+		{
+			if (string.IsNullOrWhiteSpace(serverName))
+				return false;
+
+			// For cmdlets (-ServerName) and the TBO.Reg provider (-Root), accept a small set of explicit aliases.
+			// Avoid trying to resolve arbitrary hostnames/IPs here because that risks misclassifying remote hosts.
+			var trimmed = serverName.Trim().TrimStart('\\').TrimEnd('\\');
+
+			if (string.Equals(trimmed, "localhost", StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (string.Equals(trimmed, ".", StringComparison.Ordinal))
+				return true;
+
+			// Treat the local machine name as local, so users can pass -ServerName $env:COMPUTERNAME without forcing MS-RRP.
+			var machineName = Environment.MachineName;
+			if (!string.IsNullOrWhiteSpace(machineName)
+				&& string.Equals(trimmed, machineName, StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+
+			// Loopback IP literals.
+			var ipLiteral = StripIpv6Brackets(trimmed);
+			if (IPAddress.TryParse(ipLiteral, out var ip) && IPAddress.IsLoopback(ip))
+				return true;
+
+			return false;
+		}
+
+		private static string StripIpv6Brackets(string value)
+		{
+			if (string.IsNullOrEmpty(value))
+				return value;
+
+			// Some callers may include IPv6 literals in brackets (e.g., "[::1]"); IPAddress.TryParse does not accept brackets.
+			if (value.Length >= 2 && value[0] == '[' && value[^1] == ']')
+				return value.Substring(1, value.Length - 2);
+
+			return value;
+		}
 
 		private readonly LocalRegistryClient _client;
 		private readonly RegistrySecretCache _secretCache = new();

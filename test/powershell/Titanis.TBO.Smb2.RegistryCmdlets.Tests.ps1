@@ -480,4 +480,101 @@ Describe 'Registry retry helper (mocked)' {
 		$script:invalidations | Should -BeGreaterThan 0
 		$script:attempt | Should -Be 2
 	}
+
+	It 'routes local server aliases to local registry mode' -TestCases @(
+		@{ ServerName = 'localhost' },
+		@{ ServerName = '.' },
+		@{ ServerName = '127.0.0.1' },
+		@{ ServerName = '::1' },
+		@{ ServerName = [System.Environment]::MachineName }
+	) {
+		param($ServerName)
+
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		if (-not $ServerName) {
+			Set-ItResult -Skipped -Because 'ServerName test case is empty.'
+			return
+		}
+
+		$script:sessionType = $null
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) throw 'OpenRegistrySession should not be called.' } `
+			-OpenRemoteRegistrySessionAsync { param($serverName, $token) throw 'OpenRemoteRegistrySessionAsync should not be called.' }
+
+		$helperType = [Titanis.Tbo.Smb2.PowerShell.SmbCmdlet].Assembly.GetType('Titanis.Tbo.Smb2.PowerShell.RegistryRetryHelper')
+		$execute = $helperType.GetMethod('Execute', [System.Reflection.BindingFlags]::Static -bor [System.Reflection.BindingFlags]::NonPublic -bor [System.Reflection.BindingFlags]::Public, $null, @(
+			[Titanis.Tbo.Smb2.PowerShell.ISmbProviderInfo],
+			[string],
+			[System.Threading.CancellationToken],
+			[System.Action[Titanis.Tbo.Smb2.PowerShell.IRegistrySession]]
+		), $null)
+
+		$action = [System.Action[Titanis.Tbo.Smb2.PowerShell.IRegistrySession]]{
+			param($session)
+			$script:sessionType = $session.GetType().FullName
+		}
+
+		{ $execute.Invoke($null, @($mock, $ServerName, [System.Threading.CancellationToken]::None, $action)) } | Should -Not -Throw
+		$script:sessionType | Should -Match 'LocalRegistrySession'
+	}
+}
+
+Describe 'TBO.Reg provider (local mode)' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		if (-not $script:repoRoot) {
+			$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		}
+
+		if (-not $script:moduleAvailable) {
+			$script:moduleAvailable = $false
+			if ($script:repoRoot) {
+				try {
+					Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+					$script:moduleAvailable = $true
+				} catch {
+					$script:moduleAvailable = $false
+				}
+			}
+		}
+	}
+
+	It 'New-PSDrive -PSProvider TBO.Reg -Root . can browse HKLM/HKCU' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		if (-not $IsWindows) {
+			Set-ItResult -Skipped -Because 'Local registry provider tests are Windows-only.'
+			return
+		}
+
+		$driveName = 'tbo-reg-local-test'
+		if (Get-PSDrive -Name $driveName -ErrorAction SilentlyContinue) {
+			Remove-PSDrive -Name $driveName -Force -ErrorAction SilentlyContinue
+		}
+
+		try {
+			New-PSDrive -Name $driveName -PSProvider 'TBO.Reg' -Root . | Out-Null
+
+			$hives = Get-ChildItem "$driveName`:\"
+			($hives | Select-Object -ExpandProperty Name) | Should -Contain 'HKEY_LOCAL_MACHINE'
+			($hives | Select-Object -ExpandProperty Name) | Should -Contain 'HKEY_CURRENT_USER'
+
+			{ Get-Item "$driveName`:\HKLM\SOFTWARE" | Out-Null } | Should -Not -Throw
+			{ Get-Item "$driveName`:\HKCU\SOFTWARE" | Out-Null } | Should -Not -Throw
+		}
+		finally {
+			Remove-PSDrive -Name $driveName -Force -ErrorAction SilentlyContinue
+		}
+	}
 }
