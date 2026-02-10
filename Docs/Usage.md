@@ -1090,6 +1090,54 @@ Removes a remote registry value.
 Remove-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name InstallId -Cache
 ```
 
+#### Get-TBOEnvironmentVariable
+
+Gets Windows environment variables from a remote host by reading the registry environment keys.
+
+Scopes:
+
+- `Machine`: `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`
+- `User`: `HKU\<sid>\Environment` (or `HKU\<sid>\Volatile Environment` when `-Volatile` is specified)
+
+Note: writing these values does not update already-running processes. A logoff/restart (or process restart) may be required before changes take effect.
+
+```powershell
+# List machine environment variables.
+Get-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol
+
+# Read a single machine environment variable.
+Get-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name Path
+
+# Read a user-scoped environment variable for a loaded profile (SID from HKU).
+$sid = Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol | Select-Object -First 1
+Get-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserSid $sid -Name DOTNET_STARTUP_HOOKS
+```
+
+#### Set-TBOEnvironmentVariable
+
+Sets a Windows environment variable on a remote host by writing to the registry environment keys.
+Use `-Expand` to write `REG_EXPAND_SZ` (allows `%VAR%` expansions).
+
+```powershell
+# Set a machine-scoped environment variable (example: .NET startup hooks).
+Set-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DOTNET_STARTUP_HOOKS -Value 'C:\ProgramData\hooks\hook.dll' -Cache
+
+# Append to PATH using an expandable string.
+Set-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name Path -Value '%Path%;C:\ProgramData\tools' -Expand -Cache
+
+# Set a volatile user-scoped variable (exists only for the current logon session hive).
+$sid = Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol | Select-Object -First 1
+Set-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserSid $sid -Volatile -Name TEMP -Value 'C:\Temp' -Cache
+```
+
+#### Remove-TBOEnvironmentVariable
+
+Removes a Windows environment variable on a remote host by deleting the corresponding registry value.
+
+```powershell
+Remove-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DOTNET_STARTUP_HOOKS -Cache
+```
+
 ## Local Logging
 
 Set `TITANIS_TBO_LOG` to enable provider logging. Supported formats:

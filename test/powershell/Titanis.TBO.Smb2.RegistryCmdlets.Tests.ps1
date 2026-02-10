@@ -288,6 +288,88 @@ AQAUgAwBAAAYAQAAFAAAAEgAAAACADQAAgAAAAKAFAD/AQ8AAQEAAAAAAAEAAAAAFAAYAJ0BAgABAgAA
 			$value.Value | Should -Be 42
 		}
 	}
+
+	It 'Get-TBOEnvironmentVariable reads machine env vars from fake registry store' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey('HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment') | Out-Null
+		$store.SetStringValue('HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', 'C:\Temp') | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			$var = Get-TBOEnvironmentVariable -ServerName 'server' -Name Path
+			$var.Name | Should -Be 'Path'
+			$var.Value | Should -Be 'C:\Temp'
+			$var.Scope | Should -Be 'Machine'
+		}
+	}
+
+	It 'Set-TBOEnvironmentVariable writes ExpandString when -Expand is specified' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey('HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment') | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Set-TBOEnvironmentVariable -ServerName 'server' -Name Path -Value '%Path%;C:\Temp' -Expand
+			$var = Get-TBOEnvironmentVariable -ServerName 'server' -Name Path
+			$var.ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::ExpandString)
+			$var.Value | Should -Be '%Path%;C:\Temp'
+		}
+	}
+
+	It 'Set-TBOEnvironmentVariable -Scope User writes to HKU SID environment key' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+			$sid = 'S-1-5-21-1-2-3-4'
+			$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+				$store.AddKey("HKU\$sid\Environment") | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Set-TBOEnvironmentVariable -ServerName 'server' -Scope User -UserSid $sid -Name DOTNET_STARTUP_HOOKS -Value 'C:\hook.dll'
+			$var = Get-TBOEnvironmentVariable -ServerName 'server' -Scope User -UserSid $sid -Name DOTNET_STARTUP_HOOKS
+			$var.Value | Should -Be 'C:\hook.dll'
+			$var.Scope | Should -Be 'User'
+			$var.UserSid | Should -Be $sid
+		}
+	}
+
+	It 'Remove-TBOEnvironmentVariable deletes from fake registry store' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey('HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment') | Out-Null
+		$store.SetStringValue('HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'DOTNET_STARTUP_HOOKS', 'C:\hook.dll') | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Remove-TBOEnvironmentVariable -ServerName 'server' -Name DOTNET_STARTUP_HOOKS -Confirm:$false
+			{ Get-TBOEnvironmentVariable -ServerName 'server' -Name DOTNET_STARTUP_HOOKS } | Should -Throw
+		}
+	}
 }
 
 Describe 'Registry retry helper (mocked)' {

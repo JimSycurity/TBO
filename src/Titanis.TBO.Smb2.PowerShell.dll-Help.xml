@@ -5720,6 +5720,335 @@ Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2</maml:code>
       </command:example>
     </command:examples>
   </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOEnvironmentVariable</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOEnvironmentVariable</command:noun>
+      <maml:description>
+        <maml:para>Gets Windows environment variables from a remote host by reading the registry environment keys.</maml:para>
+        <maml:para>Machine scope reads HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment. User scope reads HKU\&lt;sid&gt;\Environment (or HKU\&lt;sid&gt;\Volatile Environment with -Volatile).</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOEnvironmentVariable</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" position="1">
+          <maml:name>Name</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserSid</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Volatile</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" position="1">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>Environment variable name. Omit to enumerate all variables in the selected scope.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Environment variable scope: Machine (default) or User.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserSid</maml:name>
+        <maml:description>
+          <maml:para>User SID when Scope is User. This must refer to a loaded profile hive under HKEY_USERS.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Volatile</maml:name>
+        <maml:description>
+          <maml:para>When Scope is User, reads HKU\&lt;sid&gt;\Volatile Environment instead of HKU\&lt;sid&gt;\Environment.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Lists machine-scoped environment variables.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name Path</maml:code>
+        <maml:remarks>
+          <maml:para>Gets a single machine-scoped environment variable.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Set-TBOEnvironmentVariable</command:name>
+      <command:verb>Set</command:verb>
+      <command:noun>TBOEnvironmentVariable</command:noun>
+      <maml:description>
+        <maml:para>Sets a Windows environment variable on a remote host by writing to the registry environment keys.</maml:para>
+        <maml:para>Note: this does not update already-running processes. A logoff/restart (or process restart) may be required before the change takes effect.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Set-TBOEnvironmentVariable</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Name</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="2">
+          <maml:name>Value</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserSid</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Volatile</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Expand</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Cache</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CachePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>Environment variable name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="2">
+        <maml:name>Value</maml:name>
+        <maml:description>
+          <maml:para>Environment variable value.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Environment variable scope: Machine (default) or User.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserSid</maml:name>
+        <maml:description>
+          <maml:para>User SID when Scope is User. This must refer to a loaded profile hive under HKEY_USERS.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Volatile</maml:name>
+        <maml:description>
+          <maml:para>When Scope is User, writes HKU\&lt;sid&gt;\Volatile Environment instead of HKU\&lt;sid&gt;\Environment.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Expand</maml:name>
+        <maml:description>
+          <maml:para>Writes the value as REG_EXPAND_SZ to allow %VAR% expansions.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>When enabled, writes the change into the persistent cache write activity log.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override used when recording write activities.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Set-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DOTNET_STARTUP_HOOKS -Value 'C:\ProgramData\hooks\hook.dll'</maml:code>
+        <maml:remarks>
+          <maml:para>Sets a machine-scoped environment variable.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Set-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name Path -Value '%Path%;C:\ProgramData\tools' -Expand</maml:code>
+        <maml:remarks>
+          <maml:para>Appends to PATH using an expandable string.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Remove-TBOEnvironmentVariable</command:name>
+      <command:verb>Remove</command:verb>
+      <command:noun>TBOEnvironmentVariable</command:noun>
+      <maml:description>
+        <maml:para>Removes a Windows environment variable on a remote host by deleting the corresponding registry value.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Remove-TBOEnvironmentVariable</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Name</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserSid</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Volatile</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Cache</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CachePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>Environment variable name to delete.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Environment variable scope: Machine (default) or User.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserSid</maml:name>
+        <maml:description>
+          <maml:para>User SID when Scope is User. This must refer to a loaded profile hive under HKEY_USERS.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Volatile</maml:name>
+        <maml:description>
+          <maml:para>When Scope is User, deletes from HKU\&lt;sid&gt;\Volatile Environment instead of HKU\&lt;sid&gt;\Environment.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>When enabled, writes the change into the persistent cache write activity log.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override used when recording write activities.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Remove-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DOTNET_STARTUP_HOOKS</maml:code>
+        <maml:remarks>
+          <maml:para>Deletes a machine-scoped environment variable.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
   <command:command>
     <command:details>
       <command:name>Get-TBOCacheInfo</command:name>
