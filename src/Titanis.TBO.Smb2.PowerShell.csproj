@@ -6,6 +6,14 @@
     <RootNamespace>Titanis.Tbo.Smb2.PowerShell</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!--
+      This project is loaded directly as a PowerShell binary module. When built (not published) into a
+      standalone folder (e.g. `dotnet build -o C:\Temp\Titanis.TBO.Smb2`), NuGet runtime assemblies and
+      native assets (e.g. Microsoft.Data.Sqlite + e_sqlite3) must be copied next to the module binary so
+      PowerShell can resolve them without a .deps.json host.
+    -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>
