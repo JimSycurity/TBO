@@ -825,7 +825,7 @@ Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\c
       <maml:description>
         <maml:para>Enumerates Windows Hello / NGC-related Crypto\Keys entries and extracts PIN cracking material.</maml:para>
         <maml:para>Reads the LocalService Crypto\Keys directory and correlates key GUIDs with NGC containers (GUID1/GUID2). Decrypts private key properties to extract PBKDF2 salt/rounds and can emit Hashcat mode 28100 ($WINHELLO$) lines.</maml:para>
-        <maml:para>Best-effort private key DPAPI decryption can be attempted for non-PIN protected keys.</maml:para>
+        <maml:para>Best-effort private key DPAPI decryption can be attempted for non-PIN protected keys, and for PIN-protected software keys when -Pin is supplied.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -862,6 +862,10 @@ Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\c
         <command:parameter required="false">
           <maml:name>TryDecryptPrivateKey</maml:name>
           <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Pin</maml:name>
+          <command:parameterValue>SecureString</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
           <maml:name>KeyGuid</maml:name>
@@ -922,9 +926,16 @@ Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\c
       <command:parameter>
         <maml:name>TryDecryptPrivateKey</maml:name>
         <maml:description>
-          <maml:para>Attempt best-effort DPAPI decryption of the private key blob using CNG entropy. This will not work for PIN-protected keys.</maml:para>
+          <maml:para>Attempt best-effort DPAPI decryption of the private key blob using CNG entropy. For PIN-protected software keys, also supply -Pin.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Pin</maml:name>
+        <maml:description>
+          <maml:para>Windows Hello PIN used to derive smartCardSecret for PIN-protected (software) private keys. Only used with -TryDecryptPrivateKey.</maml:para>
+        </maml:description>
+        <command:parameterValue>SecureString</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>KeyGuid</maml:name>
@@ -959,6 +970,16 @@ Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys
         <maml:code>Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -KeyGuid '{01234567-89ab-cdef-0123-456789abcdef}' -IncludeHashcat</maml:code>
         <maml:remarks>
           <maml:para>Filters output to a specific key GUID.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>$pin = Read-Host -AsSecureString 'Windows Hello PIN'
+Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -TryDecryptPrivateKey -Pin $pin |
+  Where-Object PrivateKeyDecrypted |
+  Select-Object CryptoKeyGuid, NgcGuid, PrivateKeyMasterKeyGuid, PrivateKeyCleartextHex</maml:code>
+        <maml:remarks>
+          <maml:para>Attempts PIN-based decryption of PIN-protected (software) private keys.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
