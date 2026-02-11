@@ -4387,6 +4387,17 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
           <maml:para>Sets FailureActions to run a command on first failure. Use for research only.</maml:para>
         </maml:remarks>
       </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 7 --------------------------</command:title>
+        <maml:code>$serviceName = 'TBORegSvc'</maml:code>
+        <maml:code>$servicePath = "HKLM\SYSTEM\CurrentControlSet\Services\$serviceName"</maml:code>
+        <maml:code>New-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $servicePath</maml:code>
+        <maml:code>$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceCreateScenarios]::AutoStartOwnProcess('%SystemRoot%\Temp\tbo-agent.exe', 'Windows Telemetry Host', 'Telemetry host service.')</maml:code>
+        <maml:code>$values | ForEach-Object { Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $servicePath -Name $_.Name -Type $_.ValueType -Value $_.Value }</maml:code>
+        <maml:remarks>
+          <maml:para>Stages a service key for reboot execution by writing service values directly to the Services registry path.</maml:para>
+        </maml:remarks>
+      </command:example>
     </command:examples>
   </command:command>
 

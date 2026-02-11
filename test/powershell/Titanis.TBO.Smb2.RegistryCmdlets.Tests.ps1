@@ -331,6 +331,56 @@ AQAUgAwBAAAYAQAAFAAAAEgAAAACADQAAgAAAAKAFAD/AQ8AAQEAAAAAAAEAAAAAFAAYAJ0BAgABAgAA
 		}
 	}
 
+	It 'TboRegServiceCreateScenarios::AutoStartOwnProcess emits reboot-persistent service values' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceCreateScenarios]::AutoStartOwnProcess(
+			'%SystemRoot%\Temp\tbo-agent.exe',
+			'Windows Telemetry Host',
+			'Telemetry host service.')
+
+		$values | Should -Not -BeNullOrEmpty
+		$byName = @{}
+		foreach ($value in $values) {
+			$byName[$value.Name] = $value
+		}
+
+		$byName['Start'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::DwordLE)
+		$byName['Start'].Value | Should -Be 2
+		$byName['Type'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::DwordLE)
+		$byName['Type'].Value | Should -Be 16
+		$byName['ErrorControl'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::DwordLE)
+		$byName['ErrorControl'].Value | Should -Be 1
+		$byName['ObjectName'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::String)
+		$byName['ObjectName'].Value | Should -Be 'LocalSystem'
+		$byName['ImagePath'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::ExpandString)
+		$byName['ImagePath'].Value | Should -Be '%SystemRoot%\Temp\tbo-agent.exe'
+		$byName['DisplayName'].Value | Should -Be 'Windows Telemetry Host'
+		$byName['Description'].Value | Should -Be 'Telemetry host service.'
+	}
+
+	It 'TboRegServiceCreateScenarios::AutoStartOwnProcess validates required values' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$thrown = $null
+		try {
+			[Titanis.Tbo.Smb2.PowerShell.TboRegServiceCreateScenarios]::AutoStartOwnProcess(' ')
+		} catch {
+			$thrown = $_.Exception
+		}
+
+		$thrown | Should -Not -BeNullOrEmpty
+		$thrown.GetType().FullName | Should -Be 'System.Management.Automation.MethodInvocationException'
+		$thrown.InnerException | Should -Not -BeNullOrEmpty
+		$thrown.InnerException.GetType().FullName | Should -Be 'System.ArgumentException'
+	}
+
 	It 'Get-TBORegValue reads from fake registry store' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
