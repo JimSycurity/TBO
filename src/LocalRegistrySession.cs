@@ -92,7 +92,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
-				var handle = LocalRegistryNative.OpenRootKey(rootKey, access, _logDiagnostic);
+				var handle = LocalRegistryNative.OpenRootKey(rootKey, access, _logDiagnostic, _logWarning);
 				var name = RemoteRegistryClient.GetRootName(rootKey);
 				return Task.FromResult<IRegistryKey>(new LocalRegistryKey(handle, name, name, access, _logDiagnostic, _logWarning));
 			}

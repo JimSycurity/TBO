@@ -25,6 +25,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private const uint RegCreatedNewKey = 1;
 		private const uint RegOpenedExistingKey = 2;
+		private const RegistryAccessRights AccessSystemSecurity = (RegistryAccessRights)0x01000000;
 
 		private static RegistryAccessRights NormalizeWow64Access(RegistryAccessRights access)
 		{
@@ -60,14 +61,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		internal static SafeRegistryHandle OpenRootKey(
 			RegistryRootKey rootKey,
 			RegistryAccessRights access,
-			Action<string>? logDiagnostic = null)
+			Action<string>? logDiagnostic = null,
+			Action<string>? logWarning = null)
 		{
 			if (!OperatingSystem.IsWindows())
 				throw new PlatformNotSupportedException("Local registry mode is only supported on Windows.");
 
 			logDiagnostic ??= _ => { };
+			logWarning ??= _ => { };
 
 			var desiredAccess = NormalizeWow64Access(access);
+			if (RegistryAccessRequestsSystemSecurity(desiredAccess))
+			{
+				EnsureSeSecurityPrivilegeEnabled(
+					operation: "open key handles with ACCESS_SYSTEM_SECURITY",
+					logDiagnostic,
+					logWarning);
+			}
+
 			var rootHandle = GetPredefinedRootHandle(rootKey);
 
 			// RegOpenKeyEx allows lpSubKey=null to open the key represented by hKey.
@@ -99,6 +110,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			logWarning ??= _ => { };
 
 			var desiredAccess = NormalizeWow64Access(access);
+			if (RegistryAccessRequestsSystemSecurity(desiredAccess))
+			{
+				EnsureSeSecurityPrivilegeEnabled(
+					operation: "open key handles with ACCESS_SYSTEM_SECURITY",
+					logDiagnostic,
+					logWarning);
+			}
 
 			logDiagnostic($"Local registry RegOpenKeyEx: parent=0x{parentKey.DangerousGetHandle():X}, subkey='{subkeyPath}', access=0x{(uint)desiredAccess:X8}, options=0x{(uint)options:X8}.");
 
@@ -173,11 +191,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			logWarning ??= _ => { };
 
 			var desiredAccess = NormalizeWow64Access(access);
+			if (RegistryAccessRequestsSystemSecurity(desiredAccess))
+			{
+				EnsureSeSecurityPrivilegeEnabled(
+					operation: "create key handles with ACCESS_SYSTEM_SECURITY",
+					logDiagnostic,
+					logWarning);
+			}
 
 			if (options.HasFlag(RegistryKeyOptions.BackupRestore))
 			{
 				LocalTokenPrivileges.EnsureBackupRestorePrivilegesEnabled(
-					includeSecurityPrivilege: false,
+					includeSecurityPrivilege: RegistryAccessRequestsSystemSecurity(desiredAccess),
 					logDiagnostic,
 					logWarning);
 			}
@@ -309,7 +334,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			logWarning ??= _ => { };
 
 			if (SecurityInfoRequestsSacl(info))
-				throw new NotSupportedException("Local registry SACL is not implemented yet (requires SeSecurityPrivilege; see TBO-twi.9).");
+			{
+				EnsureSeSecurityPrivilegeEnabled(
+					operation: "query SACL sections",
+					logDiagnostic,
+					logWarning);
+			}
 
 			uint bytesNeeded = 0;
 			var res = (Win32ErrorCode)RegGetKeySecurity(key, (uint)info, null, ref bytesNeeded);
@@ -354,7 +384,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			logWarning ??= _ => { };
 
 			if (SecurityInfoRequestsSacl(info))
-				throw new NotSupportedException("Local registry SACL is not implemented yet (requires SeSecurityPrivilege; see TBO-twi.9).");
+			{
+				EnsureSeSecurityPrivilegeEnabled(
+					operation: "set SACL sections",
+					logDiagnostic,
+					logWarning);
+			}
 
 			logDiagnostic($"Local registry RegSetKeySecurity: key=0x{key.DangerousGetHandle():X}, info=0x{(uint)info:X8}, bytes={securityDescriptor.Length}.");
 
@@ -367,7 +402,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				logDiagnostic($"Local registry: access denied; retrying RegSetKeySecurity with info=0x{(uint)backupInfo:X8}.");
 
 				LocalTokenPrivileges.EnsureBackupRestorePrivilegesEnabled(
-					includeSecurityPrivilege: false,
+					includeSecurityPrivilege: SecurityInfoRequestsSacl(info),
 					logDiagnostic,
 					logWarning);
 
@@ -380,6 +415,57 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		private static bool SecurityInfoRequestsSacl(SecurityInfo info)
 			=> info.HasFlag(SecurityInfo.Sacl) || info.HasFlag(SecurityInfo.ProtectedSacl) || info.HasFlag(SecurityInfo.UnprotectedSacl);
+
+		private static bool RegistryAccessRequestsSystemSecurity(RegistryAccessRights access)
+			=> (access & AccessSystemSecurity) != 0;
+
+		private static void EnsureSeSecurityPrivilegeEnabled(
+			string operation,
+			Action<string> logDiagnostic,
+			Action<string> logWarning)
+		{
+			_ = logWarning;
+
+			// SACL operations only depend on SeSecurityPrivilege. Suppress backup/restore warning noise
+			// from the shared helper so callers get a single clear privilege error message.
+			var result = LocalTokenPrivileges.EnsureBackupRestorePrivilegesEnabled(
+				includeSecurityPrivilege: true,
+				logDiagnostic,
+				_ => { });
+
+			LocalPrivilegeStatus? seSecurityPrivilege = null;
+			foreach (var status in result.Privileges)
+			{
+				if (string.Equals(status.Name, "SeSecurityPrivilege", StringComparison.OrdinalIgnoreCase))
+				{
+					seSecurityPrivilege = status;
+					break;
+				}
+			}
+
+			if (seSecurityPrivilege?.State == LocalPrivilegeState.Enabled)
+				return;
+
+			var state = seSecurityPrivilege?.State.ToString() ?? LocalPrivilegeState.Unknown.ToString();
+			var errorText = seSecurityPrivilege?.LastWin32Error is int err
+				? $" Last error: {FormatWin32Error(err)}."
+				: string.Empty;
+
+			throw new UnauthorizedAccessException(
+				$"Local registry {operation} requires SeSecurityPrivilege, but it is not enabled for the current token (state: {state}).{errorText}");
+		}
+
+		private static string FormatWin32Error(int error)
+		{
+			try
+			{
+				return $"{new Win32Exception(error).Message} (0x{error:X8})";
+			}
+			catch
+			{
+				return $"Win32 error 0x{error:X8}";
+			}
+		}
 
 		[DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
 		private static extern int RegOpenKeyEx(

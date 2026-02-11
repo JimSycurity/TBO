@@ -162,7 +162,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				access |= WriteDac;
 			if (sections.HasFlag(SecurityInfo.Owner) || sections.HasFlag(SecurityInfo.Group))
 				access |= WriteOwner;
-			if (sections.HasFlag(SecurityInfo.Sacl))
+			if (sections.HasFlag(SecurityInfo.Sacl)
+				|| sections.HasFlag(SecurityInfo.ProtectedSacl)
+				|| sections.HasFlag(SecurityInfo.UnprotectedSacl))
 				access |= AccessSystemSecurity;
 
 			return access;

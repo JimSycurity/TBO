@@ -522,3 +522,97 @@ Describe 'DPAPI cmdlets with fake SMB file system' {
         $local.HashLine | Should -Be "{$($localGuid.ToString())}:$expectedLocalHash"
     }
 }
+
+Describe 'Copy-TBOSmbItem with fake SMB file system' {
+    It 'skips projected filesystem reparse directories by default during recursive SMB-to-local copy' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $root = '\\server\C$\Root'
+        $fake.AddDirectory($root) | Out-Null
+        $fake.AddDirectory("$root\Normal") | Out-Null
+        $fake.AddFile("$root\Normal\plain.txt", [byte[]][System.Text.Encoding]::UTF8.GetBytes('plain')) | Out-Null
+        $fake.AddDirectory(
+            "$root\ProjectedLink",
+            [Titanis.Winterop.FileAttributes]::Directory -bor [Titanis.Winterop.FileAttributes]::ReparsePoint,
+            [Titanis.Winterop.ReparseTag]::ProjectedFS) | Out-Null
+        $fake.AddFile("$root\ProjectedLink\linked.txt", [byte[]][System.Text.Encoding]::UTF8.GetBytes('linked')) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $destinationRoot = Join-Path $TestDrive 'out-default'
+        New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            Copy-TBOSmbItem -Source $root -Destination $destinationRoot -CreateDirectories
+        } finally {
+            $scope.Dispose()
+        }
+
+        Test-Path (Join-Path $destinationRoot 'Root\Normal\plain.txt') | Should -BeTrue
+        Test-Path (Join-Path $destinationRoot 'Root\ProjectedLink\linked.txt') | Should -BeFalse
+    }
+
+    It 'follows projected filesystem reparse directories when -FollowReparse is specified' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $root = '\\server\C$\Root'
+        $fake.AddDirectory($root) | Out-Null
+        $fake.AddDirectory("$root\Normal") | Out-Null
+        $fake.AddFile("$root\Normal\plain.txt", [byte[]][System.Text.Encoding]::UTF8.GetBytes('plain')) | Out-Null
+        $fake.AddDirectory(
+            "$root\ProjectedLink",
+            [Titanis.Winterop.FileAttributes]::Directory -bor [Titanis.Winterop.FileAttributes]::ReparsePoint,
+            [Titanis.Winterop.ReparseTag]::ProjectedFS) | Out-Null
+        $fake.AddFile("$root\ProjectedLink\linked.txt", [byte[]][System.Text.Encoding]::UTF8.GetBytes('linked')) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $destinationRoot = Join-Path $TestDrive 'out-follow'
+        New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            Copy-TBOSmbItem -Source $root -Destination $destinationRoot -CreateDirectories -FollowReparse
+        } finally {
+            $scope.Dispose()
+        }
+
+        Test-Path (Join-Path $destinationRoot 'Root\Normal\plain.txt') | Should -BeTrue
+        Test-Path (Join-Path $destinationRoot 'Root\ProjectedLink\linked.txt') | Should -BeTrue
+    }
+}

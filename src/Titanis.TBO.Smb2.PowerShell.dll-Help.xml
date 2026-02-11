@@ -3032,6 +3032,8 @@ Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name
       <command:noun>TBOSmbItem</command:noun>
       <maml:description>
         <maml:para>Copies files or directories between local paths and SMB paths using backup intent.</maml:para>
+        <maml:para>Recursive directory copies skip reparse-point directories by default, including projected filesystem tags.</maml:para>
+        <maml:para>Use -FollowReparse to traverse reparse directories. Following links can expand scope and revisit paths through junctions/symlinks.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -3091,6 +3093,13 @@ Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
+        <maml:name>FollowReparse</maml:name>
+        <maml:description>
+          <maml:para>Traverse reparse-point directories during recursive directory copies. By default reparse directories are skipped.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
         <maml:name>ChunkSize</maml:name>
         <maml:description>
           <maml:para>Copy chunk size in bytes.</maml:para>
@@ -3111,6 +3120,13 @@ Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name
         <maml:code>Copy-TBOSmbItem -Source tbo:\Windows\System32\Microsoft\Protect\S-1-5-18 -Destination C:\Temp\MasterKeys -CreateDirectories</maml:code>
         <maml:remarks>
           <maml:para>Recursively copies a remote directory to the local machine.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Copy-TBOSmbItem -Source tbo:\Repo -Destination C:\Temp\Repo -CreateDirectories -FollowReparse -Verbose</maml:code>
+        <maml:remarks>
+          <maml:para>Recursively copies a directory while traversing reparse-point directories. Verbose output reports projected/reparse traversal and cycle skips.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -3925,6 +3941,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <maml:description>
         <maml:para>Reads a security descriptor for a remote registry key.</maml:para>
         <maml:para>Returns a portable SecurityDescriptor by default. Use -AsSddl, -AsBytes, or -AsWindows (Windows only) to change output format.</maml:para>
+        <maml:para>For local-mode registry access (-ServerName localhost/loopback), SACL sections require SeSecurityPrivilege to be present and enabled.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -3974,7 +3991,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:parameter>
         <maml:name>Sections</maml:name>
         <maml:description>
-          <maml:para>Security descriptor sections to retrieve (default: Owner, Group, DACL).</maml:para>
+          <maml:para>Security descriptor sections to retrieve (default: Owner, Group, DACL). SACL requests in local mode require SeSecurityPrivilege.</maml:para>
         </maml:description>
         <command:parameterValue>SecurityInfo</command:parameterValue>
       </command:parameter>
@@ -4026,6 +4043,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <maml:description>
         <maml:para>Writes a security descriptor to a remote registry key.</maml:para>
         <maml:para>Accepts portable SecurityDescriptor instances, SDDL strings, raw byte arrays, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only.</maml:para>
+        <maml:para>For local-mode registry access (-ServerName localhost/loopback), applying SACL sections requires SeSecurityPrivilege to be present and enabled.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -4074,7 +4092,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:parameter>
         <maml:name>Sections</maml:name>
         <maml:description>
-          <maml:para>Security descriptor sections to apply (default: DACL).</maml:para>
+          <maml:para>Security descriptor sections to apply (default: DACL). SACL requests in local mode require SeSecurityPrivilege.</maml:para>
         </maml:description>
         <command:parameterValue>SecurityInfo</command:parameterValue>
       </command:parameter>

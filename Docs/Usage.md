@@ -267,9 +267,12 @@ Set-TBORegConnectOptions -ServerName corp1-web01.corp1.lab.home-labs.lol -RetryP
 
 Copies files or directories between local paths and SMB paths using backup intent. Supports UNC or `tbo:\` paths. Use `-Force` (alias `-Overwrite`) to overwrite existing destinations. Directory copies are recursive; use `-CreateDirectories` to create missing destination paths.
 
+By default, recursive directory copies skip reparse-point directories (including projected filesystem reparse points) and emit a verbose note. Use `-FollowReparse` to traverse reparse directories. Safety note: following reparse points can revisit paths through links/junctions; the cmdlet applies cycle guards and skips revisits, but you should still scope source paths narrowly.
+
 ```powershell
 Copy-TBOSmbItem -Source tbo:\Windows\System32\config\SAM -Destination C:\Temp\SAM.bak
 Copy-TBOSmbItem -Source tbo:\Windows\System32\Microsoft\Protect\S-1-5-18 -Destination C:\Temp\MasterKeys -CreateDirectories
+Copy-TBOSmbItem -Source tbo:\Repo -Destination C:\Temp\Repo -CreateDirectories -FollowReparse -Verbose
 Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -CreateDirectories
 Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -CreateDirectories -Cache -CachePath C:\Temp\tbo-cache.sqlite3
 Copy-TBOSmbItem -Source C:\Temp\local.txt -Destination tbo:\Temp\local.txt -Force
@@ -455,11 +458,15 @@ Remove-TBORegValue -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Name Inst
 Remove-TBORegKey -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Cache
 ```
 
-Security descriptors (SACL is not implemented yet for local mode; see `TBO-twi.9`):
+Security descriptors (local mode supports SACL when `SeSecurityPrivilege` is present and enabled):
 
 ```powershell
 $sd = Get-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE -Sections Dacl
 Set-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -SecurityDescriptor $sd -Sections Dacl -Cache
+
+# SACL operations require SeSecurityPrivilege.
+$sacl = Get-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -Sections Sacl
+Set-TBORegSecurityDescriptor -ServerName localhost -Path HKCU\SOFTWARE\TBO-Test -SecurityDescriptor $sacl -Sections Sacl
 ```
 
 #### Get-TBORegKey

@@ -622,3 +622,79 @@ Describe 'TBO.Reg provider (local mode)' {
 		}
 	}
 }
+
+Describe 'Registry security descriptor local mode' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		if (-not $script:repoRoot) {
+			$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		}
+
+		if (-not $script:moduleAvailable) {
+			$script:moduleAvailable = $false
+			if ($script:repoRoot) {
+				try {
+					Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+					$script:moduleAvailable = $true
+				} catch {
+					$script:moduleAvailable = $false
+				}
+			}
+		}
+	}
+
+	It 'handles local SACL operations based on SeSecurityPrivilege state' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		if (-not $IsWindows) {
+			Set-ItResult -Skipped -Because 'Local registry SACL tests are Windows-only.'
+			return
+		}
+
+		$keyPath = "HKCU\SOFTWARE\TBO-Sacl-Test-$([Guid]::NewGuid().ToString('N'))"
+		$created = $false
+		try {
+			New-TBORegKey -ServerName localhost -Path $keyPath -Confirm:$false | Out-Null
+			$created = $true
+
+			$getSaclError = $null
+			$saclBytes = $null
+			try {
+				$saclBytes = Get-TBORegSecurityDescriptor -ServerName localhost -Path $keyPath -Sections Sacl -AsBytes -ErrorAction Stop
+			} catch {
+				$getSaclError = $_.Exception
+			}
+
+			if ($getSaclError) {
+				$getSaclError.Message | Should -Match 'SeSecurityPrivilege'
+
+				$setSaclError = $null
+				try {
+					Set-TBORegSecurityDescriptor -ServerName localhost -Path $keyPath -SecurityDescriptor 'S:(AU;SA;KA;;;WD)' -Sections Sacl -Confirm:$false -ErrorAction Stop
+				} catch {
+					$setSaclError = $_.Exception
+				}
+
+				$setSaclError | Should -Not -BeNullOrEmpty
+				$setSaclError.Message | Should -Match 'SeSecurityPrivilege'
+				return
+			}
+
+			$saclBytes | Should -Not -BeNullOrEmpty
+
+			{ Set-TBORegSecurityDescriptor -ServerName localhost -Path $keyPath -SecurityDescriptor $saclBytes -Sections Sacl -Confirm:$false -ErrorAction Stop } | Should -Not -Throw
+		}
+		finally {
+			if ($created) {
+				Remove-TBORegKey -ServerName localhost -Path $keyPath -Confirm:$false -ErrorAction SilentlyContinue
+			}
+		}
+	}
+}

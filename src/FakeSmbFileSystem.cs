@@ -14,32 +14,53 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		private sealed class Node
 		{
-			public Node(bool isDirectory, Winterop.FileAttributes attributes)
+			public Node(ulong id, bool isDirectory, Winterop.FileAttributes attributes, Winterop.ReparseTag reparseTag)
 			{
+				this.Id = id;
 				this.IsDirectory = isDirectory;
 				this.Attributes = attributes;
+				this.ReparseTag = reparseTag;
 			}
 
+			public ulong Id { get; }
 			public bool IsDirectory { get; }
 			public Winterop.FileAttributes Attributes { get; set; }
+			public Winterop.ReparseTag ReparseTag { get; set; }
 			public byte[]? Content { get; set; }
 			public Dictionary<string, Node> Children { get; } = new(StringComparer.OrdinalIgnoreCase);
 		}
 
 		private readonly Dictionary<string, Node> _roots = new(StringComparer.OrdinalIgnoreCase);
+		private ulong _nextNodeId = 1;
 
 		public FakeSmbFileSystem AddDirectory(string uncPath)
 		{
+			return this.AddDirectory(uncPath, Winterop.FileAttributes.Directory, null);
+		}
+
+		public FakeSmbFileSystem AddDirectory(
+			string uncPath,
+			Winterop.FileAttributes attributes,
+			Winterop.ReparseTag? reparseTag = null)
+		{
 			var path = UncPath.Parse(uncPath);
-			var node = EnsureNode(path, isDirectory: true, Winterop.FileAttributes.Directory);
-			node.Attributes |= Winterop.FileAttributes.Directory;
+			var normalizedAttributes = attributes | Winterop.FileAttributes.Directory;
+			var node = EnsureNode(path, isDirectory: true, normalizedAttributes, reparseTag);
+			node.Attributes = normalizedAttributes;
+			node.ReparseTag = reparseTag ?? default;
 			return this;
 		}
 
-		public FakeSmbFileSystem AddFile(string uncPath, byte[] content, Winterop.FileAttributes attributes = Winterop.FileAttributes.Normal)
+		public FakeSmbFileSystem AddFile(
+			string uncPath,
+			byte[] content,
+			Winterop.FileAttributes attributes = Winterop.FileAttributes.Normal,
+			Winterop.ReparseTag? reparseTag = null)
 		{
 			var path = UncPath.Parse(uncPath);
-			var node = EnsureNode(path, isDirectory: false, attributes);
+			var node = EnsureNode(path, isDirectory: false, attributes, reparseTag);
+			node.Attributes = attributes;
+			node.ReparseTag = reparseTag ?? default;
 			node.Content = content ?? Array.Empty<byte>();
 			return this;
 		}
@@ -64,7 +85,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return new FakeFile(node.Content ?? Array.Empty<byte>());
 		}
 
-		private Node EnsureNode(UncPath path, bool isDirectory, Winterop.FileAttributes attributes)
+		private Node EnsureNode(
+			UncPath path,
+			bool isDirectory,
+			Winterop.FileAttributes attributes,
+			Winterop.ReparseTag? reparseTag)
 		{
 			var root = GetRoot(path);
 			var relative = path.ShareRelativePath;
@@ -81,7 +106,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				{
 					var childIsDirectory = isLast ? isDirectory : true;
 					var childAttributes = childIsDirectory ? Winterop.FileAttributes.Directory : attributes;
-					child = new Node(childIsDirectory, childAttributes);
+					var childReparseTag = isLast ? (reparseTag ?? default) : default;
+					child = new Node(GetNextNodeId(), childIsDirectory, childAttributes, childReparseTag);
 					current.Children[part] = child;
 				}
 				current = child;
@@ -119,9 +145,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var rootKey = $"\\\\{path.ServerName}\\{path.ShareName}";
 			if (_roots.TryGetValue(rootKey, out var root))
 				return root;
-			root = new Node(true, Winterop.FileAttributes.Directory);
+			root = new Node(GetNextNodeId(), true, Winterop.FileAttributes.Directory, default);
 			_roots[rootKey] = root;
 			return root;
+		}
+
+		private ulong GetNextNodeId()
+		{
+			return _nextNodeId++;
 		}
 
 		private Node? TryGetRoot(UncPath path)
@@ -163,6 +194,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						FileName = name,
 						RelativePath = name,
 						FileAttributes = child.Attributes,
+						ReparseTag = child.ReparseTag,
+						FileId = child.Id,
 						Size = (ulong)(child.Content?.Length ?? 0),
 						SizeOnDisk = (ulong)(child.Content?.Length ?? 0),
 						CreationTime = DateTime.UtcNow,

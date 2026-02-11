@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Management.Automation;
 using System.Text.Json;
@@ -37,6 +38,9 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		public SwitchParameter PreserveSecurityDescriptor { get; set; }
 
 		[Parameter]
+		public SwitchParameter FollowReparse { get; set; }
+
+		[Parameter]
 		public int ChunkSize { get; set; } = Smb2Client.DefaultChunkSize;
 
 		[Parameter]
@@ -73,15 +77,27 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		if (this.PreserveSecurityDescriptor.IsPresent && (source.Kind == PathKind.Local || destination.Kind == PathKind.Local))
 			throw new NotSupportedException("PreserveSecurityDescriptor is only supported for SMB-to-SMB copies.");
 
-		var smbClient = smb.SmbClient;
+		var sourceFileSystem = TryGetCustomSourceFileSystem(smb, source, destination);
+		Smb2Client? smbClient = null;
 		bool sourceIsDirectory = false;
 
 		if (source.Kind == PathKind.Smb)
 		{
-			var info = await TryGetEntryInfoAsync(smbClient, source.SmbPath!, source.TimeWarpToken, cancellationToken).ConfigureAwait(false);
-			if (!info.Exists)
-				throw new FileNotFoundException($"Source path '{source.SmbPath}' does not exist.");
-			sourceIsDirectory = info.IsDir;
+			if (sourceFileSystem != null)
+			{
+				var info = TryGetSmbSourceInfoViaFileSystem(sourceFileSystem, source.SmbPath!, cancellationToken);
+				if (!info.Exists)
+					throw new FileNotFoundException($"Source path '{source.SmbPath}' does not exist.");
+				sourceIsDirectory = info.IsDirectory;
+			}
+			else
+			{
+				smbClient = smb.SmbClient;
+				var info = await TryGetEntryInfoAsync(smbClient, source.SmbPath!, source.TimeWarpToken, cancellationToken).ConfigureAwait(false);
+				if (!info.Exists)
+					throw new FileNotFoundException($"Source path '{source.SmbPath}' does not exist.");
+				sourceIsDirectory = info.IsDir;
+			}
 		}
 		else
 		{
@@ -99,17 +115,27 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		{
 			if (source.Kind == PathKind.Smb && destination.Kind == PathKind.Smb)
 			{
-				await CopySmbDirectoryToSmbAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+				var smbClientForCopy = smbClient ?? smb.SmbClient;
+				await CopySmbDirectoryToSmbAsync(smbClientForCopy, source.SmbPath!, source.TimeWarpToken, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
 				return;
 			}
 
 			if (source.Kind == PathKind.Smb)
 			{
-				await CopySmbDirectoryToLocalAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
+				if (sourceFileSystem != null)
+				{
+					await CopySmbDirectoryToLocalViaFileSystemAsync(sourceFileSystem, source.SmbPath!, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
+				}
+				else
+				{
+					var smbClientForCopy = smbClient ?? smb.SmbClient;
+					await CopySmbDirectoryToLocalAsync(smbClientForCopy, source.SmbPath!, source.TimeWarpToken, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
+				}
 				return;
 			}
 
-			await CopyLocalDirectoryToSmbAsync(smbClient, source.LocalPath!, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+			var smbClientForLocalSource = smbClient ?? smb.SmbClient;
+			await CopyLocalDirectoryToSmbAsync(smbClientForLocalSource, source.LocalPath!, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
 			return;
 		}
 
@@ -118,17 +144,27 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 
 		if (source.Kind == PathKind.Smb && destination.Kind == PathKind.Smb)
 		{
-			await CopySmbToSmbAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+			var smbClientForCopy = smbClient ?? smb.SmbClient;
+			await CopySmbToSmbAsync(smbClientForCopy, source.SmbPath!, source.TimeWarpToken, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
 			return;
 		}
 
 		if (source.Kind == PathKind.Smb)
 		{
-			await CopySmbToLocalAsync(smbClient, source.SmbPath!, source.TimeWarpToken, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
+			if (sourceFileSystem != null && !source.TimeWarpToken.HasValue)
+			{
+				await CopySmbToLocalViaFileSystemAsync(sourceFileSystem, source.SmbPath!, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
+			}
+			else
+			{
+				var smbClientForCopy = smbClient ?? smb.SmbClient;
+				await CopySmbToLocalAsync(smbClientForCopy, source.SmbPath!, source.TimeWarpToken, destination.LocalPath!, cancellationToken).ConfigureAwait(false);
+			}
 			return;
 		}
 
-		await CopyLocalToSmbAsync(smbClient, source.LocalPath!, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
+		var smbClientForLocalSourceFile = smbClient ?? smb.SmbClient;
+		await CopyLocalToSmbAsync(smbClientForLocalSourceFile, source.LocalPath!, destination.SmbPath!, cancellationToken).ConfigureAwait(false);
 	}
 
 	private async Task CopySmbDirectoryToSmbAsync(
@@ -157,6 +193,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 				sourcePath,
 				sourceTimeWarpToken,
 				destinationRoot,
+				new HashSet<ulong>(),
 				cancellationToken).ConfigureAwait(false);
 		}
 		catch (Exception ex)
@@ -195,7 +232,91 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			sourcePath,
 			sourceTimeWarpToken,
 			destinationRoot,
+			new HashSet<ulong>(),
 			cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task CopySmbDirectoryToLocalViaFileSystemAsync(
+		ISmbFileSystem sourceFileSystem,
+		UncPath sourcePath,
+		string destinationPath,
+		CancellationToken cancellationToken)
+	{
+		var sourceDirectoryName = GetSmbDirectoryName(sourcePath);
+		var destinationRoot = ResolveLocalDirectoryDestination(sourceDirectoryName, destinationPath);
+
+		if (!ShouldProcessCopy(sourcePath.ToString(), destinationRoot))
+			return;
+
+		await CopySmbDirectoryToLocalViaFileSystemCoreAsync(
+			sourceFileSystem,
+			sourcePath,
+			destinationRoot,
+			new HashSet<ulong>(),
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task CopySmbDirectoryToLocalViaFileSystemCoreAsync(
+		ISmbFileSystem sourceFileSystem,
+		UncPath sourcePath,
+		string destinationPath,
+		HashSet<ulong> followedReparseDirectoryIds,
+		CancellationToken cancellationToken)
+	{
+		EnsureLocalDirectoryExists(destinationPath);
+
+		using var sourceDir = sourceFileSystem.OpenDirectory(sourcePath, cancellationToken);
+		var entries = sourceDir.QueryEntries(
+			"*",
+			Smb2Directory.Smb2DirQueryOptions.QueryReparseInfo,
+			SecurityInfo.None,
+			Smb2Directory.DefaultQueryBufferSize,
+			cancellationToken);
+
+		foreach (var entry in entries)
+		{
+			if (string.IsNullOrEmpty(entry.FileName))
+				continue;
+			if (entry.FileName is "." or "..")
+				continue;
+
+			bool isDirectory = (entry.FileAttributes & Winterop.FileAttributes.Directory) != 0;
+			bool isReparse = (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint) != 0;
+			var childSourcePath = sourcePath.Append(entry.FileName);
+
+			if (isDirectory)
+			{
+				if (isReparse && !ShouldFollowSmbReparseDirectory(entry, childSourcePath, followedReparseDirectoryIds, out var skipReason))
+				{
+					this.WriteVerboseSafe(skipReason);
+					continue;
+				}
+
+				if (isReparse)
+					this.WriteVerboseSafe(BuildFollowingSmbReparseDirectoryMessage(childSourcePath, entry.ReparseTag));
+
+				await CopySmbDirectoryToLocalViaFileSystemCoreAsync(
+					sourceFileSystem,
+					childSourcePath,
+					Path.Combine(destinationPath, entry.FileName),
+					followedReparseDirectoryIds,
+					cancellationToken).ConfigureAwait(false);
+				continue;
+			}
+
+			await CopySmbToLocalViaFileSystemAsync(
+				sourceFileSystem,
+				childSourcePath,
+				Path.Combine(destinationPath, entry.FileName),
+				cancellationToken,
+				shouldProcess: false).ConfigureAwait(false);
+		}
+
+		if (this.PreserveTimestamps.IsPresent)
+		{
+			this.WriteVerboseSafe(
+				$"Copy-TBOSmbItem: source metadata for '{sourcePath}' is unavailable from the configured file-system provider; directory timestamps were not preserved.");
+		}
 	}
 
 	private async Task CopyLocalDirectoryToSmbAsync(
@@ -222,6 +343,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 				smbClient,
 				sourcePath,
 				destinationRoot,
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 				cancellationToken).ConfigureAwait(false);
 		}
 		catch (Exception ex)
@@ -247,6 +369,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		UncPath sourcePath,
 		DateTime? sourceTimeWarpToken,
 		UncPath destinationPath,
+		HashSet<ulong> followedReparseDirectoryIds,
 		CancellationToken cancellationToken)
 	{
 		await EnsureRemoteDirectoryExistsAsync(smbClient, destinationPath, cancellationToken).ConfigureAwait(false);
@@ -290,27 +413,32 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 
 				bool isDirectory = (entry.FileAttributes & Winterop.FileAttributes.Directory) != 0;
 				bool isReparse = (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint) != 0;
+				var childSourcePath = sourcePath.Append(entry.FileName);
 
 				if (isDirectory)
 				{
-					if (isReparse)
+					if (isReparse && !ShouldFollowSmbReparseDirectory(entry, childSourcePath, followedReparseDirectoryIds, out var skipReason))
 					{
-						this.WriteVerbose($"Copy-TBOSmbItem skipped reparse directory '{sourcePath.Append(entry.FileName)}'.");
+						this.WriteVerboseSafe(skipReason);
 						continue;
 					}
 
+					if (isReparse)
+						this.WriteVerboseSafe(BuildFollowingSmbReparseDirectoryMessage(childSourcePath, entry.ReparseTag));
+
 					await CopySmbDirectoryToSmbCoreAsync(
 						smbClient,
-						sourcePath.Append(entry.FileName),
+						childSourcePath,
 						sourceTimeWarpToken,
 						destinationPath.Append(entry.FileName),
+						followedReparseDirectoryIds,
 						cancellationToken).ConfigureAwait(false);
 					continue;
 				}
 
 				await CopySmbToSmbAsync(
 					smbClient,
-					sourcePath.Append(entry.FileName),
+					childSourcePath,
 					sourceTimeWarpToken,
 					destinationPath.Append(entry.FileName),
 					cancellationToken,
@@ -367,6 +495,7 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		UncPath sourcePath,
 		DateTime? sourceTimeWarpToken,
 		string destinationPath,
+		HashSet<ulong> followedReparseDirectoryIds,
 		CancellationToken cancellationToken)
 	{
 		EnsureLocalDirectoryExists(destinationPath);
@@ -401,27 +530,32 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 
 				bool isDirectory = (entry.FileAttributes & Winterop.FileAttributes.Directory) != 0;
 				bool isReparse = (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint) != 0;
+				var childSourcePath = sourcePath.Append(entry.FileName);
 
 				if (isDirectory)
 				{
-					if (isReparse)
+					if (isReparse && !ShouldFollowSmbReparseDirectory(entry, childSourcePath, followedReparseDirectoryIds, out var skipReason))
 					{
-						this.WriteVerbose($"Copy-TBOSmbItem skipped reparse directory '{sourcePath.Append(entry.FileName)}'.");
+						this.WriteVerboseSafe(skipReason);
 						continue;
 					}
 
+					if (isReparse)
+						this.WriteVerboseSafe(BuildFollowingSmbReparseDirectoryMessage(childSourcePath, entry.ReparseTag));
+
 					await CopySmbDirectoryToLocalCoreAsync(
 						smbClient,
-						sourcePath.Append(entry.FileName),
+						childSourcePath,
 						sourceTimeWarpToken,
 						Path.Combine(destinationPath, entry.FileName),
+						followedReparseDirectoryIds,
 						cancellationToken).ConfigureAwait(false);
 					continue;
 				}
 
 				await CopySmbToLocalAsync(
 					smbClient,
-					sourcePath.Append(entry.FileName),
+					childSourcePath,
 					sourceTimeWarpToken,
 					Path.Combine(destinationPath, entry.FileName),
 					cancellationToken,
@@ -442,33 +576,43 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		Smb2Client smbClient,
 		string sourcePath,
 		UncPath destinationPath,
+		HashSet<string> followedReparseTargets,
 		CancellationToken cancellationToken)
 	{
 		var sourceInfo = new DirectoryInfo(sourcePath);
 		if (!sourceInfo.Exists)
 			throw new DirectoryNotFoundException($"Source path '{sourcePath}' does not exist.");
 
-		if ((sourceInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+		if ((sourceInfo.Attributes & FileAttributes.ReparsePoint) != 0
+			&& !ShouldFollowLocalReparseDirectory(sourceInfo, followedReparseTargets, out var rootSkipReason))
 		{
-			this.WriteVerbose($"Copy-TBOSmbItem skipped reparse directory '{sourcePath}'.");
+			this.WriteVerboseSafe(rootSkipReason);
 			return;
 		}
+
+		if ((sourceInfo.Attributes & FileAttributes.ReparsePoint) != 0)
+			this.WriteVerboseSafe(BuildFollowingLocalReparseDirectoryMessage(sourceInfo.FullName));
 
 		await EnsureRemoteDirectoryExistsAsync(smbClient, destinationPath, cancellationToken).ConfigureAwait(false);
 
 		foreach (var dir in sourceInfo.EnumerateDirectories())
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if ((dir.Attributes & FileAttributes.ReparsePoint) != 0)
+			if ((dir.Attributes & FileAttributes.ReparsePoint) != 0
+				&& !ShouldFollowLocalReparseDirectory(dir, followedReparseTargets, out var skipReason))
 			{
-				this.WriteVerbose($"Copy-TBOSmbItem skipped reparse directory '{dir.FullName}'.");
+				this.WriteVerboseSafe(skipReason);
 				continue;
 			}
+
+			if ((dir.Attributes & FileAttributes.ReparsePoint) != 0)
+				this.WriteVerboseSafe(BuildFollowingLocalReparseDirectoryMessage(dir.FullName));
 
 			await CopyLocalDirectoryToSmbCoreAsync(
 				smbClient,
 				dir.FullName,
 				destinationPath.Append(dir.Name),
+				followedReparseTargets,
 				cancellationToken).ConfigureAwait(false);
 		}
 
@@ -624,6 +768,52 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 						success: operationFailure == null,
 						failureReason: operationFailure?.Message);
 				}
+			}
+		}
+
+		private async Task CopySmbToLocalViaFileSystemAsync(
+			ISmbFileSystem sourceFileSystem,
+			UncPath sourcePath,
+			string destinationPath,
+			CancellationToken cancellationToken,
+			bool shouldProcess = true)
+		{
+			var sourceInfo = TryGetSmbSourceInfoViaFileSystem(sourceFileSystem, sourcePath, cancellationToken);
+			if (!sourceInfo.Exists)
+				throw new FileNotFoundException($"Source path '{sourcePath}' does not exist.");
+			if (sourceInfo.IsDirectory)
+				throw new IOException($"Source path '{sourcePath}' is a directory. Copy-TBOSmbItem supports files only.");
+
+			destinationPath = ResolveLocalDestinationPath(sourcePath, destinationPath);
+
+			if (File.Exists(destinationPath) && !this.Force.IsPresent)
+				throw new IOException($"The file '{destinationPath}' already exists.");
+			if (Directory.Exists(destinationPath))
+				throw new IOException($"Destination path '{destinationPath}' is a directory.");
+
+			if (shouldProcess && !ShouldProcessCopy(sourcePath.ToString(), destinationPath))
+				return;
+
+			if (this.CreateDirectories.IsPresent)
+				EnsureLocalDirectory(destinationPath);
+			else
+			{
+				var destinationDirectory = Path.GetDirectoryName(destinationPath);
+				if (!string.IsNullOrWhiteSpace(destinationDirectory) && !Directory.Exists(destinationDirectory))
+					throw new IOException($"Destination directory '{destinationDirectory}' does not exist. Use -CreateDirectories to create it.");
+			}
+
+			using var sourceFile = sourceFileSystem.OpenFileRead(sourcePath, cancellationToken);
+			await using (var sourceStream = sourceFile.OpenRead())
+			await using (var destStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, this.ChunkSize, useAsync: true))
+			{
+				await sourceStream.CopyToAsync2(destStream, this.ChunkSize, cancellationToken).ConfigureAwait(false);
+			}
+
+			if (this.PreserveTimestamps.IsPresent)
+			{
+				this.WriteVerboseSafe(
+					$"Copy-TBOSmbItem: source metadata for '{sourcePath}' is unavailable from the configured file-system provider; file timestamps were not preserved.");
 			}
 		}
 
@@ -1080,6 +1270,154 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 			return destinationPath;
 		}
 
+		private static ISmbFileSystem? TryGetCustomSourceFileSystem(
+			ISmbProviderInfo smb,
+			ResolvedPath source,
+			ResolvedPath destination)
+		{
+			if (source.Kind != PathKind.Smb || destination.Kind != PathKind.Local || source.HasTimeWarpToken)
+				return null;
+
+			if (smb is ISmbFileSystemProvider provider)
+				return provider.FileSystem;
+
+			return null;
+		}
+
+		private static (bool Exists, bool IsDirectory) TryGetSmbSourceInfoViaFileSystem(
+			ISmbFileSystem sourceFileSystem,
+			UncPath sourcePath,
+			CancellationToken cancellationToken)
+		{
+			ISmbDirectory? sourceDirectory = null;
+			try
+			{
+				sourceDirectory = sourceFileSystem.OpenDirectory(sourcePath, cancellationToken);
+				return (true, true);
+			}
+			catch
+			{
+			}
+			finally
+			{
+				sourceDirectory?.Dispose();
+			}
+
+			ISmbFile? sourceFile = null;
+			try
+			{
+				sourceFile = sourceFileSystem.OpenFileRead(sourcePath, cancellationToken);
+				return (true, false);
+			}
+			catch
+			{
+				return (false, false);
+			}
+			finally
+			{
+				sourceFile?.Dispose();
+			}
+		}
+
+		private bool ShouldFollowSmbReparseDirectory(
+			Smb2DirEntry entry,
+			UncPath reparsePath,
+			HashSet<ulong> followedReparseDirectoryIds,
+			out string skipReason)
+		{
+			if (!this.FollowReparse.IsPresent)
+			{
+				skipReason = BuildSkippedSmbReparseDirectoryMessage(reparsePath, entry.ReparseTag);
+				return false;
+			}
+
+			if (entry.FileId != 0 && !followedReparseDirectoryIds.Add(entry.FileId))
+			{
+				skipReason =
+					$"Copy-TBOSmbItem skipped reparse directory '{reparsePath}' to avoid a traversal cycle (revisited file ID 0x{entry.FileId:X16}).";
+				return false;
+			}
+
+			skipReason = string.Empty;
+			return true;
+		}
+
+		private bool ShouldFollowLocalReparseDirectory(
+			DirectoryInfo directory,
+			HashSet<string> followedReparseTargets,
+			out string skipReason)
+		{
+			if (!this.FollowReparse.IsPresent)
+			{
+				skipReason = BuildSkippedLocalReparseDirectoryMessage(directory.FullName);
+				return false;
+			}
+
+			var trackingKey = GetLocalReparseTrackingKey(directory);
+			if (!followedReparseTargets.Add(trackingKey))
+			{
+				skipReason =
+					$"Copy-TBOSmbItem skipped reparse directory '{directory.FullName}' to avoid a traversal cycle (resolved target '{trackingKey}' was already visited).";
+				return false;
+			}
+
+			skipReason = string.Empty;
+			return true;
+		}
+
+		private static string GetLocalReparseTrackingKey(DirectoryInfo directory)
+		{
+			try
+			{
+				var resolvedTarget = directory.ResolveLinkTarget(returnFinalTarget: true);
+				if (resolvedTarget != null && !string.IsNullOrWhiteSpace(resolvedTarget.FullName))
+					return Path.GetFullPath(resolvedTarget.FullName);
+			}
+			catch
+			{
+			}
+
+			return Path.GetFullPath(directory.FullName);
+		}
+
+		private static bool IsProjectedReparseTag(Winterop.ReparseTag tag)
+		{
+			return tag == Winterop.ReparseTag.ProjectedFS
+				|| tag == Winterop.ReparseTag.ProjFSTombstone;
+		}
+
+		private static string BuildSkippedSmbReparseDirectoryMessage(UncPath reparsePath, Winterop.ReparseTag tag)
+		{
+			var tagDescription = $"{tag} (0x{(uint)tag:X8})";
+			if (IsProjectedReparseTag(tag))
+			{
+				return
+					$"Copy-TBOSmbItem skipped projected filesystem reparse directory '{reparsePath}' (tag {tagDescription}). Use -FollowReparse to traverse reparse directories.";
+			}
+
+			return
+				$"Copy-TBOSmbItem skipped reparse directory '{reparsePath}' (tag {tagDescription}). Use -FollowReparse to traverse reparse directories.";
+		}
+
+		private static string BuildFollowingSmbReparseDirectoryMessage(UncPath reparsePath, Winterop.ReparseTag tag)
+		{
+			var tagDescription = $"{tag} (0x{(uint)tag:X8})";
+			if (IsProjectedReparseTag(tag))
+				return $"Copy-TBOSmbItem following projected filesystem reparse directory '{reparsePath}' (tag {tagDescription}).";
+
+			return $"Copy-TBOSmbItem following reparse directory '{reparsePath}' (tag {tagDescription}).";
+		}
+
+		private static string BuildSkippedLocalReparseDirectoryMessage(string reparsePath)
+		{
+			return $"Copy-TBOSmbItem skipped reparse directory '{reparsePath}'. Use -FollowReparse to traverse reparse directories.";
+		}
+
+		private static string BuildFollowingLocalReparseDirectoryMessage(string reparsePath)
+		{
+			return $"Copy-TBOSmbItem following reparse directory '{reparsePath}'.";
+		}
+
 		private static void ApplyLocalBasicInfo(string destinationPath, Smb2FileBasicInfo basicInfo)
 		{
 			if (basicInfo == null)
@@ -1192,6 +1530,21 @@ public sealed class CopyTBOSmbItem : SmbCmdlet
 		private bool ShouldProcessCopy(string sourceDisplay, string destinationDisplay)
 		{
 			return this.ShouldProcess(destinationDisplay, $"Copy from {sourceDisplay}");
+		}
+
+		private void WriteVerboseSafe(string message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return;
+
+			try
+			{
+				this.WriteVerbose(message);
+			}
+			catch (PSInvalidOperationException)
+			{
+				// Ignore verbose writes that occur off the PowerShell pipeline thread.
+			}
 		}
 
 		private readonly struct SnapshotPath
