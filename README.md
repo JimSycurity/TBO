@@ -23,7 +23,11 @@ Set-Location tbo:\
 Get-ChildItem
 ```
 
-[Usage Examples](Docs\Usage.md)
+## Documentation
+
+- Start here: [Docs/Guide.md](Docs/Guide.md)
+- Docs index: [Docs/README.md](Docs/README.md)
+- Cmdlet/provider reference: [Docs/Usage.md](Docs/Usage.md)
 
 
 This software was written almost exclusively with the use of agentic coding. As such, it primarily contains code pilfered and regurgitated from elsewhere. However, there were specific choices to base some aspects of the code on SharpDPAPI and BackupOperatorToolkit.

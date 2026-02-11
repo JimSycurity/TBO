@@ -4,18 +4,17 @@ using System.Globalization;
 using System.IO;
 using System.Management.Automation.Provider;
 using System.Text;
-using Titanis.Smb2;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
 	internal sealed class SmbContentWriter : IContentWriter
 	{
-		private readonly Smb2FileStream _stream;
+		private readonly Stream _stream;
 		private readonly StreamWriter _writer;
 		private readonly bool _noNewline;
 		private bool _disposed;
 
-		internal SmbContentWriter(Smb2FileStream stream, Encoding encoding, bool noNewline)
+		internal SmbContentWriter(Stream stream, Encoding encoding, bool noNewline)
 		{
 			if (stream is null) throw new ArgumentNullException(nameof(stream));
 			if (encoding is null) throw new ArgumentNullException(nameof(encoding));

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Management.Automation;
 using System.Security.Cryptography;
@@ -30,7 +31,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	[OutputType(typeof(TboRegCachedCredentialInfo))]
 	public sealed class GetTBORegCachedCredentials : TboRegLsaSecretCmdlet
 	{
-		private const string CachePath = @"SECURITY\Cache";
+		private const string SecurityCacheKeyPath = @"SECURITY\Cache";
 
 		[Parameter(Position = 1)]
 		public string[]? Name { get; set; }
@@ -41,8 +42,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter(ValueFromPipelineByPropertyName = true)]
 		public string? LsaKey { get; set; }
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
 			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
 				var lsaKey = ResolveLsaKey(
@@ -68,11 +76,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 
 				vistaOrLater = IsVistaOrLaterCache(lsaKeySource, nlkm);
+				var cacheVersion = vistaOrLater ? 2 : 1;
+				var dccKind = cacheVersion == 2 ? "DCC2" : "DCC1";
 
 				var cacheSpec = new RegistryPathSpec(
 					RegistryRootKey.LocalMachine,
 					RemoteRegistryClient.GetRootName(RegistryRootKey.LocalMachine),
-					CachePath);
+					SecurityCacheKeyPath);
 
 				using var cacheKey = OpenRegistryKey(session.Client, cacheSpec, RegistryAccessRights.QueryValue, cancellationToken);
 				List<RegistryValueInfo> values;
@@ -106,13 +116,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (!TryParseCacheEntry(cacheBytes, vistaOrLater, nlkm, out var entry))
 						continue;
 
-					this.WriteObject(new TboRegCachedCredentialInfo
+					var info = new TboRegCachedCredentialInfo
 					{
 						ServerName = this.ServerName,
 						Name = value.Name,
-						KeyPath = $"HKEY_LOCAL_MACHINE\\{CachePath}\\{value.Name}",
+						KeyPath = $"HKEY_LOCAL_MACHINE\\{SecurityCacheKeyPath}\\{value.Name}",
 						IterationCount = iterationCount,
-						CacheVersion = vistaOrLater ? 2 : 1,
+						CacheVersion = cacheVersion,
 						UserName = entry.UserName,
 						DomainName = entry.DomainName,
 						DnsDomainName = entry.DnsDomainName,
@@ -120,7 +130,39 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						DccHashHex = entry.Hash?.ToHexString(),
 						EncryptedBytes = cacheBytes,
 						DecryptedBytes = entry.DecryptedBytes
-					});
+					};
+
+					if (ingestCache && !string.IsNullOrWhiteSpace(info.DccHashHex))
+					{
+						try
+						{
+							var contextJson = $"{{\"cacheValue\":\"{value.Name}\",\"iterationCount\":{iterationCount.ToString(CultureInfo.InvariantCulture)},\"cacheVersion\":{cacheVersion.ToString(CultureInfo.InvariantCulture)}}}";
+							TboCacheIngestion.AddObservation(new TboCacheIngestion.AddObservationArgs
+							{
+								ServerName = this.ServerName,
+								SourceKind = "Get-TBORegCachedCredentials",
+								SourcePath = info.KeyPath,
+
+								PrincipalDomain = entry.DomainName,
+								PrincipalName = entry.UserName,
+								PrincipalType = "DomainUser",
+
+								CredentialKind = dccKind,
+								CredentialIdentifier = info.DccHashHex,
+
+								Confidence = 100,
+								ContextJson = contextJson,
+								CachePath = this.CachePath
+							}, msg => LogDiagnostic(smb, msg));
+						}
+						catch (Exception ex)
+						{
+							this.LogException(smb, $"Get-TBORegCachedCredentials failed to write cache observation for {this.ServerName}", ex);
+							this.LogWarning(smb, $"Get-TBORegCachedCredentials cache write failed: {ex.Message}");
+						}
+					}
+
+					this.WriteObject(info);
 				}
 			});
 		}
@@ -309,6 +351,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			return true;
+		}
+
+		private static void LogDiagnostic(ISmbProviderInfo smb, string message)
+		{
+			if (smb is SmbProviderInfo provider)
+				provider.LogDiagnostic(message);
 		}
 
 	}

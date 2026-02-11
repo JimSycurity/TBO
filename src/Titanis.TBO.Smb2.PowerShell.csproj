@@ -6,6 +6,14 @@
     <RootNamespace>Titanis.Tbo.Smb2.PowerShell</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!--
+      This project is loaded directly as a PowerShell binary module. When built (not published) into a
+      standalone folder (e.g. `dotnet build -o C:\Temp\Titanis.TBO.Smb2`), NuGet runtime assemblies and
+      native assets (e.g. Microsoft.Data.Sqlite + e_sqlite3) must be copied next to the module binary so
+      PowerShell can resolve them without a .deps.json host.
+    -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>
@@ -42,8 +50,14 @@
 
   <ItemGroup>
     <PackageReference Include="PowerShellStandard.Library" />
-    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!--
+      Explicit version required. If omitted, NuGet may restore the oldest available version (observed: 1.0.0),
+      which requires a system sqlite3 DLL and breaks cache operations/tests on Windows.
+    -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.0" />
     <PackageReference Include="plist-cil" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup Condition=" '$(TitanisRepoRoot)' != '' ">
@@ -55,6 +69,7 @@
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Msrrp\Titanis.Msrpc.Msrrp.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Msscmr.Core\Titanis.Msrpc.Msscmr.Core.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\msrpc\Titanis.Msrpc.Mssrvs\Titanis.Msrpc.Mssrvs.csproj" />
+    <ProjectReference Include="$(TitanisRepoRoot)\src\net\Titanis.Socks\Titanis.Socks.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\net\Titanis.Smb2\Titanis.Smb2.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\security\Titanis.Security.Kerberos\Titanis.Security.Kerberos.csproj" />
     <ProjectReference Include="$(TitanisRepoRoot)\src\security\Titanis.Security.Ntlm\Titanis.Security.Ntlm.csproj" />

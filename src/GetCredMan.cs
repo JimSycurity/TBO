@@ -252,7 +252,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			var input = this.InputObject;
-			var serverName = input?.ServerName ?? CredManHelpers.NormalizeServerName(this.ServerName);
+			var serverName = CredManHelpers.NormalizeServerName(input?.ServerName ?? this.ServerName);
 			if (string.IsNullOrWhiteSpace(serverName))
 				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
 
@@ -271,21 +271,24 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var fileSystem = SmbFileSystemResolver.Resolve(smb);
 			var masterKey = ResolveMasterKey();
 			var masterKeySet = ResolveMasterKeySet(smb);
+			if (masterKeySet.Count > 0)
+				TboDpapiMasterKeyCache.TrySetMany(smb, serverName, masterKeySet);
 			if ((this.MasterKeyBytes != null || !string.IsNullOrWhiteSpace(this.MasterKey)) && (masterKey == null || masterKey.Length == 0))
 				throw new ArgumentException("MasterKey must be provided (hex) or MasterKeyBytes must be set.", nameof(this.MasterKey));
 			if (this.MasterKeys != null && this.MasterKeys.Length > 0 && masterKeySet.Count == 0)
 				this.LogWarning(smb, "Get-TBOCredManEntry did not receive any usable master keys (missing MasterKeyGuid or MasterKey).");
 			var entropy = ResolveEntropy();
-			ReadCredManFile(smb, fileSystem, uncPath, input, masterKey, masterKeySet, entropy);
+			ReadCredManFile(smb, fileSystem, serverName, uncPath, input, masterKey, masterKeySet, entropy);
 		}
 
 		private void ReadCredManFile(
 			ISmbProviderInfo smb,
 			ISmbFileSystem fileSystem,
+			string serverName,
 			UncPath path,
 			TboCredManFileInfo? input,
 			byte[]? masterKey,
-			IReadOnlyDictionary<Guid, byte[]> masterKeySet,
+			Dictionary<Guid, byte[]> masterKeySet,
 			byte[]? entropy)
 		{
 			byte[]? buffer = null;
@@ -322,8 +325,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw;
 			}
 
-			int? offset = CredManHelpers.FindDpapiOffset(buffer.AsSpan(0, bytesRead));
-			var decryptResult = TryDecryptBlob(buffer.AsSpan(0, bytesRead), offset, masterKey, masterKeySet, entropy);
+			var fileSpan = buffer.AsSpan(0, bytesRead);
+			int? offset = CredManHelpers.FindDpapiOffset(fileSpan);
+			TryLoadCachedMasterKey(smb, serverName, fileSpan, offset, masterKey, masterKeySet);
+			var decryptResult = TryDecryptBlob(fileSpan, offset, masterKey, masterKeySet, entropy);
 			var cleartextBytes = decryptResult.Cleartext;
 			if (cleartextBytes == null && !string.IsNullOrWhiteSpace(decryptResult.FailureReason))
 			{
@@ -346,8 +351,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					this.MaxBytes,
 					masterKey,
 					masterKeySet,
-					entropy,
-					message => this.LogVerbose(smb, message));
+				entropy,
+				message => this.LogVerbose(smb, message));
 			}
 			this.WriteObject(new TboCredManEntryInfo
 			{
@@ -380,6 +385,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				HmacValidated = decryptResult.HmacValidated,
 				FailureReason = decryptResult.FailureReason
 			});
+		}
+
+		private void TryLoadCachedMasterKey(
+			ISmbProviderInfo smb,
+			string serverName,
+			ReadOnlySpan<byte> fileBytes,
+			int? dpapiBlobOffset,
+			byte[]? explicitMasterKey,
+			Dictionary<Guid, byte[]> masterKeySet)
+		{
+			if (explicitMasterKey != null && explicitMasterKey.Length > 0)
+				return;
+			if (!dpapiBlobOffset.HasValue || dpapiBlobOffset.Value < 0 || dpapiBlobOffset.Value >= fileBytes.Length)
+				return;
+
+			if (!DpapiBlobCrypto.TryParseHeader(fileBytes, dpapiBlobOffset.Value, out var header, out _))
+				return;
+			if (header.GuidMasterKey == Guid.Empty)
+				return;
+			if (masterKeySet.TryGetValue(header.GuidMasterKey, out var existing) && existing != null && existing.Length > 0)
+				return;
+
+			if (TboDpapiMasterKeyCache.TryGet(smb, serverName, header.GuidMasterKey, out var cached) && cached != null && cached.Length > 0)
+			{
+				masterKeySet[header.GuidMasterKey] = cached;
+			}
 		}
 
 		private static int ReadPrefix(Stream stream, byte[] buffer)
@@ -573,7 +604,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return null;
 		}
 
-		private IReadOnlyDictionary<Guid, byte[]> ResolveMasterKeySet(ISmbProviderInfo smb)
+		private Dictionary<Guid, byte[]> ResolveMasterKeySet(ISmbProviderInfo smb)
 		{
 			if (this.MasterKeys == null || this.MasterKeys.Length == 0)
 				return new Dictionary<Guid, byte[]>();

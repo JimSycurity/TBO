@@ -45,6 +45,23 @@ function Import-TboModuleForTests {
 		throw 'Unable to locate repo root to import module.'
 	}
 
+	# Pester may import the binary module from publish output when validating Get-Help content.
+	# Avoid trying to load the same assembly identity from a different path, which can throw.
+	if (Get-Module -Name 'Titanis.TBO.Smb2.PowerShell' -ErrorAction SilentlyContinue) {
+		return $RepoRoot
+	}
+
+	# Prefer publish output when available. The project is a class library, so `dotnet build` output
+	# may not include NuGet runtime dependencies next to the module binary.
+	$publishRoot = Get-TboPublishRoot -RepoRoot $RepoRoot
+	if ($publishRoot) {
+		$publishBinary = Join-Path $publishRoot 'Titanis.TBO.Smb2.PowerShell.dll'
+		if (Test-Path -LiteralPath $publishBinary) {
+			Import-Module -Name $publishBinary -Force -ErrorAction Stop | Out-Null
+			return $RepoRoot
+		}
+	}
+
 	$binaryCandidates = @(
 		(Join-Path $RepoRoot 'src\bin\Release\net8.0\Titanis.TBO.Smb2.PowerShell.dll'),
 		(Join-Path $RepoRoot 'src\bin\Debug\net8.0\Titanis.TBO.Smb2.PowerShell.dll')

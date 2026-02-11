@@ -11,6 +11,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	public sealed class GetTBORegSecurityDescriptor : TboRegCmdlet
 	{
 		private const RegistryAccessRights ReadControl = (RegistryAccessRights)0x00020000;
+		private const RegistryAccessRights AccessSystemSecurity = (RegistryAccessRights)0x01000000;
 
 		[Parameter(Mandatory = true, Position = 1, ValueFromPipeline = true, ValueFromPipelineByPropertyName = true)]
 		[Alias("KeyPath")]
@@ -45,8 +46,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			ExecuteRegistryOperation(smb, cancellationToken, session =>
 			{
-				var access = RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys | ReadControl;
-				using var key = OpenRegistryKey(session.Client, parsedPath, access, cancellationToken);
+				var access = ResolveRegistryAccess(this.Sections);
+				var rootAccess = ResolveRootRegistryAccess(parsedPath, access);
+				using var key = OpenRegistryKey(session.Client, parsedPath, access, rootAccess, cancellationToken);
 
 				var sdBytes = key.QuerySecurity(this.Sections, cancellationToken).GetAwaiter().GetResult();
 				if (sdBytes.Length == 0)
@@ -58,6 +60,28 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var descriptor = SecurityDescriptorHelpers.FromBytes(sdBytes);
 				this.WriteObject(SecurityDescriptorHelpers.Format(descriptor, format));
 			});
+		}
+
+		private static RegistryAccessRights ResolveRegistryAccess(SecurityInfo sections)
+		{
+			var access = RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys | ReadControl;
+			if (sections.HasFlag(SecurityInfo.Sacl)
+				|| sections.HasFlag(SecurityInfo.ProtectedSacl)
+				|| sections.HasFlag(SecurityInfo.UnprotectedSacl))
+			{
+				access |= AccessSystemSecurity;
+			}
+
+			return access;
+		}
+
+		private static RegistryAccessRights? ResolveRootRegistryAccess(RegistryPathSpec path, RegistryAccessRights access)
+		{
+			if (path.IsRoot)
+				return null;
+
+			var wow64 = access & (RegistryAccessRights.Wow64_Use64 | RegistryAccessRights.Wow64_Use32);
+			return RegistryAccessRights.EnumerateSubkeys | RegistryAccessRights.QueryValue | ReadControl | wow64;
 		}
 	}
 }

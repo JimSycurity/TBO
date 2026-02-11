@@ -143,6 +143,172 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	internal static class DpapiBlobCrypto
 	{
+		internal sealed class DpapiBlobHeader
+		{
+			internal uint Version { get; init; }
+			internal Guid GuidCredential { get; init; }
+			internal uint MasterKeyVersion { get; init; }
+			internal Guid GuidMasterKey { get; init; }
+			internal uint Flags { get; init; }
+
+			internal string? Description { get; init; }
+			internal uint? CryptAlgorithm { get; init; }
+			internal uint? CryptAlgorithmLength { get; init; }
+			internal uint? HashAlgorithm { get; init; }
+			internal uint? HashAlgorithmLength { get; init; }
+		}
+
+		// Best-effort header parsing for triage/caching scenarios where we only need GUIDs + basic metadata.
+		// Returns true if the fixed portion of the header (version, GUIDs, flags) was parsed.
+		internal static bool TryParseHeader(ReadOnlySpan<byte> data, int offset, out DpapiBlobHeader header, out string? failureReason)
+		{
+			header = new DpapiBlobHeader();
+			failureReason = null;
+
+			if (data.IsEmpty)
+			{
+				failureReason = "DPAPI blob data was empty.";
+				return false;
+			}
+
+			if (offset < 0 || offset >= data.Length)
+			{
+				failureReason = "Offset must be within the data bounds.";
+				return false;
+			}
+
+			int pos = offset;
+
+			static bool TryReadUInt32(ReadOnlySpan<byte> buffer, ref int at, out uint value)
+			{
+				value = 0;
+				if (buffer.Length - at < 4)
+					return false;
+				value = BinaryPrimitives.ReadUInt32LittleEndian(buffer.Slice(at, 4));
+				at += 4;
+				return true;
+			}
+
+			static bool TryReadGuid(ReadOnlySpan<byte> buffer, ref int at, out Guid value)
+			{
+				value = default;
+				if (buffer.Length - at < 16)
+					return false;
+				value = new Guid(buffer.Slice(at, 16));
+				at += 16;
+				return true;
+			}
+
+			static bool TrySkip(ReadOnlySpan<byte> buffer, ref int at, uint length)
+			{
+				if (length > int.MaxValue)
+					return false;
+				var len = unchecked((int)length);
+				if (buffer.Length - at < len)
+					return false;
+				at += len;
+				return true;
+			}
+
+			if (!TryReadUInt32(data, ref pos, out var version)
+				|| !TryReadGuid(data, ref pos, out var guidCredential)
+				|| !TryReadUInt32(data, ref pos, out var masterKeyVersion)
+				|| !TryReadGuid(data, ref pos, out var guidMasterKey)
+				|| !TryReadUInt32(data, ref pos, out var flags))
+			{
+				failureReason = "DPAPI blob header is truncated.";
+				return false;
+			}
+
+			string? description = null;
+			uint? cryptAlgo = null;
+			uint? cryptAlgoLen = null;
+			uint? hashAlgo = null;
+			uint? hashAlgoLen = null;
+
+			DpapiBlobHeader BuildHeader()
+			{
+				return new DpapiBlobHeader
+				{
+					Version = version,
+					GuidCredential = guidCredential,
+					MasterKeyVersion = masterKeyVersion,
+					GuidMasterKey = guidMasterKey,
+					Flags = flags,
+					Description = description,
+					CryptAlgorithm = cryptAlgo,
+					CryptAlgorithmLength = cryptAlgoLen,
+					HashAlgorithm = hashAlgo,
+					HashAlgorithmLength = hashAlgoLen
+				};
+			}
+
+			if (!TryReadUInt32(data, ref pos, out var descriptionLen))
+			{
+				header = BuildHeader();
+				failureReason = "DPAPI blob is truncated (description length missing).";
+				return true;
+			}
+
+			if (descriptionLen > 0)
+			{
+				if (!TrySkip(data, ref pos, descriptionLen))
+				{
+					header = BuildHeader();
+					failureReason = "DPAPI blob is truncated (description bytes missing).";
+					return true;
+				}
+
+				try
+				{
+					// Decode from the original slice. We already advanced pos, so re-slice to the correct window.
+					var descStart = pos - unchecked((int)descriptionLen);
+					description = Encoding.Unicode.GetString(data.Slice(descStart, unchecked((int)descriptionLen))).TrimEnd('\0');
+				}
+				catch
+				{
+					description = null;
+				}
+			}
+
+			if (!TryReadUInt32(data, ref pos, out var cryptAlgoValue) || !TryReadUInt32(data, ref pos, out var cryptAlgoLenValue))
+			{
+				header = BuildHeader();
+				failureReason = "DPAPI blob is truncated (cipher algorithm missing).";
+				return true;
+			}
+
+			cryptAlgo = cryptAlgoValue;
+			cryptAlgoLen = cryptAlgoLenValue;
+
+			if (!TryReadUInt32(data, ref pos, out var saltLen) || !TrySkip(data, ref pos, saltLen))
+			{
+				header = BuildHeader();
+				failureReason = "DPAPI blob is truncated (salt missing).";
+				return true;
+			}
+
+			if (!TryReadUInt32(data, ref pos, out var hmacKeyLen) || !TrySkip(data, ref pos, hmacKeyLen))
+			{
+				header = BuildHeader();
+				failureReason = "DPAPI blob is truncated (HMAC key missing).";
+				return true;
+			}
+
+			if (!TryReadUInt32(data, ref pos, out var hashAlgoValue) || !TryReadUInt32(data, ref pos, out var hashAlgoLenValue))
+			{
+				header = BuildHeader();
+				failureReason = "DPAPI blob is truncated (hash algorithm missing).";
+				return true;
+			}
+
+			hashAlgo = hashAlgoValue;
+			hashAlgoLen = hashAlgoLenValue;
+
+			header = BuildHeader();
+			return true;
+		}
+
 		private sealed class HashAlgorithmInfo
 		{
 			public HashAlgorithmInfo(uint id, string name, HashAlgorithmName hashName, int digestLength, int blockLength)

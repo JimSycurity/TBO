@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Management.Automation;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
+using System.Text.Json;
 using System.Threading;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Winterop.Security;
@@ -28,48 +29,115 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public SecurityInfo Sections { get; set; } = SecurityInfo.Dacl;
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		internal IRegistrySecurityDescriptorWriter SecurityDescriptorWriter { get; set; } = new RegistryKeySecurityDescriptorWriter();
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
+			var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+
 			if (this.Sections == SecurityInfo.None)
 				throw new ArgumentException("Sections must include at least one SecurityInfo flag.", nameof(this.Sections));
 
 			var parsedPath = ParseRegistryPath(this.Path, nameof(this.Path));
-			var resolvedDescriptor = ResolveSecurityDescriptor(this.SecurityDescriptor);
-			var securityInfo = ResolveSecurityInfo(resolvedDescriptor, this.Sections);
+			var resolvedDescriptor = SecurityDescriptorInputHelpers.ResolveSecurityDescriptor(this.SecurityDescriptor, allowRegistryBinaryBytes: false);
+			var securityInfo = SecurityDescriptorInputHelpers.ResolveSecurityInfo(resolvedDescriptor, this.Sections);
 			var access = ResolveRegistryAccess(securityInfo);
 			var rootAccess = ResolveRootRegistryAccess(parsedPath, access);
 
-			if (!this.ShouldProcess($"{this.ServerName}:{parsedPath.KeyPath}", "Set registry security descriptor"))
+			var target = $"{this.ServerName}:{parsedPath.KeyPath}";
+			if (!this.ShouldProcess(target, "Set registry security descriptor"))
 				return;
 
-			ExecuteRegistryOperation(smb, cancellationToken, session =>
-			{
-				using var key = OpenRegistryKey(session.Client, parsedPath, access, rootAccess, cancellationToken);
+			byte[]? beforeBytes = null;
+			string? beforeReadFailure = null;
+			Exception? operationFailure = null;
+			var afterBytes = resolvedDescriptor.ToByteArray();
 
-				try
+			try
+			{
+				ExecuteRegistryOperation(smb, cancellationToken, session =>
 				{
-					this.SecurityDescriptorWriter.SetSecurity(key, securityInfo, resolvedDescriptor, cancellationToken);
-				}
-				catch (Win32Exception ex) when (ex.NativeErrorCode == 5 && !securityInfo.HasFlag(SecurityInfo.Backup))
-				{
-					// Some servers appear to require BACKUP_SECURITY_INFORMATION to honor SeRestorePrivilege for SetKeySecurity.
-					// Retry once with BACKUP_SECURITY_INFORMATION before escalating to a new handle with KEY_ALL_ACCESS.
-					var backupInfo = securityInfo | SecurityInfo.Backup;
-					this.LogVerbose(smb, $"Set-TBORegSecurityDescriptor access denied; retrying with {backupInfo}.");
+					using var key = OpenRegistryKey(session.Client, parsedPath, access, rootAccess, cancellationToken);
+
+					if (recordActivity)
+					{
+						try
+						{
+							beforeBytes = key.QuerySecurity(this.Sections, cancellationToken).GetAwaiter().GetResult();
+						}
+						catch (Exception ex)
+						{
+							beforeReadFailure = ex.Message;
+							beforeBytes = null;
+						}
+					}
+
 					try
 					{
-						this.SecurityDescriptorWriter.SetSecurity(key, backupInfo, resolvedDescriptor, cancellationToken);
+						this.SecurityDescriptorWriter.SetSecurity(key, securityInfo, resolvedDescriptor, cancellationToken);
 					}
-					catch (Win32Exception ex2) when (ex2.NativeErrorCode == 5)
+					catch (Win32Exception ex) when (ex.NativeErrorCode == 5 && !securityInfo.HasFlag(SecurityInfo.Backup))
 					{
-						this.LogVerbose(smb, "Set-TBORegSecurityDescriptor still access denied; retrying with KEY_ALL_ACCESS handle.");
-						using var keyAll = OpenRegistryKey(session.Client, parsedPath, KeyAllAccess, rootAccess, cancellationToken);
-						this.SecurityDescriptorWriter.SetSecurity(keyAll, backupInfo, resolvedDescriptor, cancellationToken);
+						// Some servers appear to require BACKUP_SECURITY_INFORMATION to honor SeRestorePrivilege for SetKeySecurity.
+						// Retry once with BACKUP_SECURITY_INFORMATION before escalating to a new handle with KEY_ALL_ACCESS.
+						var backupInfo = securityInfo | SecurityInfo.Backup;
+						this.LogVerbose(smb, $"Set-TBORegSecurityDescriptor access denied; retrying with {backupInfo}.");
+						try
+						{
+							this.SecurityDescriptorWriter.SetSecurity(key, backupInfo, resolvedDescriptor, cancellationToken);
+						}
+						catch (Win32Exception ex2) when (ex2.NativeErrorCode == 5)
+						{
+							this.LogVerbose(smb, "Set-TBORegSecurityDescriptor still access denied; retrying with KEY_ALL_ACCESS handle.");
+							using var keyAll = OpenRegistryKey(session.Client, parsedPath, KeyAllAccess, rootAccess, cancellationToken);
+							this.SecurityDescriptorWriter.SetSecurity(keyAll, backupInfo, resolvedDescriptor, cancellationToken);
+						}
 					}
+				});
+			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
+			}
+			finally
+			{
+				string? contextJson = null;
+				if (recordActivity)
+				{
+					contextJson = JsonSerializer.Serialize(new
+					{
+						sections = this.Sections.ToString(),
+						beforeReadFailure
+					});
 				}
-			});
+
+				TboCacheWriteActivities.TryRecord(
+					cmdlet: this,
+					smb: smb,
+					enabled: recordActivity,
+					cachePath: this.CachePath,
+					serverName: this.ServerName,
+					kind: TboCacheWriteActivities.KindRegistry,
+					action: TboCacheWriteActivities.ActionSetSecurityDescriptor,
+					target: target,
+					path: parsedPath.KeyPath,
+					valueName: null,
+					valueType: null,
+					beforeBlobKind: beforeBytes != null ? TboCacheWriteActivities.BlobKindSecurityDescriptor : null,
+					beforeBlob: beforeBytes,
+					afterBlobKind: TboCacheWriteActivities.BlobKindSecurityDescriptor,
+					afterBlob: afterBytes,
+					contextJson: contextJson,
+					success: operationFailure == null,
+					failureReason: operationFailure?.Message);
+			}
 		}
 
 		private static RegistryAccessRights? ResolveRootRegistryAccess(RegistryPathSpec path, RegistryAccessRights access)
@@ -94,63 +162,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				access |= WriteDac;
 			if (sections.HasFlag(SecurityInfo.Owner) || sections.HasFlag(SecurityInfo.Group))
 				access |= WriteOwner;
-			if (sections.HasFlag(SecurityInfo.Sacl))
+			if (sections.HasFlag(SecurityInfo.Sacl)
+				|| sections.HasFlag(SecurityInfo.ProtectedSacl)
+				|| sections.HasFlag(SecurityInfo.UnprotectedSacl))
 				access |= AccessSystemSecurity;
 
 			return access;
 		}
 
-		private static SecurityDescriptor ResolveSecurityDescriptor(object input)
-		{
-			if (input is PSObject psObject)
-				input = psObject.BaseObject;
-
-			switch (input)
-			{
-				case SecurityDescriptor descriptor:
-					return descriptor;
-				case byte[] bytes:
-					return SecurityDescriptorHelpers.FromBytes(bytes);
-				case string sddl:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("SDDL input is only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromSddl(sddl);
-				case RawSecurityDescriptor rawDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromWindowsSecurityDescriptor(rawDescriptor);
-				case CommonSecurityDescriptor commonDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromWindowsSecurityDescriptor(commonDescriptor);
-				case GenericSecurityDescriptor genericDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					var buffer = new byte[genericDescriptor.BinaryLength];
-					genericDescriptor.GetBinaryForm(buffer, 0);
-					return SecurityDescriptorHelpers.FromBytes(buffer);
-				default:
-					throw new ArgumentException("SecurityDescriptor must be a Titanis SecurityDescriptor, SDDL string (Windows only), raw byte array, or Windows security descriptor.", nameof(input));
-			}
-		}
-
-		private static SecurityInfo ResolveSecurityInfo(SecurityDescriptor securityDescriptor, SecurityInfo requestedSections)
-		{
-			if (securityDescriptor is null) throw new ArgumentNullException(nameof(securityDescriptor));
-
-			if (requestedSections == SecurityInfo.None)
-				throw new ArgumentException("Sections must include at least one SecurityInfo flag.", nameof(requestedSections));
-
-			if (requestedSections.HasFlag(SecurityInfo.Owner) && securityDescriptor.Owner == null)
-				throw new ArgumentException("Security descriptor does not include an owner section.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Group) && securityDescriptor.Group == null)
-				throw new ArgumentException("Security descriptor does not include a group section.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Dacl) && securityDescriptor.Dacl == null)
-				throw new ArgumentException("Security descriptor does not include a DACL.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Sacl) && securityDescriptor.Sacl == null)
-				throw new ArgumentException("Security descriptor does not include a SACL.", nameof(securityDescriptor));
-
-			return requestedSections;
-		}
 	}
 }

@@ -7,7 +7,7 @@ using Titanis.Smb2;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
-	public partial class SmbProviderInfo : IRegistrySessionProvider, IRegistrySessionInvalidator
+	public partial class SmbProviderInfo : IRegistrySessionProvider, IRegistrySessionInvalidator, IRegistrySecretCacheStore
 	{
 		private readonly object _registrySessionLock = new();
 		private readonly Dictionary<RegistrySessionKey, RegistrySessionCacheEntry> _registrySessions = new(RegistrySessionKeyComparer.Instance);
@@ -20,6 +20,29 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		void IRegistrySessionInvalidator.InvalidateAllRegistrySessions(RegistrySessionInvalidationReason reason)
 			=> this.InvalidateRegistrySessions(null, reason);
+
+		RegistrySecretCache IRegistrySecretCacheStore.GetOrCreateRegistrySecretCache(string serverName)
+		{
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("Server name must be provided.", nameof(serverName));
+
+			var parms = this.GetConnectParametersFor(serverName, true) as SmbConnectionParameters;
+			var port = parms?.RemotePort ?? Smb2Client.TcpPort;
+			var fingerprint = BuildRegistrySessionFingerprint(parms);
+			var key = new RegistrySessionKey(serverName, port, fingerprint);
+
+			RegistrySessionCacheEntry entry;
+			lock (_registrySessionLock)
+			{
+				if (!this._registrySessions.TryGetValue(key, out entry))
+				{
+					entry = new RegistrySessionCacheEntry(this, serverName, port, fingerprint);
+					this._registrySessions.Add(key, entry);
+				}
+			}
+
+			return entry.SecretCache;
+		}
 
 		internal IRegistrySession GetOrCreateRegistrySession(string serverName, CancellationToken cancellationToken)
 		{
@@ -52,6 +75,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var builder = new StringBuilder(256);
 			AppendFingerprint(builder, parms.HostName);
 			AppendFingerprint(builder, parms.RemotePort);
+			AppendFingerprint(builder, parms.Socks5Proxy);
 			AppendFingerprint(builder, parms.UserName);
 			AppendFingerprint(builder, parms.UserDomain);
 			AppendFingerprint(builder, parms.Password);

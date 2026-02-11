@@ -60,6 +60,25 @@ Describe 'TBO SMB cmdlets (mocked)' {
 		$script:captured.Parameters.GetType().Name | Should -Be 'SmbConnectionParameters'
 	}
 
+	It 'Set-TBOConnectOptions captures Socks5Proxy when provided' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$script:captured = $null
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-GetConnectParametersFor { param($serverName, $defaultIfNone) $null } `
+			-SetConnectParameters { param($serverName, $parameters) $script:captured = @{ Server = $serverName; Parameters = $parameters } }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			Set-TBOConnectOptions -ServerName 'fileserver' -Socks5Proxy '127.0.0.1:1080'
+		}
+
+		$script:captured.Server | Should -Be 'fileserver'
+		$script:captured.Parameters.Socks5Proxy | Should -Be '127.0.0.1:1080'
+	}
+
 	It 'Set-TBOConnectOptions merges onto existing per-server parameters' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'

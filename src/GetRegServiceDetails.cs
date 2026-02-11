@@ -86,6 +86,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string? InactivityShutdownDelay { get; init; }
 		public string? RefreshRequired { get; init; }
 		public string? ServiceMain { get; init; }
+		public string? PerformanceLibrary { get; init; }
+		public string? PerformanceOpen { get; init; }
+		public string? PerformanceCollect { get; init; }
+		public string? PerformanceClose { get; init; }
 		public string? StateFlags { get; init; }
 		public string? AttachWhenLoaded { get; init; }
 		public object? HwNClxSecurity { get; init; }
@@ -102,6 +106,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string? ServiceIdentity { get; init; }
 		public IReadOnlyList<string>? Alias { get; init; }
 		public string? ServiceHostSid { get; init; }
+		public IReadOnlyList<TboRegServiceSubkeyValueInfo>? ParametersValues { get; init; }
+		public IReadOnlyList<TboRegServiceSubkeyValueInfo>? PerformanceValues { get; init; }
 		public IReadOnlyList<string>? Subkeys { get; init; }
 		public object? SecurityDescriptor { get; init; }
 		public byte[]? SecurityDescriptorBytes { get; init; }
@@ -151,6 +157,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public object? Value { get; init; }
 	}
 
+	public sealed class TboRegServiceSubkeyValueInfo
+	{
+		public string Name { get; init; } = string.Empty;
+		public RegistryValueType ValueType { get; init; }
+		public byte[]? Bytes { get; init; }
+		public object? Value { get; init; }
+	}
+
 	[Cmdlet(VerbsCommon.Get, "TBORegServiceDetails")]
 	[OutputType(typeof(TboRegServiceDetailsInfo))]
 	public sealed class GetTBORegServiceDetails : ServiceRegistryCmdletBase
@@ -158,6 +172,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string SecretsPath = @"HKLM\SECURITY\Policy\Secrets";
 		private const string ServiceSecretPrefix = "_SC_";
 		private const string ParametersSubkeyName = "Parameters";
+		private const string PerformanceSubkeyName = "Performance";
 
 		[Parameter(Position = 1)]
 		public string Path { get; set; } = DefaultServicesPath;
@@ -346,6 +361,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var subkeys = TryCollectSubkeyNames(smb, serviceKey, cancellationToken);
 			var parametersValues = TryLoadSubkeyValues(smb, client, serviceSpec, ParametersSubkeyName, cancellationToken);
+			var performanceValues = TryLoadSubkeyValues(smb, client, serviceSpec, PerformanceSubkeyName, cancellationToken);
 			var triggerInfo = TryReadTriggerInfo(smb, client, serviceSpec, cancellationToken);
 
 			var imagePath = TryGetString(values, "ImagePath");
@@ -396,6 +412,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var inactivityShutdownDelay = FormatDword(TryGetDword(parametersValues, "InactivityShutdownDelay"));
 			var refreshRequired = FormatBool(TryGetDword(parametersValues, "RefreshRequired"));
 			var serviceMain = TryGetString(parametersValues, "ServiceMain");
+			var performanceLibrary = TryGetString(performanceValues, "Library");
+			var performanceOpen = TryGetString(performanceValues, "Open");
+			var performanceCollect = TryGetString(performanceValues, "Collect");
+			var performanceClose = TryGetString(performanceValues, "Close");
+			var parametersValueInfos = ToSubkeyValueInfos(parametersValues);
+			var performanceValueInfos = ToSubkeyValueInfos(performanceValues);
 
 			var stateFlags = FormatDword(TryGetDword(values, "StateFlags"));
 			var attachWhenLoaded = FormatBool(TryGetDword(values, "AttachWhenLoaded"));
@@ -507,6 +529,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				InactivityShutdownDelay = inactivityShutdownDelay,
 				RefreshRequired = refreshRequired,
 				ServiceMain = serviceMain,
+				PerformanceLibrary = performanceLibrary,
+				PerformanceOpen = performanceOpen,
+				PerformanceCollect = performanceCollect,
+				PerformanceClose = performanceClose,
 				StateFlags = stateFlags,
 				AttachWhenLoaded = attachWhenLoaded,
 				HwNClxSecurity = hwNclxSecurity,
@@ -523,6 +549,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				ServiceIdentity = serviceIdentity,
 				Alias = alias,
 				ServiceHostSid = serviceHostSid,
+				ParametersValues = parametersValueInfos,
+				PerformanceValues = performanceValueInfos,
 				Subkeys = subkeys,
 				SecurityDescriptor = sd,
 				SecurityDescriptorBytes = sdBytes,
@@ -688,6 +716,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				this.LogWarning(smb, $"Get-TBORegServiceDetails failed to read {subkeyName} values for '{serviceSpec.KeyPath}': {ex.Message}");
 				return null;
 			}
+		}
+
+		private static IReadOnlyList<TboRegServiceSubkeyValueInfo>? ToSubkeyValueInfos(
+			Dictionary<string, RegistryValueInfo>? values)
+		{
+			if (values == null || values.Count == 0)
+				return null;
+
+			return values.Select(entry => new TboRegServiceSubkeyValueInfo
+			{
+				Name = entry.Key,
+				ValueType = entry.Value.ValueType,
+				Bytes = entry.Value.Bytes,
+				Value = entry.Value.TypedValue
+			}).ToList();
 		}
 
 		private IReadOnlyList<TboRegServiceTriggerInfo>? TryReadTriggerInfo(

@@ -48,6 +48,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		RegistrySecretCache SecretCache { get; }
 	}
 
+	internal interface IRegistrySecretCacheStore
+	{
+		RegistrySecretCache GetOrCreateRegistrySecretCache(string serverName);
+	}
+
 	public enum RegistrySessionInvalidationReason
 	{
 		Unknown = 0,

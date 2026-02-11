@@ -4,19 +4,18 @@ using System.Collections.Generic;
 using System.IO;
 using System.Management.Automation.Provider;
 using System.Text;
-using Titanis.Smb2;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
 	internal sealed class SmbContentReader : IContentReader
 	{
-		private readonly Smb2FileStream _stream;
+		private readonly Stream _stream;
 		private readonly Encoding _encoding;
 		private readonly bool _raw;
 		private StreamReader? _reader;
 		private bool _completed;
 
-		internal SmbContentReader(Smb2FileStream stream, Encoding encoding, bool raw)
+		internal SmbContentReader(Stream stream, Encoding encoding, bool raw)
 		{
 			if (stream is null) throw new ArgumentNullException(nameof(stream));
 			if (encoding is null) throw new ArgumentNullException(nameof(encoding));

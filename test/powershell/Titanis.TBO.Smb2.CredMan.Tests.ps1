@@ -138,4 +138,67 @@ Describe 'CredMan cmdlets with fake SMB file system' {
         $entry | Should -Not -BeNullOrEmpty
         $entry.FailureReason | Should -Match 'Failed to parse DPAPI blob'
     }
+
+    It 'uses cached DPAPI master keys when explicit keys are not supplied' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $masterGuid = [Guid]::Parse('11111111-2222-3333-4444-555555555555')
+        $magic = 0x01,0x00,0x00,0x00,0xD0,0x8C,0x9D,0xDF,0x01,0x15,0xD1,0x11,0x8C,0x7A,0x00,0xC0,0x4F,0xC2,0x97,0xEB
+
+        # Minimal DPAPI blob with an unsupported cipher algorithm so decrypt fails quickly
+        # while still populating MasterKeyGuid when the key is available.
+        $blobBytes = New-Object System.Collections.Generic.List[byte]
+        $blobBytes.AddRange([byte[]]$magic)
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]1)) # MasterKeyVersion
+        $blobBytes.AddRange($masterGuid.ToByteArray())
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # Flags
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # DescriptionLen
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0xDEAD)) # CryptAlgorithm (unsupported)
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # CryptAlgorithmLength
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # SaltLen
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # HmacKeyLen
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0x8004)) # HashAlgorithm (SHA1)
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # HashAlgorithmLength
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # HmacLen
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # DataLen
+        $blobBytes.AddRange([BitConverter]::GetBytes([uint32]0)) # SignLen
+
+        $payload = [byte[]]((0xAA,0xBB,0xCC,0xDD) + $blobBytes.ToArray())
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $fake.AddDirectory('\\server\C$\Users\jsmith\AppData\Local\Microsoft\Credentials') | Out-Null
+        $fake.AddFile('\\server\C$\Users\jsmith\AppData\Local\Microsoft\Credentials\cred3', $payload) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+        $mock.AddCachedDpapiMasterKey('server', $masterGuid.ToString(), [byte[]](0x01,0x02,0x03,0x04)) | Out-Null
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            $entry = Get-TBOCredManEntry -ServerName server -Path '\\server\C$\Users\jsmith\AppData\Local\Microsoft\Credentials\cred3'
+        } finally {
+            $scope.Dispose()
+        }
+
+        $entry | Should -Not -BeNullOrEmpty
+        $entry.HasDpapiBlob | Should -BeTrue
+        $entry.DpapiBlobOffset | Should -Be 4
+        $entry.MasterKeyGuid | Should -Be $masterGuid.ToString()
+        $entry.FailureReason | Should -Match 'Unsupported cipher algorithm'
+    }
 }

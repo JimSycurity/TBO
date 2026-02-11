@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Management.Automation;
 using System.Security.AccessControl;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading;
 using Titanis;
 using Titanis.Smb2;
@@ -82,13 +83,31 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			SecurityInfo sections,
 			CancellationToken cancellationToken)
 		{
+			if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+			{
+				var provider = smb as SmbProviderInfo;
+				Action<string>? logDiagnostic = provider != null ? provider.LogDiagnostic : null;
+				Action<string>? logWarning = provider != null ? provider.LogWarning : null;
+					return LocalNtfsSecurityDescriptor.Read(
+						uncPath,
+						timeWarpToken: null,
+						sections,
+						logDiagnostic: logDiagnostic,
+						logWarning: logWarning,
+						cancellationToken: cancellationToken);
+			}
+
 			Smb2OpenFileObjectBase? file = null;
 			try
 			{
+				var desiredAccess = Smb2AccessRights.ReadControl;
+				if (sections.HasFlag(SecurityInfo.Sacl))
+					desiredAccess |= Smb2AccessRights.AccessSystemSecurity;
+
 				var createInfo = new Smb2CreateInfo
 				{
 					CreateDisposition = Smb2CreateDisposition.Open,
-					DesiredAccess = (uint)Smb2AccessRights.ReadControl,
+					DesiredAccess = (uint)desiredAccess,
 					ShareAccess = Smb2ShareAccess.ReadWriteDelete,
 					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
 					CreateOptions = Smb2FileCreateOptions.SynchronousIoNonalert,
@@ -157,21 +176,29 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public SecurityInfo Sections { get; set; } = SecurityInfo.Owner | SecurityInfo.Group | SecurityInfo.Dacl;
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		private CancellationTokenSource? _cancelSource;
 
 		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			this._cancelSource ??= new CancellationTokenSource();
 
-			var resolvedDescriptor = ResolveSecurityDescriptor(this.SecurityDescriptor);
-			var securityInfo = ResolveSecurityInfo(resolvedDescriptor, this.Sections);
+			var recordActivity = this.ResolveCacheIngestionEnabled(this.Cache);
+
+			var resolvedDescriptor = SecurityDescriptorInputHelpers.ResolveSecurityDescriptor(this.SecurityDescriptor, allowRegistryBinaryBytes: false);
+			var securityInfo = SecurityDescriptorInputHelpers.ResolveSecurityInfo(resolvedDescriptor, this.Sections);
 
 			foreach (var path in GetTargetPaths())
 			{
 				var uncPath = ResolveToUncPath(path, this.ParameterSetName);
 				if (!this.ShouldProcess(uncPath.ToString(), "Set security descriptor"))
 					continue;
-				WriteSecurityDescriptor(smb, uncPath, resolvedDescriptor, securityInfo, this._cancelSource.Token);
+				WriteSecurityDescriptor(smb, uncPath, resolvedDescriptor, securityInfo, recordActivity, this.CachePath, this._cancelSource.Token);
 			}
 		}
 
@@ -188,73 +215,69 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				: this.Path;
 		}
 
-		private static SecurityDescriptor ResolveSecurityDescriptor(object input)
-		{
-			if (input is PSObject psObject)
-				input = psObject.BaseObject;
-
-			switch (input)
-			{
-				case SecurityDescriptor descriptor:
-					return descriptor;
-				case byte[] bytes:
-					return SecurityDescriptorHelpers.FromBytes(bytes);
-				case string sddl:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("SDDL input is only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromSddl(sddl);
-				case RawSecurityDescriptor rawDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromWindowsSecurityDescriptor(rawDescriptor);
-				case CommonSecurityDescriptor commonDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					return SecurityDescriptorHelpers.FromWindowsSecurityDescriptor(commonDescriptor);
-				case GenericSecurityDescriptor genericDescriptor:
-					if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-						throw new NotSupportedException("Windows security descriptor types are only supported on Windows. Provide a byte[] or Titanis SecurityDescriptor instead.");
-					var buffer = new byte[genericDescriptor.BinaryLength];
-					genericDescriptor.GetBinaryForm(buffer, 0);
-					return SecurityDescriptorHelpers.FromBytes(buffer);
-				default:
-					throw new ArgumentException("SecurityDescriptor must be a Titanis SecurityDescriptor, SDDL string (Windows only), raw byte array, or Windows security descriptor.", nameof(input));
-			}
-		}
-
-		private static SecurityInfo ResolveSecurityInfo(SecurityDescriptor securityDescriptor, SecurityInfo requestedSections)
-		{
-			if (securityDescriptor is null) throw new ArgumentNullException(nameof(securityDescriptor));
-
-			if (requestedSections == SecurityInfo.None)
-				throw new ArgumentException("Sections must include at least one SecurityInfo flag.", nameof(requestedSections));
-
-			if (requestedSections.HasFlag(SecurityInfo.Owner) && securityDescriptor.Owner == null)
-				throw new ArgumentException("Security descriptor does not include an owner section.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Group) && securityDescriptor.Group == null)
-				throw new ArgumentException("Security descriptor does not include a group section.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Dacl) && securityDescriptor.Dacl == null)
-				throw new ArgumentException("Security descriptor does not include a DACL.", nameof(securityDescriptor));
-			if (requestedSections.HasFlag(SecurityInfo.Sacl) && securityDescriptor.Sacl == null)
-				throw new ArgumentException("Security descriptor does not include a SACL.", nameof(securityDescriptor));
-
-			return requestedSections;
-		}
-
 		private void WriteSecurityDescriptor(
 			ISmbProviderInfo smb,
 			UncPath uncPath,
 			SecurityDescriptor securityDescriptor,
 			SecurityInfo securityInfo,
+			bool recordActivity,
+			string? cachePath,
 			CancellationToken cancellationToken)
 		{
+			var target = uncPath.ToString();
+			var afterBytes = securityDescriptor.ToByteArray();
+			byte[]? beforeBytes = null;
+			string? beforeReadFailure = null;
+			Exception? operationFailure = null;
 			Smb2OpenFileObjectBase? file = null;
+
 			try
 			{
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+				{
+					var provider = smb as SmbProviderInfo;
+					Action<string>? logDiagnostic = provider != null ? provider.LogDiagnostic : null;
+					Action<string>? logWarning = provider != null ? provider.LogWarning : null;
+
+					if (recordActivity)
+					{
+						try
+						{
+							var existing = LocalNtfsSecurityDescriptor.Read(
+								uncPath,
+								timeWarpToken: null,
+								securityInfo,
+								logDiagnostic: logDiagnostic,
+								logWarning: logWarning,
+								cancellationToken: cancellationToken);
+							beforeBytes = existing.ToByteArray();
+						}
+						catch (Exception ex)
+						{
+							beforeReadFailure = ex.Message;
+							beforeBytes = null;
+						}
+					}
+
+					LocalNtfsSecurityDescriptor.Write(
+						uncPath,
+						timeWarpToken: null,
+						securityDescriptor,
+						securityInfo,
+						logDiagnostic: logDiagnostic,
+						logWarning: logWarning,
+						cancellationToken: cancellationToken);
+					return;
+				}
+
+				var desiredAccess = Smb2AccessRights.WriteDac | Smb2AccessRights.WriteOwner | Smb2AccessRights.ReadControl;
+				if (securityInfo.HasFlag(SecurityInfo.Sacl))
+					desiredAccess |= Smb2AccessRights.AccessSystemSecurity;
+
 				var createInfo = new Smb2CreateInfo
 				{
 					CreateDisposition = Smb2CreateDisposition.Open,
-					DesiredAccess = (uint)(Smb2AccessRights.WriteDac | Smb2AccessRights.WriteOwner | Smb2AccessRights.ReadControl),
+					DesiredAccess = (uint)desiredAccess,
 					ShareAccess = Smb2ShareAccess.ReadWriteDelete,
 					ImpersonationLevel = Smb2ImpersonationLevel.Impersonation,
 					CreateOptions = Smb2FileCreateOptions.SynchronousIoNonalert,
@@ -262,12 +285,64 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				};
 
 				file = smb.SmbClient.CreateFileAsync(uncPath, createInfo, FileAccess.ReadWrite, cancellationToken).GetAwaiter().GetResult();
+				if (file == null)
+					throw new InvalidOperationException($"SMB CreateFile returned null for '{uncPath}'.");
+
+				if (recordActivity)
+				{
+					try
+					{
+						var existing = file.GetSecurityAsync(securityInfo, 8192, cancellationToken).GetAwaiter().GetResult();
+						beforeBytes = existing.ToByteArray();
+					}
+					catch (Exception ex)
+					{
+						beforeReadFailure = ex.Message;
+						beforeBytes = null;
+					}
+				}
+
 				file.SetSecurityAsync(securityDescriptor, securityInfo, cancellationToken).GetAwaiter().GetResult();
+			}
+			catch (Exception ex)
+			{
+				operationFailure = ex;
+				throw;
 			}
 			finally
 			{
 				if (file != null)
 					file.CloseAsync(cancellationToken).GetAwaiter().GetResult();
+
+				string? contextJson = null;
+				if (recordActivity)
+				{
+					contextJson = JsonSerializer.Serialize(new
+					{
+						sections = securityInfo.ToString(),
+						beforeReadFailure
+					});
+				}
+
+				TboCacheWriteActivities.TryRecord(
+					cmdlet: this,
+					smb: smb,
+					enabled: recordActivity,
+					cachePath: cachePath,
+					serverName: uncPath.ServerName,
+					kind: TboCacheWriteActivities.KindFileSystem,
+					action: TboCacheWriteActivities.ActionSetSecurityDescriptor,
+					target: target,
+					path: target,
+					valueName: null,
+					valueType: null,
+					beforeBlobKind: beforeBytes != null ? TboCacheWriteActivities.BlobKindSecurityDescriptor : null,
+					beforeBlob: beforeBytes,
+					afterBlobKind: TboCacheWriteActivities.BlobKindSecurityDescriptor,
+					afterBlob: afterBytes,
+					contextJson: contextJson,
+					success: operationFailure == null,
+					failureReason: operationFailure?.Message);
 			}
 		}
 

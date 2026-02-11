@@ -82,6 +82,26 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			var securityInfo = MapSecurityInfo(sections);
 
+				// Local-mode (\\localhost\<Drive>$) uses handle-based Win32 APIs to read the security descriptor
+				// without establishing an SMB connection. When a snapshot time-warp token is present, the path
+				// is mapped to a local VSS shadow copy device object (read-only).
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(snapshotPath.ResolvedPath))
+				{
+					var sd = LocalNtfsSecurityDescriptor.Read(
+						snapshotPath.ResolvedPath,
+						snapshotPath.TimeWarpToken,
+						securityInfo,
+						DefaultSecurityDescriptorBufferSize,
+						out var isDirectory,
+						this.LogDiagnostic,
+					this.LogWarning,
+					cancellationToken);
+
+				var acl = CreateObjectSecurity(isDirectory);
+				acl.SetSecurityDescriptorBinaryForm(sd.ToByteArray(), sections);
+				return acl;
+			}
+
 			Smb2OpenFileObjectBase? file = null;
 			try
 			{
@@ -128,6 +148,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			SecurityInfo securityInfo,
 			CancellationToken cancellationToken)
 		{
+				// Local-mode (\\localhost\<Drive>$) write uses SetKernelObjectSecurity with backup/restore privileges.
+				if (OperatingSystem.IsWindows() && LocalNtfsUncPathMapper.IsSupportedLocalAdminShare(uncPath))
+				{
+					LocalNtfsSecurityDescriptor.Write(
+						uncPath,
+						timeWarpToken: null,
+						securityDescriptor,
+						securityInfo,
+						this.LogDiagnostic,
+						this.LogWarning,
+					cancellationToken);
+				return;
+			}
+
 			Smb2OpenFileObjectBase? file = null;
 			try
 			{

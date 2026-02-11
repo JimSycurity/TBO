@@ -136,9 +136,17 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
         $cmdlets | Should -Contain 'Get-TBORegKey'
         $cmdlets | Should -Contain 'Get-TBORegSecurityDescriptor'
         $cmdlets | Should -Contain 'Set-TBORegSecurityDescriptor'
+        $cmdlets | Should -Contain 'Get-TBOEnvironmentVariable'
+        $cmdlets | Should -Contain 'Set-TBOEnvironmentVariable'
+        $cmdlets | Should -Contain 'Remove-TBOEnvironmentVariable'
         $cmdlets | Should -Contain 'Find-TBODpapiBlobs'
+        $cmdlets | Should -Contain 'Get-TBODpapiMemoryDump'
+        $cmdlets | Should -Contain 'Get-TBOAdConnectCredentials'
+        $cmdlets | Should -Contain 'Get-TBONGCInfo'
+        $cmdlets | Should -Contain 'Get-TBONGCCryptoKeys'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeyLocations'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeys'
+        $cmdlets | Should -Contain 'Get-TBODpapiCredHist'
         $cmdlets | Should -Contain 'Get-TBODpapiMasterKeyHashes'
     }
 
@@ -287,6 +295,66 @@ Describe 'DPAPI cmdlets with fake SMB file system' {
         $match | Should -Not -BeNullOrEmpty
         $match.MatchOffset | Should -Be 0
         $match.Source | Should -Be 'File'
+    }
+
+    It 'scans a memory dump for DPAPI blobs using a fake SMB file system' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $fake.AddDirectory("\\server\C$\Temp") | Out-Null
+
+        $mkGuid = [Guid]::Parse('50323a73-4618-4959-82d1-dc71fe85c087')
+        $blobBytes = New-Object System.Collections.Generic.List[byte]
+        $blobBytes.AddRange([byte[]](0x01,0x00,0x00,0x00,0xD0,0x8C,0x9D,0xDF,0x01,0x15,0xD1,0x11,0x8C,0x7A,0x00,0xC0,0x4F,0xC2,0x97,0xEB)) | Out-Null
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]2)) | Out-Null
+        $blobBytes.AddRange($mkGuid.ToByteArray()) | Out-Null
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # flags
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # desc len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0x6610)) | Out-Null # AES-256
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0x20)) | Out-Null # key len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # salt len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # hmac key len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0x800e)) | Out-Null # SHA512
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # hash len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # hmac len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # data len
+        $blobBytes.AddRange([System.BitConverter]::GetBytes([uint32]0)) | Out-Null # sign len
+
+        # Put the blob near the end of the first chunk so it crosses into the next chunk.
+        $dump = New-Object byte[] 8192
+        $blob = $blobBytes.ToArray()
+        [System.Array]::Copy($blob, 0, $dump, 4090, $blob.Length)
+        $fake.AddFile("\\server\C$\Temp\mem.dmp", $dump) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            $results = @(Get-TBODpapiMemoryDump -ServerName server -Path "\\server\C$\Temp\mem.dmp" -ChunkBytes 4096 -MaxBlobBytes 128)
+        } finally {
+            $scope.Dispose()
+        }
+
+        $results | Should -Not -BeNullOrEmpty
+        $match = $results | Select-Object -First 1
+        $match.MatchOffset | Should -Be 4090
+        $match.MasterKeyGuid | Should -Be $mkGuid.ToString()
     }
 
     It 'enumerates master key locations using a fake SMB file system' {
@@ -452,5 +520,99 @@ Describe 'DPAPI cmdlets with fake SMB file system' {
         $expectedLocalHash = '$DPAPImk$2*1*' + $localSid + '*aes256*sha512*1000*' + $saltHex + '*32*' + $cipherHex
         $local.Hash | Should -Be $expectedLocalHash
         $local.HashLine | Should -Be "{$($localGuid.ToString())}:$expectedLocalHash"
+    }
+}
+
+Describe 'Copy-TBOSmbItem with fake SMB file system' {
+    It 'skips projected filesystem reparse directories by default during recursive SMB-to-local copy' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $root = '\\server\C$\Root'
+        $fake.AddDirectory($root) | Out-Null
+        $fake.AddDirectory("$root\Normal") | Out-Null
+        $fake.AddFile("$root\Normal\plain.txt", [byte[]][System.Text.Encoding]::UTF8.GetBytes('plain')) | Out-Null
+        $fake.AddDirectory(
+            "$root\ProjectedLink",
+            [Titanis.Winterop.FileAttributes]::Directory -bor [Titanis.Winterop.FileAttributes]::ReparsePoint,
+            [Titanis.Winterop.ReparseTag]::ProjectedFS) | Out-Null
+        $fake.AddFile("$root\ProjectedLink\linked.txt", [byte[]][System.Text.Encoding]::UTF8.GetBytes('linked')) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $destinationRoot = Join-Path $TestDrive 'out-default'
+        New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            Copy-TBOSmbItem -Source $root -Destination $destinationRoot -CreateDirectories
+        } finally {
+            $scope.Dispose()
+        }
+
+        Test-Path (Join-Path $destinationRoot 'Root\Normal\plain.txt') | Should -BeTrue
+        Test-Path (Join-Path $destinationRoot 'Root\ProjectedLink\linked.txt') | Should -BeFalse
+    }
+
+    It 'follows projected filesystem reparse directories when -FollowReparse is specified' {
+        if (-not (Get-Command -Name Import-TboModuleForTests -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Test harness helpers not available.'
+            return
+        }
+
+        try {
+            Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+        } catch {
+            Set-ItResult -Skipped -Because 'Module binary not found; build the module to enable fake SMB tests.'
+            return
+        }
+
+        if (-not ('Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem' -as [type])) {
+            Set-ItResult -Skipped -Because 'Fake SMB file system not found; rebuild the module to include it.'
+            return
+        }
+
+        $fake = [Titanis.Tbo.Smb2.PowerShell.FakeSmbFileSystem]::new()
+        $root = '\\server\C$\Root'
+        $fake.AddDirectory($root) | Out-Null
+        $fake.AddDirectory("$root\Normal") | Out-Null
+        $fake.AddFile("$root\Normal\plain.txt", [byte[]][System.Text.Encoding]::UTF8.GetBytes('plain')) | Out-Null
+        $fake.AddDirectory(
+            "$root\ProjectedLink",
+            [Titanis.Winterop.FileAttributes]::Directory -bor [Titanis.Winterop.FileAttributes]::ReparsePoint,
+            [Titanis.Winterop.ReparseTag]::ProjectedFS) | Out-Null
+        $fake.AddFile("$root\ProjectedLink\linked.txt", [byte[]][System.Text.Encoding]::UTF8.GetBytes('linked')) | Out-Null
+
+        $mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot
+        $mock.FileSystem = $fake
+
+        $destinationRoot = Join-Path $TestDrive 'out-follow'
+        New-Item -ItemType Directory -Path $destinationRoot -Force | Out-Null
+
+        $scope = Use-TboProviderInfoOverride -ProviderInfo $mock
+        try {
+            Copy-TBOSmbItem -Source $root -Destination $destinationRoot -CreateDirectories -FollowReparse
+        } finally {
+            $scope.Dispose()
+        }
+
+        Test-Path (Join-Path $destinationRoot 'Root\Normal\plain.txt') | Should -BeTrue
+        Test-Path (Join-Path $destinationRoot 'Root\ProjectedLink\linked.txt') | Should -BeTrue
     }
 }

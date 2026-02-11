@@ -234,6 +234,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			CancellationToken cancellationToken,
 			bool allowCache)
 		{
+			if (LocalRegistrySession.IsLocalServerName(serverName))
+			{
+				if (smb is SmbProviderInfo providerInfo)
+					providerInfo.LogDiagnostic($"TBO: Using local registry mode for {serverName}.");
+
+				Action<string>? logDiagnostic = smb is SmbProviderInfo p ? p.LogDiagnostic : null;
+				Action<string>? logWarning = smb is SmbProviderInfo p2 ? (msg => p2.LogWarning(msg)) : null;
+				return (new LocalRegistrySession(logDiagnostic, logWarning), false);
+			}
+
 			if (allowCache && smb is IRegistrySessionProvider provider)
 			{
 				var session = provider.OpenRegistrySession(serverName, cancellationToken);

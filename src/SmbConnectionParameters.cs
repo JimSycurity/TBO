@@ -19,6 +19,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return new SmbConnectionParameters
 			{
 				RemotePort = Smb2Client.TcpPort,
+				Socks5Proxy = Environment.GetEnvironmentVariable("TITANIS_TBO_SOCKS5_PROXY"),
 				Dialects = Smb2ConnectionOptions.DefaultSupportedDialects,
 				NameResolveOptions = NameResolverOptions.Default,
 				Capabilities = Smb2ConnectionOptions.DefaultSmb3Caps,
@@ -45,6 +46,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string? HostName { get; set; }
 		[Parameter]
 		public int? RemotePort { get; set; }
+		[Parameter]
+		[Alias("SocksProxy")]
+		public string? Socks5Proxy { get; set; }
 		[Parameter]
 		public NameResolverOptions? NameResolveOptions { get; set; }
 
@@ -107,6 +111,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				HostName = PreferRef(this.HostName, baseParams.HostName),
 				RemotePort = PreferVal(this.RemotePort, baseParams.RemotePort),
+				Socks5Proxy = PreferRef(this.Socks5Proxy, baseParams.Socks5Proxy),
 				Capabilities = PreferVal(this.Capabilities, baseParams.Capabilities),
 				NameResolveOptions = PreferVal(this.NameResolveOptions, baseParams.NameResolveOptions),
 				Dialects = PreferRef(this.Dialects, baseParams.Dialects),

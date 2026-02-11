@@ -6,6 +6,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	public abstract class SmbCmdlet : PSCmdlet
 	{
 		internal static ISmbProviderInfo? ProviderInfoOverride { get; set; }
+		internal const string CacheIngestEnvVar = "TITANIS_TBO_CACHE_INGEST";
 
 		protected override void ProcessRecord()
 		{
@@ -14,6 +15,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		}
 
 		protected abstract void ProcessRecord(ISmbProviderInfo smb);
+
+		protected bool ResolveCacheIngestionEnabled(SwitchParameter cache, string cacheParamName = "Cache")
+		{
+			// Allow explicit -Cache:$false overrides by checking whether the parameter was bound.
+			// SwitchParameter.IsPresent alone cannot distinguish "not specified" from "-Cache:$false".
+			if (!string.IsNullOrWhiteSpace(cacheParamName)
+				&& this.MyInvocation.BoundParameters.ContainsKey(cacheParamName))
+			{
+				return cache.IsPresent;
+			}
+
+			var env = Environment.GetEnvironmentVariable(CacheIngestEnvVar);
+			if (string.IsNullOrWhiteSpace(env))
+				return false;
+
+			return TboCacheDatabase.IsTruthy(env);
+		}
 
 		protected void LogVerbose(ISmbProviderInfo smb, string message)
 		{

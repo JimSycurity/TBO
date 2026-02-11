@@ -43,7 +43,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (smb is ISmbFileSystemProvider provider && provider.FileSystem != null)
 				return provider.FileSystem;
 
-			return new SmbClientFileSystem(smb.SmbClient);
+			var remote = new SmbClientFileSystem(smb.SmbClient);
+
+			// Local NTFS support is Windows-only. If the UNC path isn't a supported local admin share,
+			// the hybrid filesystem transparently falls back to the SMB client implementation.
+			if (!OperatingSystem.IsWindows())
+				return remote;
+
+			Action<string>? logDiagnostic = null;
+			Action<string>? logWarning = null;
+			if (smb is SmbProviderInfo providerInfo)
+			{
+				logDiagnostic = providerInfo.LogDiagnostic;
+				logWarning = msg => providerInfo.LogWarning(msg, emitToConsole: false);
+			}
+
+			var local = new LocalNtfsFileSystem(logDiagnostic, logWarning);
+			return new HybridSmbFileSystem(remote, local);
 		}
 	}
 

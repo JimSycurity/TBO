@@ -24,6 +24,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public long? FileSize { get; init; }
 		public int MatchOffset { get; init; }
 		public int BytesScanned { get; init; }
+
+		public string? CredentialGuid { get; init; }
+		public string? MasterKeyGuid { get; init; }
+		public uint? Flags { get; init; }
+		public string? Description { get; init; }
+		public uint? CryptAlgorithmId { get; init; }
+		public string? CryptAlgorithm { get; init; }
+		public uint? HashAlgorithmId { get; init; }
+		public string? HashAlgorithm { get; init; }
+		public string? ParseFailureReason { get; init; }
 	}
 
 	[Cmdlet(VerbsCommon.Find, "TBODpapiBlobs", DefaultParameterSetName = FileSystemParameterSet)]
@@ -33,6 +43,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string FileSystemParameterSet = "FileSystem";
 		private const string RegistryParameterSet = "Registry";
 		private const int DefaultMaxBytes = 1024;
+
+		private TboCacheDatabase? _cacheDb;
+		private long _cacheMachineId;
 
 		[Parameter(Mandatory = true, Position = 1, ParameterSetName = FileSystemParameterSet, ValueFromPipeline = true, ValueFromPipelineByPropertyName = true)]
 		public string Path { get; set; } = string.Empty;
@@ -57,14 +70,47 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(serverName))
 				throw new ArgumentException("ServerName must be provided.", nameof(this.ServerName));
 
-			if (this.ParameterSetName == RegistryParameterSet)
+			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
+			try
 			{
-				FindRegistryBlobs(smb, serverName, cancellationToken);
-				return;
-			}
+				if (ingestCache)
+				{
+					try
+					{
+						_cacheDb = TboCacheDatabase.Open(this.CachePath, msg => this.WriteVerbose(msg));
+						_cacheMachineId = _cacheDb.UpsertMachine(serverName);
+					}
+					catch (Exception ex)
+					{
+						_cacheDb?.Dispose();
+						_cacheDb = null;
+						_cacheMachineId = 0;
+						this.LogException(smb, $"Find-TBODpapiBlobs failed to open cache DB for {serverName}", ex, emitWarning: false);
+						this.LogWarning(smb, $"Find-TBODpapiBlobs cache write disabled: {ex.Message}");
+					}
+				}
 
-			FindFileSystemBlobs(smb, serverName, cancellationToken);
+				if (this.ParameterSetName == RegistryParameterSet)
+				{
+					FindRegistryBlobs(smb, serverName, cancellationToken);
+					return;
+				}
+
+				FindFileSystemBlobs(smb, serverName, cancellationToken);
+			}
+			finally
+			{
+				_cacheDb?.Dispose();
+				_cacheDb = null;
+				_cacheMachineId = 0;
+			}
 		}
+
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
 
 		private void FindFileSystemBlobs(ISmbProviderInfo smb, string serverName, CancellationToken cancellationToken)
 		{
@@ -239,15 +285,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (offset < 0)
 				return;
 
-			this.WriteObject(new TboDpapiBlobInfo
-			{
-				ServerName = this.ServerName,
-				Source = "File",
-				Path = filePath.ToString(),
-				FileSize = fileSize.HasValue ? (long)fileSize.Value : null,
-				MatchOffset = offset,
-				BytesScanned = prefix.Length
-			});
+			WriteBlobHit(
+				smb,
+				serverName: this.ServerName,
+				source: "File",
+				path: filePath.ToString(),
+				valueName: null,
+				valueType: null,
+				dataLength: null,
+				fileSize: fileSize.HasValue ? (long)fileSize.Value : null,
+				matchOffset: offset,
+				bytesScanned: prefix.Length,
+				buffer: prefix);
 		}
 
 		private void ScanRegistryKey(
@@ -276,7 +325,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					try
 					{
 						var fullInfo = key.GetValue(valueInfo.Name, cancellationToken).GetAwaiter().GetResult();
-						ScanRegistryValue(serverName, keyPath, fullInfo);
+						ScanRegistryValue(smb, serverName, keyPath, fullInfo);
 					}
 					catch (Exception valueEx)
 					{
@@ -295,7 +344,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			foreach (var valueInfo in values)
 			{
-				ScanRegistryValue(serverName, keyPath, valueInfo);
+				ScanRegistryValue(smb, serverName, keyPath, valueInfo);
 			}
 
 			if (!this.Recurse.IsPresent)
@@ -346,7 +395,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private void ScanRegistryValue(string serverName, string keyPath, RegistryValueInfo valueInfo)
+		private void ScanRegistryValue(ISmbProviderInfo smb, string serverName, string keyPath, RegistryValueInfo valueInfo)
 		{
 			if (valueInfo.Bytes == null || valueInfo.Bytes.Length == 0)
 				return;
@@ -360,17 +409,137 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return;
 
 			var dataLength = valueInfo.DataLength > 0 ? valueInfo.DataLength : valueInfo.Bytes.Length;
-			this.WriteObject(new TboDpapiBlobInfo
+			WriteBlobHit(
+				smb,
+				serverName: serverName,
+				source: "Registry",
+				path: keyPath,
+				valueName: valueInfo.Name,
+				valueType: valueInfo.ValueType,
+				dataLength: dataLength,
+				fileSize: null,
+				matchOffset: offset,
+				bytesScanned: scanLength,
+				buffer: valueInfo.Bytes);
+		}
+
+		private void WriteBlobHit(
+			ISmbProviderInfo smb,
+			string serverName,
+			string source,
+			string path,
+			string? valueName,
+			RegistryValueType? valueType,
+			int? dataLength,
+			long? fileSize,
+			int matchOffset,
+			int bytesScanned,
+			ReadOnlySpan<byte> buffer)
+		{
+			string? credentialGuid = null;
+			string? masterKeyGuid = null;
+			uint? flags = null;
+			string? description = null;
+			uint? cryptAlgorithmId = null;
+			string? cryptAlgorithm = null;
+			uint? hashAlgorithmId = null;
+			string? hashAlgorithm = null;
+			string? parseFailureReason = null;
+
+			if (DpapiBlobCrypto.TryParseHeader(buffer, matchOffset, out var header, out var headerFailure))
+			{
+				credentialGuid = header.GuidCredential.ToString();
+				masterKeyGuid = header.GuidMasterKey.ToString();
+				flags = header.Flags;
+				description = header.Description;
+
+				if (header.CryptAlgorithm.HasValue && header.CryptAlgorithmLength.HasValue)
+				{
+					cryptAlgorithmId = header.CryptAlgorithm.Value;
+					cryptAlgorithm = DpapiBlobCrypto.ResolveCipherAlgorithmName(header.CryptAlgorithm.Value, header.CryptAlgorithmLength.Value);
+				}
+
+				if (header.HashAlgorithm.HasValue && header.HashAlgorithmLength.HasValue)
+				{
+					hashAlgorithmId = header.HashAlgorithm.Value;
+					hashAlgorithm = DpapiBlobCrypto.ResolveHashAlgorithmName(header.HashAlgorithm.Value, header.HashAlgorithmLength.Value);
+				}
+
+				parseFailureReason = headerFailure;
+			}
+			else
+			{
+				parseFailureReason = headerFailure;
+			}
+
+			var info = new TboDpapiBlobInfo
 			{
 				ServerName = serverName,
-				Source = "Registry",
-				Path = keyPath,
-				ValueName = valueInfo.Name,
-				ValueType = valueInfo.ValueType,
+				Source = source,
+				Path = path,
+				ValueName = valueName,
+				ValueType = valueType,
 				DataLength = dataLength,
-				MatchOffset = offset,
-				BytesScanned = scanLength
-			});
+				FileSize = fileSize,
+				MatchOffset = matchOffset,
+				BytesScanned = bytesScanned,
+
+				CredentialGuid = credentialGuid,
+				MasterKeyGuid = masterKeyGuid,
+				Flags = flags,
+				Description = description,
+				CryptAlgorithmId = cryptAlgorithmId,
+				CryptAlgorithm = cryptAlgorithm,
+				HashAlgorithmId = hashAlgorithmId,
+				HashAlgorithm = hashAlgorithm,
+				ParseFailureReason = parseFailureReason
+			};
+
+			if (_cacheDb != null && _cacheMachineId > 0)
+			{
+				var blobKey = BuildBlobKey(source, path, valueName, matchOffset);
+				try
+				{
+					var valueTypeInt = valueType.HasValue ? (int)valueType.Value : (int?)null;
+					_cacheDb.UpsertDpapiBlob(
+						machineId: _cacheMachineId,
+						blobKey: blobKey,
+						source: source,
+						path: path,
+						valueName: valueName,
+						valueType: valueTypeInt,
+						dataLength: dataLength,
+						fileSize: fileSize,
+						matchOffset: matchOffset,
+						bytesScanned: bytesScanned,
+						credentialGuid: credentialGuid,
+						masterKeyGuid: masterKeyGuid,
+						flags: flags,
+						description: description,
+						cryptAlgorithmId: cryptAlgorithmId,
+						hashAlgorithmId: hashAlgorithmId,
+						parseFailureReason: parseFailureReason);
+				}
+				catch (Exception ex)
+				{
+					this.LogException(smb, $"Find-TBODpapiBlobs failed to write cache blob record for {serverName}", ex, emitWarning: false);
+					this.LogWarning(smb, $"Find-TBODpapiBlobs cache write failed: {ex.Message}");
+				}
+			}
+
+			this.WriteObject(info);
+		}
+
+		private static string BuildBlobKey(string source, string path, string? valueName, int matchOffset)
+		{
+			var safeSource = source?.Trim() ?? string.Empty;
+			var safePath = path?.Trim() ?? string.Empty;
+			var safeValueName = valueName?.Trim() ?? string.Empty;
+
+			if (safeSource.Equals("Registry", StringComparison.OrdinalIgnoreCase))
+				return $"Registry|{safePath}|{safeValueName}|{matchOffset}";
+
+			return $"{safeSource}|{safePath}|{matchOffset}";
 		}
 
 		private static byte[] ReadFilePrefix(ISmbFileSystem fileSystem, UncPath path, int maxBytes, CancellationToken cancellationToken)
