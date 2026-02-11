@@ -502,9 +502,11 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
 #### Get-TBORegSessions
 
 Enumerates user session SIDs from HKEY_USERS on the remote host. SYSTEM SIDs are excluded by default.
+Use `-ResolveSid` to resolve entries to `DOMAIN\user` (from `Volatile Environment`) or to profile names (from `ProfileList`) without LSA calls.
 
 ```powershell
 Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol
+Get-TBORegSessions -ServerName corp1-web01.corp1.lab.home-labs.lol -ResolveSid
 ```
 
 #### Get-TBORegServices

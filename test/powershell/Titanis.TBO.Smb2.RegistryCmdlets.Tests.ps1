@@ -40,22 +40,63 @@ Describe 'TBO registry cmdlets (mocked)' {
 		}
 	}
 
-	It 'Get-TBORegSessions -ResolveSid fails before connecting' {
+	It 'Get-TBORegSessions -ResolveSid resolves names from registry data with SID fallback' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
 			return
 		}
 
-		$script:sessionCalled = $false
-		$emptySessionTask = [System.Threading.Tasks.Task[Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]]::FromResult([Titanis.Tbo.Smb2.PowerShell.RemoteRegistrySession]$null)
+		$sidResolvedFromVolatile = 'S-1-5-21-1-2-3-1001'
+		$sidResolvedFromProfile = 'S-1-5-21-1-2-3-1002'
+		$sidFallback = 'S-1-5-21-1-2-3-1003'
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey("HKU\$sidResolvedFromVolatile") | Out-Null
+		$store.AddKey("HKU\$sidResolvedFromVolatile\Volatile Environment\1") | Out-Null
+		$store.SetStringValue("HKU\$sidResolvedFromVolatile\Volatile Environment\1", 'USERDOMAIN', 'CORP') | Out-Null
+		$store.SetStringValue("HKU\$sidResolvedFromVolatile\Volatile Environment\1", 'USERNAME', 'alice') | Out-Null
+		$store.AddKey("HKU\$sidResolvedFromProfile") | Out-Null
+		$store.AddKey("HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sidResolvedFromProfile") | Out-Null
+		$store.SetStringValue("HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sidResolvedFromProfile", 'ProfileImagePath', 'C:\Users\bob') | Out-Null
+		$store.AddKey("HKU\$sidFallback") | Out-Null
+		$store.AddKey('HKU\S-1-5-18') | Out-Null
+
 		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
-			-OpenRemoteRegistrySessionAsync { param($serverName, $token) $script:sessionCalled = $true; $emptySessionTask }
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
 
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
-			Should -Throw -ExceptionType ([System.NotSupportedException]) -ActualValue { Get-TBORegSessions -ServerName 'server' -ResolveSid }
+			$result = @(Get-TBORegSessions -ServerName 'server' -ResolveSid)
+			$result | Should -Contain 'CORP\alice'
+			$result | Should -Contain 'bob'
+			$result | Should -Contain $sidFallback
+			$result | Should -Not -Contain $sidResolvedFromVolatile
+			$result | Should -Not -Contain $sidResolvedFromProfile
+			$result | Should -Not -Contain 'S-1-5-18'
+		}
+	}
+
+	It 'Get-TBORegSessions returns raw user SIDs when -ResolveSid is not set' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
 		}
 
-		$script:sessionCalled | Should -BeFalse
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey('HKU\S-1-5-21-5-6-7-1001') | Out-Null
+		$store.AddKey('HKU\S-1-5-21-5-6-7-1002') | Out-Null
+		$store.AddKey('HKU\S-1-5-18') | Out-Null
+		$store.AddKey('HKU\S-1-5-21-5-6-7-1002_Classes') | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			$result = @(Get-TBORegSessions -ServerName 'server')
+			$result | Should -Contain 'S-1-5-21-5-6-7-1001'
+			$result | Should -Contain 'S-1-5-21-5-6-7-1002'
+			$result | Should -Not -Contain 'S-1-5-18'
+			$result.Count | Should -Be 2
+		}
 	}
 
 	It 'Get-TBORegKey rejects unsupported root keys before connecting' {
