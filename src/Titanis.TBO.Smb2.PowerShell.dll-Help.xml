@@ -4264,7 +4264,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       <command:verb>Get</command:verb>
       <command:noun>TBORegServiceDetails</command:noun>
       <maml:description>
-        <maml:para>Reads extended registry-backed service details including core configuration, dependencies, security descriptor, Parameters subkey values, and whether an _SC_ service credential exists.</maml:para>
+        <maml:para>Reads extended registry-backed service details including core configuration, dependencies, security descriptor, Parameters/Performance subkey values, and whether an _SC_ service credential exists.</maml:para>
         <maml:para>TriggerInfo entries include the TriggerInfo subkey path plus raw registry values for round-trip edits.</maml:para>
         <maml:para>FailureActions registry values can be modified, but malformed data can break service startup.</maml:para>
       </maml:description>
@@ -4326,6 +4326,13 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
       </command:example>
       <command:example>
         <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'WmiApSrv' | Select-Object KeyName, ServiceDll, ServiceMain, PerformanceLibrary, PerformanceOpen, PerformanceCollect, PerformanceClose</maml:code>
+        <maml:remarks>
+          <maml:para>Surfaces technique-relevant Parameters and Performance subkey values.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
         <maml:code>$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'</maml:code>
         <maml:code>$trigger = $svc.TriggerInfo | Select-Object -First 1</maml:code>
         <maml:code>$trigger.Values | Format-Table Name, ValueType, Value</maml:code>
@@ -4335,7 +4342,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         </maml:remarks>
       </command:example>
       <command:example>
-        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <command:title>-------------------------- EXAMPLE 5 --------------------------</command:title>
         <maml:code>$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv'</maml:code>
         <maml:code>$triggerPath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)\TriggerInfo\1"</maml:code>
         <maml:code>New-TBORegKey -ServerName $svc.ServerName -Path $triggerPath</maml:code>
@@ -4346,7 +4353,7 @@ Set-TBORegSecurityDescriptor -ServerName corp1-web01.corp1.lab.home-labs.lol -Pa
         </maml:remarks>
       </command:example>
       <command:example>
-        <command:title>-------------------------- EXAMPLE 5 --------------------------</command:title>
+        <command:title>-------------------------- EXAMPLE 6 --------------------------</command:title>
         <maml:code>$svc = Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService2'</maml:code>
         <maml:code>$servicePath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.KeyName)"</maml:code>
         <maml:code>$values = [Titanis.Tbo.Smb2.PowerShell.TboRegServiceFailureActionScenarios]::RunCommandFirst("C:\Windows\System32\notepad.exe")</maml:code>

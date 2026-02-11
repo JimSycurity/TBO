@@ -246,6 +246,50 @@ AQAUgAwBAAAYAQAAFAAAAEgAAAACADQAAgAAAAKAFAD/AQ8AAQEAAAAAAAEAAAAAFAAYAJ0BAgABAgAA
 		}
 	}
 
+	It 'Get-TBORegServiceDetails includes Parameters and Performance subkey technique values' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$servicePath = 'HKLM\SYSTEM\CurrentControlSet\Services\SvcTech'
+		$parametersPath = "$servicePath\Parameters"
+		$performancePath = "$servicePath\Performance"
+
+		$store = [Titanis.Tbo.Smb2.PowerShell.FakeRegistryStore]::new()
+		$store.AddKey($servicePath) | Out-Null
+		$store.SetStringValue($servicePath, 'ImagePath', 'C:\Windows\System32\svchost.exe -k netsvcs') | Out-Null
+		$store.AddKey($parametersPath) | Out-Null
+		$store.SetStringValue($parametersPath, 'ServiceDll', 'C:\Windows\System32\example-service.dll') | Out-Null
+		$store.SetStringValue($parametersPath, 'ServiceMain', 'ServiceMain') | Out-Null
+		$store.SetDwordValue($parametersPath, 'ServiceDllUnloadOnStop', 1) | Out-Null
+		$store.AddKey($performancePath) | Out-Null
+		$store.SetStringValue($performancePath, 'Library', 'C:\Windows\System32\example-perf.dll') | Out-Null
+		$store.SetStringValue($performancePath, 'Open', 'OpenPerfData') | Out-Null
+		$store.SetStringValue($performancePath, 'Collect', 'CollectPerfData') | Out-Null
+		$store.SetStringValue($performancePath, 'Close', 'ClosePerfData') | Out-Null
+
+		$mock = New-TboMockProviderInfo -RepoRoot $script:repoRoot `
+			-OpenRegistrySession { param($serverName, $token) $store.CreateSession() }
+
+		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
+			$svc = Get-TBORegServiceDetails -ServerName 'server' -Name 'SvcTech'
+			$svc.KeyName | Should -Be 'SvcTech'
+			$svc.ServiceDll | Should -Be 'C:\Windows\System32\example-service.dll'
+			$svc.ServiceMain | Should -Be 'ServiceMain'
+			$svc.ServiceDllUnloadOnStop | Should -Be 'True (1)'
+			$svc.PerformanceLibrary | Should -Be 'C:\Windows\System32\example-perf.dll'
+			$svc.PerformanceOpen | Should -Be 'OpenPerfData'
+			$svc.PerformanceCollect | Should -Be 'CollectPerfData'
+			$svc.PerformanceClose | Should -Be 'ClosePerfData'
+
+			$svc.ParametersValues | Should -Not -BeNullOrEmpty
+			$svc.PerformanceValues | Should -Not -BeNullOrEmpty
+			@($svc.ParametersValues | Where-Object Name -eq 'ServiceDll').Count | Should -Be 1
+			@($svc.PerformanceValues | Where-Object Name -eq 'Library').Count | Should -Be 1
+		}
+	}
+
 	It 'Get-TBORegValue reads from fake registry store' {
 		if (-not $script:moduleAvailable) {
 			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'

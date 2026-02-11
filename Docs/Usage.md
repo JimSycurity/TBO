@@ -515,13 +515,15 @@ Get-TBORegServices -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestSe
 
 #### Get-TBORegServiceDetails
 
-Returns extended registry-backed service metadata including core configuration, dependency lists, Parameters subkey values, security descriptors, and whether an _SC_ credential exists.
+Returns extended registry-backed service metadata including core configuration, dependency lists, `Parameters` and `Performance` subkey values, security descriptors, and whether an _SC_ credential exists.
 
 ```powershell
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'MDCoreSvc'
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService*'
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'TestService2' | Select-Object -Expand FailureActionsInfo
 Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'wuauserv' | Select-Object -Expand TriggerInfo
+Get-TBORegServiceDetails -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'WmiApSrv' |
+  Select-Object KeyName, ServiceDll, ServiceMain, PerformanceLibrary, PerformanceOpen, PerformanceCollect, PerformanceClose
 ```
 
 TriggerInfo entries now include the registry key path and raw value data for round-trip edits.
