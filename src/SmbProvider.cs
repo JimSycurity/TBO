@@ -1103,8 +1103,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				TicketInfo? ticket = krb.TicketCache.GetTicketFromCache(targetSpn, effectiveUser);
 				if (ticket != null)
 				{
-					effectiveUser ??= ticket.UserName;
-					authRealm ??= ticket.UserRealm;
+					effectiveUser ??= ticket.ClientName;
+					authRealm ??= ticket.ClientRealm;
 				}
 
 				if (ticket is null && parms.Tickets != null)
@@ -1132,11 +1132,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					{
 						if (tgtTicket.IsTgt && tgtTicket.IsCurrent)
 						{
-							if ((authUser == null || string.Equals(authUser, tgtTicket.UserName, StringComparison.OrdinalIgnoreCase))
-								&& (authRealm == null || string.Equals(authRealm, tgtTicket.UserRealm, StringComparison.OrdinalIgnoreCase)))
+							if ((authUser == null || string.Equals(authUser, tgtTicket.ClientName, StringComparison.OrdinalIgnoreCase))
+								&& (authRealm == null || string.Equals(authRealm, tgtTicket.ClientRealm, StringComparison.OrdinalIgnoreCase)))
 							{
-								authUser ??= tgtTicket.UserName;
-								authRealm ??= tgtTicket.UserRealm;
+								authUser ??= tgtTicket.ClientName;
+								authRealm ??= tgtTicket.ClientRealm;
 								krb.ImportTicket(tgtTicket);
 							}
 						}
@@ -1146,19 +1146,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				KerberosCredential? cred = null;
 				if (!string.IsNullOrEmpty(authUser) && !string.IsNullOrEmpty(authRealm))
 				{
+					var upn = new UserPrincipalName(authUser, authRealm);
 					if (parms.Password != null)
-						cred = new KerberosPasswordCredential(authUser, authRealm, parms.Password);
+						cred = new KerberosPasswordCredential(upn, parms.Password);
 					else if (parms.NtlmHash != null)
-						cred = new KerberosKeyCredential(authUser, authRealm, EType.Rc4Hmac, parms.NtlmHash.NtHash);
+						cred = new KerberosKeyCredential(upn, EType.Rc4Hmac, parms.NtlmHash.NtHash);
 					else if (parms.AesKey != null)
-						cred = new KerberosKeyCredential(authUser, authRealm, parms.AesKey.Bytes.Length switch
+						cred = new KerberosKeyCredential(upn, parms.AesKey.Bytes.Length switch
 						{
 							(128 / 8) => EType.Aes128CtsHmacSha1_96,
 							(256 / 8) => EType.Aes256CtsHmacSha1_96,
 							_ => throw new ArgumentException("The AES key is not the correct size for AES 128 or AES 256.")
 						}, parms.AesKey.Bytes);
 					else if (parms.DesKey != null)
-						cred = new KerberosKeyCredential(authUser, authRealm, EType.DesCbcMd5, parms.DesKey.Bytes);
+						cred = new KerberosKeyCredential(upn, EType.DesCbcMd5, parms.DesKey.Bytes);
 				}
 
 				if (ticket is null && cred != null && locator != null)
@@ -1181,7 +1182,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				if (ticket != null)
 				{
-					cred ??= new KerberosNullCredential(authUser ?? ticket.UserName, authRealm ?? ticket.ServiceRealm ?? ticket.UserRealm);
+					cred ??= new KerberosNullCredential(new UserPrincipalName(authUser ?? ticket.ClientName ?? string.Empty, authRealm ?? ticket.ServiceRealm ?? ticket.ClientRealm));
 					var krbContext = new KerberosClientContext(cred, krb, targetSpn, ticket);
 					krbContext.RequiredCapabilities = requiredCaps;
 					authContext.Contexts.Add(krbContext);
@@ -1213,7 +1214,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					Workstation = parms.Workstation,
 					WorkstationDomain = parms.UserDomain,
 					TargetSpn = targetSpn,
-					ClientChannelBindingsUnhashed = new byte[16]
+					ChannelBinding = null
 				};
 				ntlmContext.RequiredCapabilities = requiredCaps;
 				ntlmContext.ClientConfigFlags |= NegotiateFlags.D_NegotiateSign;
@@ -1241,12 +1242,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				return false;
 
 			if (
-				(userName == null || string.Equals(userName, ticket.UserName, StringComparison.OrdinalIgnoreCase))
-				&& (userRealm == null || string.Equals(userRealm, ticket.UserRealm, StringComparison.OrdinalIgnoreCase))
+				(userName == null || string.Equals(userName, ticket.ClientName, StringComparison.OrdinalIgnoreCase))
+				&& (userRealm == null || string.Equals(userRealm, ticket.ClientRealm, StringComparison.OrdinalIgnoreCase))
 				)
 			{
-				userName ??= ticket.UserName;
-				userRealm ??= ticket.UserRealm;
+				userName ??= ticket.ClientName;
+				userRealm ??= ticket.ClientRealm;
 				return true;
 			}
 
