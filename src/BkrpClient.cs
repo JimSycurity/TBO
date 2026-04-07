@@ -1,0 +1,231 @@
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading;
+using System.Threading.Tasks;
+using Titanis.DceRpc;
+using Titanis.DceRpc.Client;
+using Titanis.Security;
+using Titanis.Smb2;
+
+namespace Titanis.Tbo.Smb2.PowerShell
+{
+	// [MS-BKRP] § 3.1.4 - BackupKey Remote Protocol
+	//
+	// The entire interface exposes a single operation, BackuprKey (opnum 0).
+	// Behaviour is controlled by the pguidActionAgent parameter.
+
+	internal static class BkrpActionGuids
+	{
+		// [MS-BKRP] § 2.2.3 - Retrieve the DC's RSA backup-key certificate (DER/X.509)
+		public static readonly Guid RetrieveBackupKey = new("018FF48A-EAB3-4A17-ABBA-9DEE04766FCE");
+
+		// [MS-BKRP] § 2.2.3 - Restore / decrypt a domain backup blob
+		public static readonly Guid RestoreKey = new("47270C64-2FC7-499B-AC5B-0E37CDCE899A");
+	}
+
+	public sealed class BkrpCallResult
+	{
+		public uint ReturnCode { get; init; }
+		public byte[]? DataOut { get; init; }
+		public uint DataOutLength { get; init; }
+
+		public bool IsSuccess => ReturnCode == 0;
+
+		// 0x0d = ERROR_INVALID_DATA  - PKCS#1 padding was valid, inner SID check failed
+		public bool IsPaddingValid => ReturnCode == 0 || ReturnCode == 0x0d;
+
+		// 0x57 = ERROR_INVALID_PARAMETER - PKCS#1 padding was invalid
+		public bool IsPaddingInvalid => ReturnCode == 0x57;
+	}
+
+	// Hand-written DCE/RPC proxy for MS-BKRP (BackupKey Remote Protocol).
+	// Follows the same pattern as the Animus IDL-generated proxies.
+	//
+	// IDL (simplified):
+	//   DWORD BackuprKey(
+	//     [in]           handle_t                          h,          // binding handle, not marshalled
+	//     [in]           GUID                             *pguidActionAgent,   // ref pointer (no referent ID)
+	//     [in, unique, size_is(cbDataIn)] byte            *pDataIn,
+	//     [in]           DWORD                             cbDataIn,
+	//     [out, size_is(,*pcbDataOut)] byte              **ppDataOut,
+	//     [out]          DWORD                            *pcbDataOut,
+	//     [in]           DWORD                             dwParam     // must be 0
+	//   );
+	internal sealed class BkrpProxy : RpcClientProxy, IRpcClientProxy
+	{
+		private static readonly Guid InterfaceUuidValue = new("3dde7c30-165d-11d1-ab8f-00805f14db40");
+		private static readonly RpcVersion InterfaceVersionValue = new(1, 0);
+
+		public override Guid InterfaceUuid => InterfaceUuidValue;
+		public override RpcVersion InterfaceVersion => InterfaceVersionValue;
+		public override Type InterfaceType => typeof(BkrpProxy);
+
+		public async Task<BkrpCallResult> BackuprKeyAsync(
+			Guid actionAgent,
+			byte[]? dataIn,
+			uint cbDataIn,
+			CancellationToken cancellationToken)
+		{
+			IRpcRequestBuilder req = this.CreateRequest(0);
+			IRpcEncoder encoder = req.StubData;
+
+			// pguidActionAgent: reference pointer – GUID written inline (no referent ID)
+			encoder.WriteValue(actionAgent);
+
+			// pDataIn: unique pointer to conformant byte array
+			encoder.WriteUniqueReferentId(dataIn == null);
+			if (dataIn != null)
+			{
+				encoder.WriteArrayHeader<byte>(dataIn);
+				for (int i = 0; i < dataIn.Length; i++)
+					encoder.WriteValue(dataIn[i]);
+			}
+
+			// cbDataIn
+			encoder.WriteValue(cbDataIn);
+
+			// dwParam must be 0
+			encoder.WriteValue(0u);
+
+			IRpcDecoder decoder = await this.SendRequestAsync(req, cancellationToken).ConfigureAwait(false);
+
+			// ppDataOut: outer ref pointer is not on wire; read the inner unique pointer referent
+			var innerRefId = decoder.ReadReferentId();
+			byte[]? dataOut = null;
+			if (innerRefId != 0)
+			{
+				var arr = decoder.ReadArrayHeader<byte>();
+				for (int i = 0; i < arr.Length; i++)
+					arr[i] = decoder.ReadChar();
+				dataOut = arr;
+			}
+
+			// pcbDataOut (ref pointer – just the DWORD value)
+			var cbDataOut = decoder.ReadUInt32();
+
+			// return code (Win32 DWORD)
+			var retval = decoder.ReadUInt32();
+
+			return new BkrpCallResult
+			{
+				ReturnCode = retval,
+				DataOut = dataOut,
+				DataOutLength = cbDataOut
+			};
+		}
+	}
+
+	// Thin client wrapper around BkrpProxy — mirrors the RpcServiceClient<T> pattern.
+	internal sealed class BkrpClient : RpcServiceClient<BkrpProxy>
+	{
+		public const string BkrpPipeName = "protected_storage";
+
+		// [MS-BKRP] § 2.1 – must use Kerberos + privacy-level encryption
+		public override string? WellKnownPipeName => BkrpPipeName;
+		public override bool SupportsDynamicTcp => false;
+		public override bool SupportsNdr64 => false;
+		public override bool SupportsReauthOverNamedPipes => true;
+		public override string? ServiceClass => ServiceClassNames.HostU;
+
+		public Task<BkrpCallResult> BackuprKeyAsync(
+			Guid actionAgent,
+			byte[]? dataIn,
+			uint cbDataIn,
+			CancellationToken cancellationToken)
+			=> this._proxy.BackuprKeyAsync(actionAgent, dataIn, cbDataIn, cancellationToken);
+	}
+
+	// Wraps an open, bound BkrpClient and its underlying SMB resources.
+	public sealed class BkrpSession : IAsyncDisposable, IDisposable
+	{
+		internal BkrpSession(BkrpClient client, Smb2TreeConnect share, Stream stream)
+		{
+			this.Client = client ?? throw new ArgumentNullException(nameof(client));
+			this._share = share ?? throw new ArgumentNullException(nameof(share));
+			this._stream = stream ?? throw new ArgumentNullException(nameof(stream));
+		}
+
+		internal BkrpClient Client { get; }
+
+		private readonly Smb2TreeConnect _share;
+		private readonly Stream _stream;
+		private bool _disposed;
+
+		// Convenience: retrieve the DC's RSA backup-key certificate and extract modulus/exponent.
+		public async Task<BkrpPublicKeyInfo> GetBackupPublicKeyAsync(CancellationToken cancellationToken)
+		{
+			var result = await this.Client.BackuprKeyAsync(
+				BkrpActionGuids.RetrieveBackupKey,
+				new byte[4],   // pDataIn must be non-null per server expectation; 4 zero bytes is conventional
+				4,
+				cancellationToken).ConfigureAwait(false);
+
+			if (!result.IsSuccess)
+				throw new InvalidOperationException(
+					$"BackuprKey(RetrieveBackupKey) failed with Win32 error 0x{result.ReturnCode:x}.");
+
+			if (result.DataOut == null || result.DataOut.Length == 0)
+				throw new InvalidDataException("BackuprKey returned no certificate data.");
+
+			return BkrpPublicKeyInfo.FromCertificate(result.DataOut);
+		}
+
+		// Oracle query: returns true when PKCS#1 v1.5 padding is valid (0x0d or success),
+		// false when padding is invalid (0x57).
+		public async Task<BkrpCallResult> QueryOracleAsync(byte[] blob, CancellationToken cancellationToken)
+			=> await this.Client.BackuprKeyAsync(
+				BkrpActionGuids.RestoreKey,
+				blob,
+				(uint)blob.Length,
+				cancellationToken).ConfigureAwait(false);
+
+		public async ValueTask DisposeAsync()
+		{
+			if (this._disposed) return;
+			this._disposed = true;
+			try { this.Client.Dispose(); }
+			finally
+			{
+				this._stream.Dispose();
+				await this._share.DisposeAsync().ConfigureAwait(false);
+			}
+		}
+
+		public void Dispose() => this.DisposeAsync().GetAwaiter().GetResult();
+	}
+
+	// RSA public key extracted from the DC's X.509 backup key certificate.
+	public sealed class BkrpPublicKeyInfo
+	{
+		public System.Numerics.BigInteger Modulus { get; init; }
+		public System.Numerics.BigInteger Exponent { get; init; }
+
+		// Key size in bytes (= modulus byte length)
+		public int KeySizeBytes { get; init; }
+
+		public static BkrpPublicKeyInfo FromCertificate(byte[] derCertificate)
+		{
+			var cert = new X509Certificate2(derCertificate);
+			using var rsa = cert.GetRSAPublicKey()
+				?? throw new InvalidDataException("DC backup certificate does not contain an RSA public key.");
+
+			var rsaParams = rsa.ExportParameters(includePrivateParameters: false);
+
+			if (rsaParams.Modulus == null || rsaParams.Exponent == null)
+				throw new InvalidDataException("RSA parameters are incomplete.");
+
+			// BigInteger: treat as unsigned big-endian (prepend 0x00 to avoid sign bit)
+			var n = new System.Numerics.BigInteger(rsaParams.Modulus, isUnsigned: true, isBigEndian: true);
+			var e = new System.Numerics.BigInteger(rsaParams.Exponent, isUnsigned: true, isBigEndian: true);
+
+			return new BkrpPublicKeyInfo
+			{
+				Modulus = n,
+				Exponent = e,
+				KeySizeBytes = rsaParams.Modulus.Length
+			};
+		}
+	}
+}

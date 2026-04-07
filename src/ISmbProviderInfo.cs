@@ -13,6 +13,7 @@ public interface ISmbProviderInfo
 	void SetConnectParameters(string serverName, object parameters);
 		Task<ServerServiceSession> OpenServerServiceSessionAsync(string serverName, CancellationToken cancellationToken);
 		Task<RemoteRegistrySession> OpenRemoteRegistrySessionAsync(string serverName, CancellationToken cancellationToken);
+		Task<BkrpSession> OpenBkrpSessionAsync(string dcName, CancellationToken cancellationToken);
 		Task DisconnectServerAsync(string serverName, int? port = null, bool force = false);
 		Task DisconnectAllAsync(bool force = false);
 		void LogException(string context, Exception ex);

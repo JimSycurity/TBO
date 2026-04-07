@@ -18,6 +18,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public DpapiMasterKeyBlock? MasterKey { get; init; }
 		public DpapiMasterKeyBlock? BackupKey { get; init; }
 		public DpapiMasterKeyCredHistBlock? CredHist { get; init; }
+		public DpapiDomainKeyBlock? DomainKey { get; init; }
 		public ulong MasterKeyLength { get; init; }
 		public ulong BackupKeyLength { get; init; }
 		public ulong CredHistLength { get; init; }
@@ -78,6 +79,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			DpapiMasterKeyBlock? masterKey = null;
 			DpapiMasterKeyBlock? backupKey = null;
 			DpapiMasterKeyCredHistBlock? credHist = null;
+			DpapiDomainKeyBlock? domainKey = null;
 
 			if (masterKeyLen > 0)
 				masterKey = DpapiMasterKeyBlock.Parse(reader.ReadBytes(checked((int)masterKeyLen)));
@@ -86,7 +88,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (credHistLen > 0)
 				credHist = DpapiMasterKeyCredHistBlock.Parse(reader.ReadBytes(checked((int)credHistLen)));
 			if (domainKeyLen > 0)
-				reader.ReadBytes(checked((int)domainKeyLen));
+			{
+				var domainKeyRaw = reader.ReadBytes(checked((int)domainKeyLen));
+				try { domainKey = DpapiDomainKeyBlock.Parse(domainKeyRaw); }
+				catch { /* best-effort; non-parseable domain key does not break other decryption paths */ }
+			}
 
 			return new DpapiMasterKeyFile
 			{
@@ -100,7 +106,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				DomainKeyLength = domainKeyLen,
 				MasterKey = masterKey,
 				BackupKey = backupKey,
-				CredHist = credHist
+				CredHist = credHist,
+				DomainKey = domainKey
 			};
 		}
 

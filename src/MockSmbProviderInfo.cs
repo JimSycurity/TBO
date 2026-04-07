@@ -29,6 +29,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public Action<string, object>? SetConnectParametersAction { get; set; }
 		public Func<string, CancellationToken, Task<ServerServiceSession>>? OpenServerServiceSessionAsyncFunc { get; set; }
 		public Func<string, CancellationToken, Task<RemoteRegistrySession>>? OpenRemoteRegistrySessionAsyncFunc { get; set; }
+		public Func<string, CancellationToken, Task<BkrpSession>>? OpenBkrpSessionAsyncFunc { get; set; }
 		public Func<string, CancellationToken, IRegistrySession?>? OpenRegistrySessionFunc { get; set; }
 		public Action<string, RegistrySessionInvalidationReason>? InvalidateRegistrySessionAction { get; set; }
 		public Action<RegistrySessionInvalidationReason>? InvalidateAllRegistrySessionsAction { get; set; }
@@ -78,6 +79,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (this.OpenRemoteRegistrySessionAsyncFunc == null)
 				throw new InvalidOperationException("OpenRemoteRegistrySessionAsyncFunc is not configured.");
 			return this.OpenRemoteRegistrySessionAsyncFunc(serverName, cancellationToken);
+		}
+
+		Task<BkrpSession> ISmbProviderInfo.OpenBkrpSessionAsync(string dcName, CancellationToken cancellationToken)
+		{
+			if (this.OpenBkrpSessionAsyncFunc == null)
+				throw new InvalidOperationException("OpenBkrpSessionAsyncFunc is not configured.");
+			return this.OpenBkrpSessionAsyncFunc(dcName, cancellationToken);
 		}
 
 		IRegistrySession? IRegistrySessionProvider.OpenRegistrySession(string serverName, CancellationToken cancellationToken)
