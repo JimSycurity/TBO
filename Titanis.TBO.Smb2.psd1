@@ -9,7 +9,7 @@
     FormatsToProcess=@('Format.ps1xml')
     FunctionsToExport=@()
     GUID='807d7d1b-e298-4078-9173-18b4f2ab75f2'
-    ModuleVersion='3.6.0'
+    ModuleVersion='3.7.0'
     PowerShellVersion='7.0'
     PrivateData=@{
         PSData=@{

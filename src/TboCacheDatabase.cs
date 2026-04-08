@@ -16,7 +16,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		internal const string CachePathEnvVar = "TITANIS_TBO_CACHE";
 
-		private const int SchemaVersion = 4;
+		private const int SchemaVersion = 5;
 		private readonly SqliteConnection _connection;
 
 		internal enum PrincipalScope
@@ -138,7 +138,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (userVersion == 0)
 			{
 				logDiagnostic($"TBO cache: initializing new DB (schema v{SchemaVersion}).");
-				ApplySchemaV4();
+				ApplySchemaV5();
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -169,6 +169,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				logDiagnostic("TBO cache: migrating DB schema v3 -> v4.");
 				MigrateSchemaV3ToV4(logDiagnostic);
+				SetUserVersion(4);
+				userVersion = 4;
+			}
+
+			if (userVersion == 4)
+			{
+				logDiagnostic("TBO cache: migrating DB schema v4 -> v5.");
+				MigrateSchemaV4ToV5(logDiagnostic);
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -191,7 +199,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			cmd.ExecuteNonQuery();
 		}
 
-		private void ApplySchemaV4()
+		private void ApplySchemaV5()
 		{
 			using var tx = _connection.BeginTransaction();
 
@@ -293,6 +301,8 @@ CREATE TABLE IF NOT EXISTS dpapi_masterkeys(
   hash_context INTEGER NULL,
   hash TEXT NULL,
   hash_line TEXT NULL,
+  cleartext_key BLOB NULL,
+  cleartext_key_sha1 TEXT NULL COLLATE NOCASE,
   failure_reason TEXT NULL,
   first_seen_utc TEXT NOT NULL,
   last_seen_utc TEXT NOT NULL,
@@ -302,6 +312,7 @@ CREATE TABLE IF NOT EXISTS dpapi_masterkeys(
 
 			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_masterkeys_machine_id ON dpapi_masterkeys(machine_id);", tx);
 			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_masterkeys_master_key_guid ON dpapi_masterkeys(master_key_guid);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_masterkeys_cleartext_sha1 ON dpapi_masterkeys(cleartext_key_sha1) WHERE cleartext_key_sha1 IS NOT NULL;", tx);
 
 			Exec(@"
 CREATE TABLE IF NOT EXISTS dpapi_blobs(
@@ -532,6 +543,26 @@ CREATE TABLE IF NOT EXISTS write_activities(
 			tx.Commit();
 
 			logDiagnostic("TBO cache: migration to schema v4 complete.");
+		}
+
+		// v5 adds two columns to dpapi_masterkeys so cmdlets that recover the actual cleartext
+		// master key (e.g. Invoke-TBODpapiMasterKeyBkrp via the Bleichenbacher oracle attack) can
+		// persist the recovered material — not just the hashcat-format $DPAPImk$ hash that v4 stored.
+		//   - cleartext_key BLOB:        the recovered raw key bytes (typically 64 bytes for DPAPI)
+		//   - cleartext_key_sha1 TEXT:   SHA-1 hash of the cleartext, used by DPAPI itself to identify
+		//                                which master key decrypts a given blob (so this is the natural
+		//                                index for "do I already have the key for this blob?" queries)
+		private void MigrateSchemaV4ToV5(Action<string> logDiagnostic)
+		{
+			using var tx = _connection.BeginTransaction();
+
+			Exec("ALTER TABLE dpapi_masterkeys ADD COLUMN cleartext_key BLOB NULL;", tx);
+			Exec("ALTER TABLE dpapi_masterkeys ADD COLUMN cleartext_key_sha1 TEXT NULL COLLATE NOCASE;", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_dpapi_masterkeys_cleartext_sha1 ON dpapi_masterkeys(cleartext_key_sha1) WHERE cleartext_key_sha1 IS NOT NULL;", tx);
+
+			tx.Commit();
+
+			logDiagnostic("TBO cache: migration to schema v5 complete.");
 		}
 
 		private void Exec(string sql, SqliteTransaction tx)
@@ -774,7 +805,9 @@ RETURNING observation_id;";
 			int? hashContext,
 			string? hash,
 			string? hashLine,
-			string? failureReason)
+			string? failureReason,
+			byte[]? cleartextKey = null,
+			string? cleartextKeySha1 = null)
 		{
 			if (machineId <= 0)
 				throw new ArgumentOutOfRangeException(nameof(machineId));
@@ -788,9 +821,12 @@ RETURNING observation_id;";
 			var now = UtcNowIso8601();
 
 			using var cmd = _connection.CreateCommand();
+			// COALESCE on the cleartext columns preserves any previously stored value when an
+			// upsert is invoked without it (e.g. a later Get-TBODpapiMasterKeyHashes pass that
+			// only knows the hashcat-format hash should not wipe a recovered cleartext key).
 			cmd.CommandText = @"
-INSERT INTO dpapi_masterkeys(machine_id, scope, user_sid, key_path, master_key_guid, is_preferred, is_domain, hash_context, hash, hash_line, failure_reason, first_seen_utc, last_seen_utc)
-VALUES ($machine_id, $scope, $user_sid, $key_path, $master_key_guid, $is_preferred, $is_domain, $hash_context, $hash, $hash_line, $failure_reason, $now, $now)
+INSERT INTO dpapi_masterkeys(machine_id, scope, user_sid, key_path, master_key_guid, is_preferred, is_domain, hash_context, hash, hash_line, cleartext_key, cleartext_key_sha1, failure_reason, first_seen_utc, last_seen_utc)
+VALUES ($machine_id, $scope, $user_sid, $key_path, $master_key_guid, $is_preferred, $is_domain, $hash_context, $hash, $hash_line, $cleartext_key, $cleartext_key_sha1, $failure_reason, $now, $now)
 ON CONFLICT(machine_id, master_key_guid) DO UPDATE SET
   scope=excluded.scope,
   user_sid=COALESCE(excluded.user_sid, user_sid),
@@ -800,6 +836,8 @@ ON CONFLICT(machine_id, master_key_guid) DO UPDATE SET
   hash_context=COALESCE(excluded.hash_context, hash_context),
   hash=COALESCE(excluded.hash, hash),
   hash_line=COALESCE(excluded.hash_line, hash_line),
+  cleartext_key=COALESCE(excluded.cleartext_key, cleartext_key),
+  cleartext_key_sha1=COALESCE(excluded.cleartext_key_sha1, cleartext_key_sha1),
   failure_reason=CASE WHEN excluded.failure_reason IS NOT NULL THEN excluded.failure_reason ELSE failure_reason END,
   last_seen_utc=$now
 RETURNING dpapi_masterkey_id;";
@@ -814,6 +852,8 @@ RETURNING dpapi_masterkey_id;";
 			cmd.Parameters.AddWithValue("$hash_context", (object?)hashContext ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$hash", (object?)hash ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$hash_line", (object?)hashLine ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$cleartext_key", (object?)cleartextKey ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$cleartext_key_sha1", (object?)cleartextKeySha1 ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$failure_reason", (object?)failureReason ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$now", now);
 
@@ -1168,6 +1208,8 @@ ORDER BY
 			internal int? HashContext { get; init; }
 			internal string? Hash { get; init; }
 			internal string? HashLine { get; init; }
+			internal byte[]? CleartextKey { get; init; }
+			internal string? CleartextKeySha1 { get; init; }
 			internal string? FailureReason { get; init; }
 			internal string FirstSeenUtc { get; init; } = "";
 			internal string LastSeenUtc { get; init; } = "";
@@ -1213,6 +1255,8 @@ SELECT
   hash_context,
   hash,
   hash_line,
+  cleartext_key,
+  cleartext_key_sha1,
   failure_reason,
   first_seen_utc,
   last_seen_utc
@@ -1236,9 +1280,11 @@ ORDER BY dpapi_masterkey_id;";
 					HashContext = reader.IsDBNull(8) ? null : reader.GetInt32(8),
 					Hash = reader.IsDBNull(9) ? null : reader.GetString(9),
 					HashLine = reader.IsDBNull(10) ? null : reader.GetString(10),
-					FailureReason = reader.IsDBNull(11) ? null : reader.GetString(11),
-					FirstSeenUtc = reader.GetString(12),
-					LastSeenUtc = reader.GetString(13),
+					CleartextKey = reader.IsDBNull(11) ? null : (byte[])reader.GetValue(11),
+					CleartextKeySha1 = reader.IsDBNull(12) ? null : reader.GetString(12),
+					FailureReason = reader.IsDBNull(13) ? null : reader.GetString(13),
+					FirstSeenUtc = reader.GetString(14),
+					LastSeenUtc = reader.GetString(15),
 				});
 			}
 

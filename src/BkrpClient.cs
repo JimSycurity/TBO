@@ -15,6 +15,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	//
 	// The entire interface exposes a single operation, BackuprKey (opnum 0).
 	// Behaviour is controlled by the pguidActionAgent parameter.
+	//
+	// Wire format references:
+	//   - [MS-BKRP] for the protocol spec
+	//   - Bad-Jubies/Exploits "MS-BKRP_padding_oracle_decrypt.py" for the bare-conformant-
+	//     array marshalling of pDataIn (the [unique] referent ID shown in the IDL is NOT
+	//     present on the wire — adding one causes RPC_X_BAD_STUB_DATA), and for the
+	//     RetrieveBackupKey/RestoreKey action GUIDs.
+	//     https://github.com/Bad-Jubies/Exploits/blob/main/MS-BKRP_padding_oracle_decrypt.py
 
 	internal static class BkrpActionGuids
 	{
@@ -30,6 +38,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public uint ReturnCode { get; init; }
 		public byte[]? DataOut { get; init; }
 		public uint DataOutLength { get; init; }
+		internal byte[]? DiagStubBytes { get; init; }
 
 		public bool IsSuccess => ReturnCode == 0;
 
@@ -47,7 +56,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	//   DWORD BackuprKey(
 	//     [in]           handle_t                          h,          // binding handle, not marshalled
 	//     [in]           GUID                             *pguidActionAgent,   // ref pointer (no referent ID)
-	//     [in, unique, size_is(cbDataIn)] byte            *pDataIn,
+	//     [in, size_is(cbDataIn)] byte                    *pDataIn,
 	//     [in]           DWORD                             cbDataIn,
 	//     [out, size_is(,*pcbDataOut)] byte              **ppDataOut,
 	//     [out]          DWORD                            *pcbDataOut,
@@ -74,14 +83,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			// pguidActionAgent: reference pointer – GUID written inline (no referent ID)
 			encoder.WriteValue(actionAgent);
 
-			// pDataIn: unique pointer to conformant byte array
-			encoder.WriteUniqueReferentId(dataIn == null);
-			if (dataIn != null)
-			{
-				encoder.WriteArrayHeader<byte>(dataIn);
-				for (int i = 0; i < dataIn.Length; i++)
-					encoder.WriteValue(dataIn[i]);
-			}
+			// pDataIn: [in, size_is(cbDataIn)] byte* — no referent ID on the wire.
+			// Despite the IDL showing [unique], the actual MS-BKRP wire format treats this as
+			// a bare conformant array (no referent ID). Adding a referent ID causes the server
+			// to return RPC_X_BAD_STUB_DATA (the server's NDR layer rejects it).
+			// Conformant array: max_count followed immediately by the bytes.
+			var effectiveData = dataIn ?? Array.Empty<byte>();
+			encoder.WriteArrayHeader<byte>(effectiveData);
+			for (int i = 0; i < effectiveData.Length; i++)
+				encoder.WriteValue(effectiveData[i]);
 
 			// cbDataIn
 			encoder.WriteValue(cbDataIn);
@@ -90,6 +100,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			encoder.WriteValue(0u);
 
 			IRpcDecoder decoder = await this.SendRequestAsync(req, cancellationToken).ConfigureAwait(false);
+
+			// Capture raw stub bytes BEFORE reading (position is 0 at this point)
+			var stubReader = decoder.GetStubData();
+			var diagBytes = stubReader.Remaining.ToArray();
 
 			// ppDataOut: outer ref pointer is not on wire; read the inner unique pointer referent
 			var innerRefId = decoder.ReadReferentId();
@@ -112,7 +126,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				ReturnCode = retval,
 				DataOut = dataOut,
-				DataOutLength = cbDataOut
+				DataOutLength = cbDataOut,
+				DiagStubBytes = diagBytes
 			};
 		}
 	}
@@ -154,17 +169,53 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private bool _disposed;
 
 		// Convenience: retrieve the DC's RSA backup-key certificate and extract modulus/exponent.
-		public async Task<BkrpPublicKeyInfo> GetBackupPublicKeyAsync(CancellationToken cancellationToken)
+		// backupKeyGuid must be the GUID from DomainKeyBlock.BackupKeyGuid — the server locates
+		// its stored backup key by matching this GUID in pDataIn ([MS-BKRP] §3.1.4.1.1).
+		public async Task<BkrpPublicKeyInfo> GetBackupPublicKeyAsync(Guid backupKeyGuid, CancellationToken cancellationToken)
 		{
+			var guidBytes = new byte[16];
+			backupKeyGuid.TryWriteBytes(guidBytes);
+
 			var result = await this.Client.BackuprKeyAsync(
 				BkrpActionGuids.RetrieveBackupKey,
-				new byte[4],   // pDataIn must be non-null per server expectation; 4 zero bytes is conventional
-				4,
+				guidBytes,
+				16,
 				cancellationToken).ConfigureAwait(false);
 
 			if (!result.IsSuccess)
+			{
+				// If 0x57, probe with the null GUID to distinguish "this specific key not in AD"
+				// from "BKRP not working at all". Null GUID returns the DC's current backup key
+				// ([MS-BKRP] §3.1.4.1.1) so success means the plumbing works but BackupKeyGuid
+				// refers to a key that has been rotated out of AD on this DC.
+				string? probeHint = null;
+				if (result.ReturnCode == 0x57)
+				{
+					try
+					{
+						var probe = await this.Client.BackuprKeyAsync(
+							BkrpActionGuids.RetrieveBackupKey,
+							new byte[16],   // null GUID → return current backup key
+							16,
+							cancellationToken).ConfigureAwait(false);
+						probeHint = probe.IsSuccess
+							? $" Null-GUID probe succeeded (DC has a current backup key). " +
+							  $"Requested GUID {backupKeyGuid:D} is not present in AD on this DC — " +
+							  $"it may have been rotated. Check AD: Get-ADObject -Filter {{name -like \"BCKUPKEY*\"}} " +
+							  $"-SearchBase \"CN=System,...\" -Properties objectGuid,name"
+							: $" Null-GUID probe also failed (0x{probe.ReturnCode:x}) — DC has no backup keys.";
+					}
+					catch { /* best-effort probe */ }
+				}
+
+				var diag = result.DiagStubBytes;
 				throw new InvalidOperationException(
-					$"BackuprKey(RetrieveBackupKey) failed with Win32 error 0x{result.ReturnCode:x}.");
+					$"BackuprKey(RetrieveBackupKey) failed with Win32 error 0x{result.ReturnCode:x} " +
+					$"for backup key GUID {backupKeyGuid:D}." +
+					(probeHint ?? string.Empty) + " " +
+					$"Response stub ({diag?.Length ?? 0} bytes): " +
+					(diag != null ? BitConverter.ToString(diag) : "(null)"));
+			}
 
 			if (result.DataOut == null || result.DataOut.Length == 0)
 				throw new InvalidDataException("BackuprKey returned no certificate data.");
@@ -204,6 +255,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		// Key size in bytes (= modulus byte length)
 		public int KeySizeBytes { get; init; }
+
+		// Parse a locally cached BK-{domain} file from the user's Protect directory.
+		// Format: version(4) + cbCert(4) + header-data + DER-cert (last cbCert bytes).
+		public static BkrpPublicKeyInfo FromBkFile(byte[] bkFileBytes)
+		{
+			if (bkFileBytes == null || bkFileBytes.Length < 8)
+				throw new InvalidDataException("BK file is too short to contain a certificate.");
+
+			var cbCert = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bkFileBytes.AsSpan(4));
+			if (cbCert == 0 || cbCert > (uint)(bkFileBytes.Length - 8))
+				throw new InvalidDataException(
+					$"BK file certificate length field (0x{cbCert:x}) is out of range for a {bkFileBytes.Length}-byte file.");
+
+			var certOffset = bkFileBytes.Length - (int)cbCert;
+			return FromCertificate(bkFileBytes[certOffset..]);
+		}
 
 		public static BkrpPublicKeyInfo FromCertificate(byte[] derCertificate)
 		{

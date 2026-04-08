@@ -842,6 +842,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						writer.WriteString("hash", mk.Hash);
 					if (!string.IsNullOrWhiteSpace(mk.HashLine))
 						writer.WriteString("hashLine", mk.HashLine);
+					if (mk.CleartextKey != null && mk.CleartextKey.Length > 0)
+						writer.WriteString("cleartextKey", Convert.ToHexString(mk.CleartextKey));
+					if (!string.IsNullOrWhiteSpace(mk.CleartextKeySha1))
+						writer.WriteString("cleartextKeySha1", mk.CleartextKeySha1);
 					if (!string.IsNullOrWhiteSpace(mk.FailureReason))
 						writer.WriteString("failureReason", mk.FailureReason);
 					writer.WriteString("firstSeenUtc", mk.FirstSeenUtc);

