@@ -7,3 +7,12 @@ Lib/
 .vs/
 *.user
 *.suo
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/issues.jsonl.preupgrade.bak
+
+# Claude Code local settings (per-machine permission overrides)
+.claude/settings.local.json
