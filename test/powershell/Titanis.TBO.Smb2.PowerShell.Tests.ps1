@@ -182,6 +182,34 @@ Describe 'Titanis.TBO.Smb2 binary module (if built)' {
 
 Describe 'Titanis.TBO.Smb2 cmdlet help' {
     BeforeAll {
+        function Get-HelpText {
+            param([object]$InputObject)
+
+            if ($null -eq $InputObject) {
+                return ''
+            }
+
+            $parts = @()
+            foreach ($item in @($InputObject)) {
+                if ($null -eq $item) { continue }
+
+                if ($item -is [string]) {
+                    $parts += $item
+                    continue
+                }
+
+                $textProperty = $item.PSObject.Properties['Text']
+                if ($textProperty) {
+                    $parts += [string]$textProperty.Value
+                    continue
+                }
+
+                $parts += [string]$item
+            }
+
+            return ($parts | Out-String)
+        }
+
         $script:helpModule = $null
         $binary = Get-HelpModuleBinary -repoRoot $script:repoRoot
         if ($binary) {
@@ -209,10 +237,13 @@ Describe 'Titanis.TBO.Smb2 cmdlet help' {
 
             $description = ''
             if ($help.PSObject.Properties.Match('Description').Count -gt 0) {
-                $description = $help.Description | ForEach-Object { $_.Text } | Out-String
+                $description = Get-HelpText -InputObject $help.Description
             }
             if (-not $description.Trim() -and $help.PSObject.Properties.Match('Details').Count -gt 0) {
-                $description = $help.Details.Description | ForEach-Object { $_.Text } | Out-String
+                $details = $help.Details
+                if ($details -and $details.PSObject.Properties.Match('Description').Count -gt 0) {
+                    $description = Get-HelpText -InputObject $details.Description
+                }
             }
             $description.Trim() | Should -Not -BeNullOrEmpty
 

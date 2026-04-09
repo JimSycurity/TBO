@@ -64,7 +64,8 @@ AQAUgAwBAAAYAQAAFAAAAEgAAAACADQAAgAAAAKAFAD/AQ8AAQEAAAAAAAEAAAAAFAAYAJ0BAgABAgAA
 
 			$value = Get-TBORegValue -ServerName 'server' -Path $taskKeyPath -Name 'SD'
 			$value | Should -Not -BeNullOrEmpty
-			$value.ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::Binary)
+			$registryValueType = Get-TboReferencedType -TypeName 'Titanis.Winterop.Registry.RegistryValueType' -RepoRoot $script:repoRoot
+			$value.ValueType | Should -Be ([System.Enum]::Parse($registryValueType, 'Binary'))
 			[Convert]::ToBase64String($value.Bytes) | Should -Be ([Convert]::ToBase64String($sdBytes))
 		}
 	}

@@ -13,6 +13,8 @@ Lib/
 *.db
 .beads-credential-key
 .beads/issues.jsonl.preupgrade.bak
+.beads/.backup-tmp-*
 
 # Claude Code local settings (per-machine permission overrides)
 .claude/settings.local.json
+

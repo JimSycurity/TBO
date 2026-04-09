@@ -472,6 +472,167 @@
 
   <command:command>
     <command:details>
+      <command:name>Invoke-TBODpapiMasterKeyBkrp</command:name>
+      <command:verb>Invoke</command:verb>
+      <command:noun>TBODpapiMasterKeyBkrp</command:noun>
+      <maml:description>
+        <maml:para>Recovers a DPAPI master key by exploiting the PKCS#1 v1.5 padding oracle in the domain controller BKRP service.</maml:para>
+        <maml:para>Requires a domain-user master key file that contains a DomainKey block. The victim's plaintext password is not required.</maml:para>
+        <maml:para>This attack can issue many RPC calls to \PIPE\protected_storage and can take 15 to 60+ minutes depending on key size and query throttle settings.</maml:para>
+      </maml:description>
+    </command:details>
+    <command:syntax>
+      <command:syntaxItem>
+        <command:name>Invoke-TBODpapiMasterKeyBkrp</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>DomainController</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeyBytes</maml:name>
+          <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+      <command:syntaxItem>
+        <command:name>Invoke-TBODpapiMasterKeyBkrp</command:name>
+        <command:parameter required="true" position="0">
+          <maml:name>DomainController</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>ServerName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="true">
+          <maml:name>MasterKeyPath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>ShareName</maml:name>
+          <command:parameterValue>String</command:parameterValue>
+        </command:parameter>
+      </command:syntaxItem>
+    </command:syntax>
+    <command:parameters>
+      <command:parameter required="true" position="0">
+        <maml:name>DomainController</maml:name>
+        <maml:description>
+          <maml:para>Domain controller that hosts the BKRP endpoint.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MasterKeyBytes</maml:name>
+        <maml:description>
+          <maml:para>Raw bytes of the target DPAPI master key file.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ServerName</maml:name>
+        <maml:description>
+          <maml:para>Source host that contains the master key file when using -MasterKeyPath.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MasterKeyPath</maml:name>
+        <maml:description>
+          <maml:para>UNC path of the master key file to read over SMB (alias: KeyPath).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>ShareName</maml:name>
+        <maml:description>
+          <maml:para>Share name used when resolving Protect-directory paths (default: C$).</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MasterKeyGuid</maml:name>
+        <maml:description>
+          <maml:para>Optional master key GUID to include in output and cache records.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>BackupKeyFileBytes</maml:name>
+        <maml:description>
+          <maml:para>Optional BK-* file bytes used to extract the DC public key instead of calling RETRIEVE_BACKUP_KEY.</maml:para>
+        </maml:description>
+        <command:parameterValue>Byte[]</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>QueryThrottleMs</maml:name>
+        <maml:description>
+          <maml:para>Inter-query delay in milliseconds to reduce DC load.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MaxRetries</maml:name>
+        <maml:description>
+          <maml:para>Number of transport retry attempts for transient oracle call failures.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>RetryBaseDelayMs</maml:name>
+        <maml:description>
+          <maml:para>Initial retry delay in milliseconds for exponential backoff.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>MaxOracleQueries</maml:name>
+        <maml:description>
+          <maml:para>Hard cap on total oracle requests.</maml:para>
+        </maml:description>
+        <command:parameterValue>Int32</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>When set, writes recovered master key material to the TBO cache.</maml:para>
+        </maml:description>
+        <command:parameterValue>SwitchParameter</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional path override for the TBO cache database.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
+    </command:parameters>
+    <command:examples>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 1 --------------------------</command:title>
+        <maml:code>Invoke-TBODpapiMasterKeyBkrp -DomainController corp1-dc01.corp1.lab.home-labs.lol -ServerName corp1-ws01.corp1.lab.home-labs.lol -MasterKeyPath '\\corp1-ws01.corp1.lab.home-labs.lol\C$\Users\jsmith\AppData\Roaming\Microsoft\Protect\S-1-5-21-111-222-333-1105\{8e1cbf67-0cd2-4d51-8a5f-9016bd8e9f52}'</maml:code>
+        <maml:remarks>
+          <maml:para>Loads the master key file from SMB and runs the BKRP oracle attack against the specified domain controller.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 2 --------------------------</command:title>
+        <maml:code>Get-TBODpapiMasterKeyLocations -ServerName corp1-ws01.corp1.lab.home-labs.lol -Scope User | Where-Object IsDomain | Select-Object -First 1 | Invoke-TBODpapiMasterKeyBkrp -DomainController corp1-dc01.corp1.lab.home-labs.lol</maml:code>
+        <maml:remarks>
+          <maml:para>Pipelines a discovered domain master key file location into the BKRP cmdlet.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Invoke-TBODpapiMasterKeyBkrp -DomainController corp1-dc01.corp1.lab.home-labs.lol -MasterKeyBytes (Get-Content .\masterkey.bin -AsByteStream -ReadCount 0) -QueryThrottleMs 5 -Cache</maml:code>
+        <maml:remarks>
+          <maml:para>Runs the attack from local master key bytes, throttles request rate, and caches the recovered key material.</maml:para>
+        </maml:remarks>
+      </command:example>
+    </command:examples>
+  </command:command>
+
+  <command:command>
+    <command:details>
       <command:name>Find-TBODpapiBlobs</command:name>
       <command:verb>Find</command:verb>
       <command:noun>TBODpapiBlobs</command:noun>

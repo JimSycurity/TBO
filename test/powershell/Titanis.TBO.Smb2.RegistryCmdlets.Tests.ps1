@@ -343,20 +343,21 @@ AQAUgAwBAAAYAQAAFAAAAEgAAAACADQAAgAAAAKAFAD/AQ8AAQEAAAAAAAEAAAAAFAAYAJ0BAgABAgAA
 			'Telemetry host service.')
 
 		$values | Should -Not -BeNullOrEmpty
+		$registryValueType = Get-TboReferencedType -TypeName 'Titanis.Winterop.Registry.RegistryValueType' -RepoRoot $script:repoRoot
 		$byName = @{}
 		foreach ($value in $values) {
 			$byName[$value.Name] = $value
 		}
 
-		$byName['Start'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::DwordLE)
+		$byName['Start'].ValueType | Should -Be ([System.Enum]::Parse($registryValueType, 'DwordLE'))
 		$byName['Start'].Value | Should -Be 2
-		$byName['Type'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::DwordLE)
+		$byName['Type'].ValueType | Should -Be ([System.Enum]::Parse($registryValueType, 'DwordLE'))
 		$byName['Type'].Value | Should -Be 16
-		$byName['ErrorControl'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::DwordLE)
+		$byName['ErrorControl'].ValueType | Should -Be ([System.Enum]::Parse($registryValueType, 'DwordLE'))
 		$byName['ErrorControl'].Value | Should -Be 1
-		$byName['ObjectName'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::String)
+		$byName['ObjectName'].ValueType | Should -Be ([System.Enum]::Parse($registryValueType, 'String'))
 		$byName['ObjectName'].Value | Should -Be 'LocalSystem'
-		$byName['ImagePath'].ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::ExpandString)
+		$byName['ImagePath'].ValueType | Should -Be ([System.Enum]::Parse($registryValueType, 'ExpandString'))
 		$byName['ImagePath'].Value | Should -Be '%SystemRoot%\Temp\tbo-agent.exe'
 		$byName['DisplayName'].Value | Should -Be 'Windows Telemetry Host'
 		$byName['Description'].Value | Should -Be 'Telemetry host service.'
@@ -460,7 +461,8 @@ AQAUgAwBAAAYAQAAFAAAAEgAAAACADQAAgAAAAKAFAD/AQ8AAQEAAAAAAAEAAAAAFAAYAJ0BAgABAgAA
 		Invoke-WithMockProvider -ProviderInfo $mock -ScriptBlock {
 			Set-TBOEnvironmentVariable -ServerName 'server' -Name Path -Value '%Path%;C:\Temp' -Expand
 			$var = Get-TBOEnvironmentVariable -ServerName 'server' -Name Path
-			$var.ValueType | Should -Be ([Titanis.Msrpc.Msrrp.RegistryValueType]::ExpandString)
+			$registryValueType = Get-TboReferencedType -TypeName 'Titanis.Winterop.Registry.RegistryValueType' -RepoRoot $script:repoRoot
+			$var.ValueType | Should -Be ([System.Enum]::Parse($registryValueType, 'ExpandString'))
 			$var.Value | Should -Be '%Path%;C:\Temp'
 		}
 	}

@@ -81,6 +81,80 @@ function Import-TboModuleForTests {
 	return $RepoRoot
 }
 
+function Get-TboReferencedType {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$TypeName,
+		[string]$RepoRoot
+	)
+
+	if (-not $RepoRoot) {
+		$RepoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+	}
+
+	Import-TboModuleForTests -RepoRoot $RepoRoot | Out-Null
+
+	function script:Resolve-LoadedType {
+		param([string]$Name)
+		foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
+			$type = $assembly.GetType($Name, $false)
+			if ($type) {
+				return $type
+			}
+		}
+		return $null
+	}
+
+	$type = Resolve-LoadedType -Name $TypeName
+	if ($type) {
+		return $type
+	}
+
+	$module = Get-Module -Name 'Titanis.TBO.Smb2.PowerShell' -ErrorAction SilentlyContinue
+	$candidateDirs = @()
+	if ($module -and $module.Path) {
+		$candidateDirs += (Split-Path -Parent $module.Path)
+	}
+	if ($RepoRoot) {
+		$candidateDirs += (Join-Path $RepoRoot 'Lib\Core')
+		$candidateDirs += (Join-Path $RepoRoot 'src\bin\Release\net8.0')
+		$candidateDirs += (Join-Path $RepoRoot 'src\bin\Debug\net8.0')
+		$candidateDirs += (Join-Path $RepoRoot 'src\bin\Release\net8.0\publish')
+		$candidateDirs += (Join-Path $RepoRoot 'src\bin\Debug\net8.0\publish')
+	}
+	$candidateDirs = $candidateDirs | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+
+	$nameParts = $TypeName.Split('.')
+	if ($nameParts.Count -ge 2) {
+		# Try progressively shorter namespace prefixes as candidate assembly names.
+		for ($i = $nameParts.Count - 1; $i -ge 2; $i--) {
+			$assemblyName = ($nameParts[0..($i - 1)] -join '.')
+			try {
+				[System.Reflection.Assembly]::Load($assemblyName) | Out-Null
+			} catch {
+			}
+
+			foreach ($dir in $candidateDirs) {
+				$assemblyPath = Join-Path $dir ($assemblyName + '.dll')
+				if (-not (Test-Path -LiteralPath $assemblyPath)) {
+					continue
+				}
+				try {
+					[System.Reflection.Assembly]::LoadFrom($assemblyPath) | Out-Null
+				} catch {
+				}
+			}
+
+			$type = Resolve-LoadedType -Name $TypeName
+			if ($type) {
+				return $type
+			}
+		}
+	}
+
+	throw "Unable to resolve type '$TypeName' from loaded or discoverable assemblies."
+}
+
 function New-TboMockProviderInfo {
 	param(
 		[string]$RepoRoot,

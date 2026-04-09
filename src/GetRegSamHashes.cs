@@ -116,7 +116,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (ingestCache && !string.IsNullOrWhiteSpace(info.NtlmHashText))
 				{
 					var principalSid = result.AccountDomainSid != null
-						? result.AccountDomainSid.Concat(info.Rid).ToSddlString()
+						// Use canonical SID text, not SDDL aliases (e.g. "LA"), so domain-scoped
+						// local accounts from different machines do not collapse in cache identity.
+						? result.AccountDomainSid.Concat(info.Rid).ToString()
 						: null;
 
 					try
