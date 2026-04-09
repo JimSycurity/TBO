@@ -11,6 +11,35 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string Label { get; init; } = string.Empty;
 		public byte[] KeyMaterial { get; init; } = Array.Empty<byte>();
 		public double Confidence { get; init; }
+
+		/// <summary>
+		/// The type of password hash this candidate's prekey was derived from. Values match the
+		/// <c>hash_type</c> column of the <c>verified_password_hashes</c> cache table:
+		/// <c>"sha1_pwd"</c> (SHA-1 of the UTF-16 password) or <c>"nt_pwd"</c> (MD4 of the UTF-16 password, aka NT hash).
+		/// <see langword="null"/> for candidates whose source hash is not (yet) tracked.
+		/// </summary>
+		public string? SourceHashType { get; init; }
+
+		/// <summary>
+		/// The raw bytes of the source hash identified by <see cref="SourceHashType"/>. On a successful
+		/// decrypt, callers should persist this to the verified-hash cache so future runs can skip
+		/// re-deriving from plaintext. <see langword="null"/> when <see cref="SourceHashType"/> is unknown.
+		/// </summary>
+		public byte[]? SourceHash { get; init; }
+	}
+
+	/// <summary>
+	/// String constants for <see cref="DpapiKeyMaterialCandidate.SourceHashType"/> and the cache
+	/// table's <c>hash_type</c> column. Kept as constants rather than an enum so callers/storage
+	/// can round-trip the raw string without a switch/enum dependency.
+	/// </summary>
+	internal static class DpapiVerifiedHashTypes
+	{
+		/// <summary>SHA-1 hash of the UTF-16 encoded user password (20 bytes).</summary>
+		public const string Sha1Pwd = "sha1_pwd";
+
+		/// <summary>NT hash — MD4 of the UTF-16 encoded user password (16 bytes).</summary>
+		public const string NtPwd = "nt_pwd";
 	}
 
 	internal static class DpapiUserKeyDerivation
@@ -29,19 +58,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			password = string.IsNullOrWhiteSpace(password) ? null : password;
 			ntHash = (ntHash != null && ntHash.Length > 0) ? ntHash : null;
 
-			var candidates = new List<DpapiKeyMaterialCandidate>();
-
+			byte[]? sha1Password = null;
 			if (password != null)
 			{
 				var passwordUtf16 = Encoding.Unicode.GetBytes(password);
-				var sha1Password = SHA1.HashData(passwordUtf16);
-				var localPreKey = DeriveLocalPreKeyFromHash(userSid, sha1Password);
-				candidates.Add(new DpapiKeyMaterialCandidate
-				{
-					Label = "Local: HMAC-SHA1(SHA1(password), SID)",
-					KeyMaterial = localPreKey,
-					Confidence = 0.9
-				});
+				sha1Password = SHA1.HashData(passwordUtf16);
 
 				// If the caller didn't supply an NT hash, derive it from the password to cover domain-style keys too.
 				if (ntHash == null)
@@ -51,7 +72,42 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 			}
 
-			if (ntHash != null && ntHash.Length > 0)
+			return DerivePreKeyCandidatesFromHashes(userSid, sha1Password, ntHash);
+		}
+
+		/// <summary>
+		/// Builds candidates directly from pre-computed password hashes — used by both the plaintext
+		/// entry point above and the verified-hash cache reader path in <c>Get-TBODpapi*</c> cmdlets.
+		/// Each returned candidate is stamped with its <c>SourceHashType</c>/<c>SourceHash</c> so that
+		/// a downstream successful decrypt can round-trip the winning hash into the cache.
+		/// </summary>
+		internal static IReadOnlyList<DpapiKeyMaterialCandidate> DerivePreKeyCandidatesFromHashes(
+			string userSid,
+			byte[]? sha1Password,
+			byte[]? ntHash)
+		{
+			if (string.IsNullOrWhiteSpace(userSid))
+				return Array.Empty<DpapiKeyMaterialCandidate>();
+
+			sha1Password = (sha1Password != null && sha1Password.Length > 0) ? sha1Password : null;
+			ntHash = (ntHash != null && ntHash.Length > 0) ? ntHash : null;
+
+			var candidates = new List<DpapiKeyMaterialCandidate>();
+
+			if (sha1Password != null)
+			{
+				var localPreKey = DeriveLocalPreKeyFromHash(userSid, sha1Password);
+				candidates.Add(new DpapiKeyMaterialCandidate
+				{
+					Label = "Local: HMAC-SHA1(SHA1(password), SID)",
+					KeyMaterial = localPreKey,
+					Confidence = 0.9,
+					SourceHashType = DpapiVerifiedHashTypes.Sha1Pwd,
+					SourceHash = (byte[])sha1Password.Clone(),
+				});
+			}
+
+			if (ntHash != null)
 			{
 				// Domain-style DPAPI: derive a 16-byte credkey via PBKDF2-HMAC-SHA256(ntHash, sid, ...),
 				// then prekey = HMAC-SHA1(credkey, sid\0).
@@ -60,7 +116,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				{
 					Label = "Domain: HMAC-SHA1(PBKDF2-SHA256(NT), SID)",
 					KeyMaterial = domainPreKey,
-					Confidence = 0.9
+					Confidence = 0.9,
+					SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+					SourceHash = (byte[])ntHash.Clone(),
 				});
 
 				// Fallback candidate sometimes referenced in tooling.
@@ -69,7 +127,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				{
 					Label = "Fallback: HMAC-SHA1(NT, SID)",
 					KeyMaterial = ntHashHmac,
-					Confidence = 0.3
+					Confidence = 0.3,
+					SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+					SourceHash = (byte[])ntHash.Clone(),
 				});
 			}
 

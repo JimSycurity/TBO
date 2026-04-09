@@ -86,46 +86,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		internal static string NormalizeShareName(string? shareName)
 			=> DpapiHelpers.NormalizeShareName(shareName);
 
-		internal static IReadOnlyDictionary<Guid, byte[]> BuildMasterKeySet(
-			IEnumerable<TboDpapiMasterKeyInfo>? masterKeys,
-			Action<string>? logWarning,
-			string context)
-		{
-			logWarning ??= _ => { };
-			context = string.IsNullOrWhiteSpace(context) ? "BuildMasterKeySet" : context;
-
-			if (masterKeys == null)
-				return new Dictionary<Guid, byte[]>();
-
-			var results = new Dictionary<Guid, byte[]>();
-			foreach (var entry in masterKeys)
-			{
-				if (entry == null)
-					continue;
-				if (string.IsNullOrWhiteSpace(entry.MasterKeyGuid) || string.IsNullOrWhiteSpace(entry.MasterKey))
-					continue;
-				if (!Guid.TryParse(entry.MasterKeyGuid, out var guid))
-					continue;
-
-				byte[] keyBytes;
-				try
-				{
-					keyBytes = BinaryHelper.ParseHexString(entry.MasterKey.AsSpan());
-				}
-				catch (Exception ex)
-				{
-					logWarning($"{context} failed to parse master key {entry.MasterKeyGuid}: {ex.Message}");
-					continue;
-				}
-
-				if (keyBytes.Length == 0)
-					continue;
-				results[guid] = keyBytes;
-			}
-
-			return results;
-		}
-
 		internal static IEnumerable<UncPath> EnumerateDefaultCapiKeyDirectories(string serverName, string shareName)
 		{
 			yield return new UncPath(serverName, shareName, @"ProgramData\Microsoft\Crypto\RSA\MachineKeys");
@@ -786,7 +746,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public string ShareName { get; set; } = MachineCertificateHelpers.DefaultShareName;
 
-		[Parameter(Mandatory = true)]
+		[Parameter]
 		public TboDpapiMasterKeyInfo[]? MasterKeys { get; set; }
 
 		[Parameter]
@@ -794,6 +754,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		[Parameter]
 		public SwitchParameter SkipCng { get; set; }
+
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
 
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
@@ -805,10 +771,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
-			var masterKeySet = MachineCertificateHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOMachineCertificates");
+			var masterKeySet = DpapiHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOMachineCertificates");
+			if (this.ResolveCacheIngestionEnabled(this.Cache))
+			{
+				var cached = DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg));
+				DpapiHelpers.MergeMasterKeySets(masterKeySet, cached);
+			}
 			if (masterKeySet.Count == 0)
 			{
-				this.LogWarning(smb, "Get-TBOMachineCertificates did not receive any usable master keys (missing MasterKeyGuid or MasterKey).");
+				this.LogWarning(smb, "Get-TBOMachineCertificates: no master keys available (supply -MasterKeys or enable -Cache).");
 				return;
 			}
 

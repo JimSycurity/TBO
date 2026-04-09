@@ -56,6 +56,26 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public string? UserNtlmHash { get; set; }
 
+		/// <summary>
+		/// When set, persists the password/NT hash used to decrypt CREDHIST (and the hashes recovered
+		/// from within the decrypted chain) to the TBO cache's <c>verified_password_hashes</c> table
+		/// for reuse by later cmdlet runs. Cache reads are always attempted when cache ingestion is
+		/// enabled — see <c>ResolveCacheIngestionEnabled</c>.
+		/// </summary>
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		/// <summary>
+		/// Optional explicit path to the TBO cache SQLite file. Overrides the
+		/// <c>TITANIS_TBO_CACHE</c> environment variable and the default per-user path.
+		/// </summary>
+		[Parameter]
+		public string? CachePath { get; set; }
+
+		private const string CacheCmdletName = "Get-TBODpapiCredHist";
+		private const string VerifiedViaCredHistChain = "credhist_chain_decrypt";
+		private const string VerifiedViaCredHistEntry = "credhist_entry";
+
 		private CancellationTokenSource? _cancelSource;
 
 		protected override void ProcessRecord(ISmbProviderInfo smb)
@@ -71,10 +91,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (string.IsNullOrWhiteSpace(shareName))
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
-			var startHashes = ResolveStartHashes();
-			if (startHashes.Count == 0)
+			var plaintextStartHashes = ResolveStartHashes();
+
+			// Load cached verified hashes for the server once; per-file logic augments its own
+			// start-hash list with the entries for that file's SID.
+			var cacheIngestEnabled = this.ResolveCacheIngestionEnabled(this.Cache);
+			var cachedHashesBySid = new Dictionary<string, List<(string Label, byte[] Hash, string HashType)>>(StringComparer.OrdinalIgnoreCase);
+			if (cacheIngestEnabled)
 			{
-				this.WriteWarning("Get-TBODpapiCredHist requires UserPassword/UserNtlmHash to decrypt CREDHIST.");
+				LoadCachedHashes(serverName, cachedHashesBySid);
+			}
+
+			if (plaintextStartHashes.Count == 0 && cachedHashesBySid.Count == 0)
+			{
+				this.WriteWarning("Get-TBODpapiCredHist requires UserPassword/UserNtlmHash (or cached verified hashes) to decrypt CREDHIST.");
 				return;
 			}
 
@@ -97,7 +127,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					shareName,
 					userDirName,
 					UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userDirName}\AppData\Roaming\Microsoft\Protect"),
-					startHashes,
+					plaintextStartHashes,
+					cacheIngestEnabled,
+					cachedHashesBySid,
 					cancellationToken);
 
 				ProcessProtectRoot(
@@ -106,7 +138,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					shareName,
 					userDirName,
 					UncPath.Parse($@"\\{serverName}\{shareName}\Users\{userDirName}\AppData\Local\Microsoft\Protect"),
-					startHashes,
+					plaintextStartHashes,
+					cacheIngestEnabled,
+					cachedHashesBySid,
 					cancellationToken);
 			}
 		}
@@ -117,7 +151,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			base.StopProcessing();
 		}
 
-		private List<(string Label, byte[] Hash)> ResolveStartHashes()
+		private List<(string Label, byte[] Hash, string HashType)> ResolveStartHashes()
 		{
 			byte[]? userNtHash = null;
 			if (!string.IsNullOrWhiteSpace(this.UserNtlmHash))
@@ -146,16 +180,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 			}
 
-			var candidates = new List<(string Label, byte[] Hash)>();
+			var candidates = new List<(string Label, byte[] Hash, string HashType)>();
 			if (userSha1Hash != null && userSha1Hash.Length > 0)
-				candidates.Add(("SHA1(password)", userSha1Hash));
+				candidates.Add(("SHA1(password)", userSha1Hash, DpapiVerifiedHashTypes.Sha1Pwd));
 			if (userNtHash != null && userNtHash.Length > 0)
-				candidates.Add(("UserNtlmHash", userNtHash));
+				candidates.Add(("UserNtlmHash", userNtHash, DpapiVerifiedHashTypes.NtPwd));
 			if (userNtHashFromPassword != null && userNtHashFromPassword.Length > 0)
-				candidates.Add(("NT(password)", userNtHashFromPassword));
+				candidates.Add(("NT(password)", userNtHashFromPassword, DpapiVerifiedHashTypes.NtPwd));
 
 			return candidates
-				.GroupBy(x => Convert.ToHexString(x.Hash), StringComparer.OrdinalIgnoreCase)
+				.GroupBy(x => x.HashType + ":" + Convert.ToHexString(x.Hash), StringComparer.OrdinalIgnoreCase)
 				.Select(g => g.First())
 				.ToList();
 		}
@@ -166,7 +200,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			string shareName,
 			string userDirName,
 			UncPath protectRoot,
-			IReadOnlyList<(string Label, byte[] Hash)> startHashes,
+			IReadOnlyList<(string Label, byte[] Hash, string HashType)> plaintextStartHashes,
+			bool cacheIngestEnabled,
+			IReadOnlyDictionary<string, List<(string Label, byte[] Hash, string HashType)>> cachedHashesBySid,
 			CancellationToken cancellationToken)
 		{
 			var fileSystem = SmbFileSystemResolver.Resolve(smb);
@@ -240,15 +276,35 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						continue;
 					}
 
+					// Per-SID start hash list: plaintext (always) plus any cached entries for this
+					// file's SID. Deduplicated by HashType:HashHex so that overlap is silently dropped.
+					var fileSid = entry.FileName;
+					var perFileStartHashes = new List<(string Label, byte[] Hash, string HashType)>(plaintextStartHashes);
+					if (cachedHashesBySid.TryGetValue(fileSid, out var cachedForSid))
+					{
+						if (cachedForSid.Count > 0)
+							this.WriteVerbose($"Get-TBODpapiCredHist: augmenting start hashes for SID {fileSid} with {cachedForSid.Count} cached entry/entries.");
+						perFileStartHashes.AddRange(cachedForSid);
+					}
+
+					perFileStartHashes = perFileStartHashes
+						.GroupBy(x => x.HashType + ":" + Convert.ToHexString(x.Hash), StringComparer.OrdinalIgnoreCase)
+						.Select(g => g.First())
+						.ToList();
+
 					string? usedLabel = null;
+					string? usedHashType = null;
+					byte[]? usedStartHash = null;
 					string? failureReason = null;
 					IReadOnlyList<DpapiCredHistDecryptedEntry> decryptedEntries = Array.Empty<DpapiCredHistDecryptedEntry>();
 
-					foreach (var (label, startHash) in startHashes)
+					foreach (var (label, startHash, hashType) in perFileStartHashes)
 					{
 						if (credHistFile.TryDecryptChain(startHash, out decryptedEntries, out failureReason))
 						{
 							usedLabel = label;
+							usedHashType = hashType;
+							usedStartHash = startHash;
 							break;
 						}
 					}
@@ -256,6 +312,23 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					if (decryptedEntries != null && decryptedEntries.Count > 0)
 					{
 						var currentGuidText = credHistFile.CurrentGuid?.ToString();
+
+						// Cache write: (1) the winning start hash — verified by a successful chain
+						// decrypt — and (2) every PasswordHash/NtHash recovered from inside the chain.
+						// Historical hashes verify historical master keys so they're just as useful
+						// to later cmdlets and the planned triage cmdlet (TBO-txp).
+						if (cacheIngestEnabled && usedStartHash != null && usedHashType != null)
+						{
+							CacheVerifiedHashes(
+								serverName,
+								fileSid,
+								userDirName,
+								usedStartHash,
+								usedHashType,
+								decryptedEntries,
+								credHistPath.ToString());
+						}
+
 						for (int i = 0; i < decryptedEntries.Count; i++)
 						{
 							var dec = decryptedEntries[i];
@@ -281,13 +354,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					}
 					else
 					{
-						var tried = string.Join(", ", startHashes.Select(s => s.Label));
+						var tried = perFileStartHashes.Count == 0
+							? "(none)"
+							: string.Join(", ", perFileStartHashes.Select(s => s.Label));
 						this.WriteObject(new TboDpapiCredHistEntryInfo
 						{
 							ServerName = this.ServerName,
 							ShareName = this.ShareName,
 							UserName = userDirName,
-							UserSid = entry.FileName,
+							UserSid = fileSid,
 							CredHistPath = credHistPath.ToString(),
 							FooterMagic = credHistFile.FooterMagic,
 							CurrentGuid = credHistFile.CurrentGuid?.ToString(),
@@ -319,5 +394,140 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private static readonly Regex SidPattern = new(
 			@"^S-1-\d+(-\d+)+$",
 			RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+		/// <summary>
+		/// Reads verified hashes for <paramref name="serverName"/> and populates
+		/// <paramref name="target"/> keyed by user SID. Failures are swallowed after logging so a
+		/// cache miss never breaks the cmdlet.
+		/// </summary>
+		private void LoadCachedHashes(
+			string serverName,
+			Dictionary<string, List<(string Label, byte[] Hash, string HashType)>> target)
+		{
+			TboCacheDatabase? cacheDb = null;
+			try
+			{
+				cacheDb = TboCacheDatabase.Open(this.CachePath, msg => this.WriteVerbose(msg));
+				var rows = cacheDb.QueryVerifiedPasswordHashes(serverName, userSid: null);
+				foreach (var row in rows)
+				{
+					byte[] parsed;
+					try
+					{
+						parsed = Convert.FromHexString(row.HashValueHex);
+					}
+					catch (FormatException ex)
+					{
+						this.WriteVerbose($"Get-TBODpapiCredHist: skipping malformed cached hash for {row.UserSid} ({row.HashType}): {ex.Message}");
+						continue;
+					}
+
+					if (row.HashType != DpapiVerifiedHashTypes.Sha1Pwd
+						&& row.HashType != DpapiVerifiedHashTypes.NtPwd)
+					{
+						this.WriteVerbose($"Get-TBODpapiCredHist: skipping unknown cached hash type '{row.HashType}' for SID {row.UserSid}.");
+						continue;
+					}
+
+					if (!target.TryGetValue(row.UserSid, out var list))
+					{
+						list = new List<(string, byte[], string)>();
+						target[row.UserSid] = list;
+					}
+
+					list.Add(($"cache:{row.HashType}", parsed, row.HashType));
+				}
+
+				if (target.Count > 0)
+					this.WriteVerbose($"Get-TBODpapiCredHist: loaded cached verified hashes for {target.Count} SID(s) on {serverName}.");
+			}
+			catch (Exception ex)
+			{
+				this.WriteWarning($"Get-TBODpapiCredHist: cache read failed for {serverName}: {ex.Message}");
+			}
+			finally
+			{
+				cacheDb?.Dispose();
+			}
+		}
+
+		/// <summary>
+		/// Persists the winning start hash and all recovered historical hashes from a decrypted
+		/// CREDHIST chain to the TBO cache. Failures are logged and swallowed — a cache write must
+		/// never break the enumeration.
+		/// </summary>
+		private void CacheVerifiedHashes(
+			string serverName,
+			string userSid,
+			string? userDirName,
+			byte[] startHash,
+			string startHashType,
+			IReadOnlyList<DpapiCredHistDecryptedEntry> decryptedEntries,
+			string contextForErrors)
+		{
+			TboCacheDatabase? cacheDb = null;
+			try
+			{
+				cacheDb = TboCacheDatabase.Open(this.CachePath, msg => this.WriteVerbose(msg));
+				var machineId = cacheDb.UpsertMachine(serverName);
+				var writeCount = 0;
+
+				// (1) The start hash that decrypted the chain — the current password's hash.
+				cacheDb.UpsertVerifiedPasswordHash(
+					machineId: machineId,
+					serverName: serverName,
+					userSid: userSid,
+					userName: userDirName,
+					hashType: startHashType,
+					hashValueHex: Convert.ToHexString(startHash),
+					verifiedByCmdlet: CacheCmdletName,
+					verifiedVia: VerifiedViaCredHistChain);
+				writeCount++;
+
+				// (2) Every PasswordHash/NtHash recovered from inside the chain — historical
+				// passwords that each decrypt historical master keys. Same (user_sid) as the
+				// current entry since CREDHIST is per-user.
+				foreach (var dec in decryptedEntries)
+				{
+					if (dec.PasswordHash != null && dec.PasswordHash.Length > 0)
+					{
+						cacheDb.UpsertVerifiedPasswordHash(
+							machineId: machineId,
+							serverName: serverName,
+							userSid: userSid,
+							userName: userDirName,
+							hashType: DpapiVerifiedHashTypes.Sha1Pwd,
+							hashValueHex: Convert.ToHexString(dec.PasswordHash),
+							verifiedByCmdlet: CacheCmdletName,
+							verifiedVia: VerifiedViaCredHistEntry);
+						writeCount++;
+					}
+
+					if (dec.NtHash != null && dec.NtHash.Length == 16)
+					{
+						cacheDb.UpsertVerifiedPasswordHash(
+							machineId: machineId,
+							serverName: serverName,
+							userSid: userSid,
+							userName: userDirName,
+							hashType: DpapiVerifiedHashTypes.NtPwd,
+							hashValueHex: Convert.ToHexString(dec.NtHash),
+							verifiedByCmdlet: CacheCmdletName,
+							verifiedVia: VerifiedViaCredHistEntry);
+						writeCount++;
+					}
+				}
+
+				this.WriteVerbose($"Get-TBODpapiCredHist: cached {writeCount} verified hash(es) for SID {userSid} on {serverName}.");
+			}
+			catch (Exception ex)
+			{
+				this.WriteWarning($"Get-TBODpapiCredHist: cache write failed for {contextForErrors}: {ex.Message}");
+			}
+			finally
+			{
+				cacheDb?.Dispose();
+			}
+		}
 	}
 }

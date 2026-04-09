@@ -771,7 +771,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public string CryptoKeysPath { get; set; } = NgcCryptoKeysHelpers.DefaultCryptoKeysRelativePath;
 
-		[Parameter(Mandatory = true)]
+		[Parameter]
 		public TboDpapiMasterKeyInfo[]? MasterKeys { get; set; }
 
 		[Parameter]
@@ -788,6 +788,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 		[Parameter]
 		public string[]? KeyGuid { get; set; }
+
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
 
 		private CancellationTokenSource? _cancelSource;
 
@@ -808,14 +814,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				? null
 				: this.Snapshot.Trim();
 
-			var masterKeySet = MachineCertificateHelpers.BuildMasterKeySet(
+			var masterKeySet = DpapiHelpers.BuildMasterKeySet(
 				this.MasterKeys,
 				msg => this.LogWarning(smb, msg),
 				context: "Get-TBONGCCryptoKeys");
+			if (this.ResolveCacheIngestionEnabled(this.Cache))
+			{
+				var cached = DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg));
+				DpapiHelpers.MergeMasterKeySets(masterKeySet, cached);
+			}
 
 			if (masterKeySet.Count == 0)
 			{
-				this.LogWarning(smb, "Get-TBONGCCryptoKeys did not receive any usable master keys (missing MasterKeyGuid or MasterKey).");
+				this.LogWarning(smb, "Get-TBONGCCryptoKeys: no master keys available (supply -MasterKeys or enable -Cache).");
 				return;
 			}
 

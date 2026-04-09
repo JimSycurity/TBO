@@ -56,7 +56,11 @@ Describe 'Export-TBOCacheJson' {
 
 		$export = Export-TBOCacheJson | ConvertFrom-Json
 		$export.schema | Should -Be 'tbo.cache.export.v1'
-		$export.schemaVersion | Should -Be 4
+		# schemaVersion tracks the DB-side PRAGMA user_version. It must be >= 4 (the version at
+		# which this export-shape test was written) but is free to advance as new tables are added
+		# by later migrations. The wire-format contract is pinned by $export.schema, not by a
+		# hard-coded number here — asserting an exact version creates busy-work for every bump.
+		$export.schemaVersion | Should -BeGreaterOrEqual 4
 
 		$export.machines.Count | Should -Be 1
 		$export.principals.Count | Should -Be 1

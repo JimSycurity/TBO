@@ -16,7 +16,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		internal const string CachePathEnvVar = "TITANIS_TBO_CACHE";
 
-		private const int SchemaVersion = 5;
+		private const int SchemaVersion = 6;
 		private readonly SqliteConnection _connection;
 
 		internal enum PrincipalScope
@@ -138,7 +138,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (userVersion == 0)
 			{
 				logDiagnostic($"TBO cache: initializing new DB (schema v{SchemaVersion}).");
-				ApplySchemaV5();
+				ApplySchemaV6();
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -177,6 +177,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				logDiagnostic("TBO cache: migrating DB schema v4 -> v5.");
 				MigrateSchemaV4ToV5(logDiagnostic);
+				SetUserVersion(5);
+				userVersion = 5;
+			}
+
+			if (userVersion == 5)
+			{
+				logDiagnostic("TBO cache: migrating DB schema v5 -> v6.");
+				MigrateSchemaV5ToV6(logDiagnostic);
 				SetUserVersion(SchemaVersion);
 				return;
 			}
@@ -199,7 +207,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			cmd.ExecuteNonQuery();
 		}
 
-		private void ApplySchemaV5()
+		private void ApplySchemaV6()
 		{
 			using var tx = _connection.BeginTransaction();
 
@@ -368,6 +376,31 @@ CREATE TABLE IF NOT EXISTS write_activities(
 
 			Exec("CREATE INDEX IF NOT EXISTS idx_write_activities_machine_id ON write_activities(machine_id);", tx);
 			Exec("CREATE INDEX IF NOT EXISTS idx_write_activities_activity_utc ON write_activities(activity_utc);", tx);
+
+			// v6: verified password hashes. Populated by cmdlets that cryptographically confirm a
+			// password/NT hash (e.g. a successful DPAPI master key decrypt or CREDHIST chain decrypt).
+			// Other cmdlets on subsequent runs can re-use these hashes without requiring the plaintext
+			// password again. See bead TBO-7xo and the triage-cmdlet consumer TBO-txp.
+			Exec(@"
+CREATE TABLE IF NOT EXISTS verified_password_hashes(
+  verified_password_hash_id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  server_name TEXT NOT NULL COLLATE NOCASE,
+  user_sid TEXT NOT NULL COLLATE NOCASE,
+  user_name TEXT NULL,
+  hash_type TEXT NOT NULL,
+  hash_value TEXT NOT NULL COLLATE NOCASE,
+  verified_by_cmdlet TEXT NOT NULL,
+  verified_via TEXT NOT NULL,
+  first_seen_utc TEXT NOT NULL,
+  last_seen_utc TEXT NOT NULL,
+  UNIQUE(machine_id, user_sid, hash_type, hash_value)
+);
+", tx);
+
+			Exec("CREATE INDEX IF NOT EXISTS idx_verified_password_hashes_machine_id ON verified_password_hashes(machine_id);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_verified_password_hashes_server_sid ON verified_password_hashes(server_name, user_sid);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_verified_password_hashes_server ON verified_password_hashes(server_name);", tx);
 
 			tx.Commit();
 		}
@@ -563,6 +596,43 @@ CREATE TABLE IF NOT EXISTS write_activities(
 			tx.Commit();
 
 			logDiagnostic("TBO cache: migration to schema v5 complete.");
+		}
+
+		// v6 adds the verified_password_hashes table: a cross-cmdlet stash of password / NT hashes
+		// that have been cryptographically *verified* (not merely guessed). Downstream cmdlets can
+		// load these as candidate key material without the user having to re-supply plaintext.
+		//
+		// Entries are *only* written after cryptographic confirmation (e.g. successful DPAPI master
+		// key decrypt or CREDHIST chain decrypt). Failed/unverified attempts do NOT belong here —
+		// see bead TBO-7xo.
+		private void MigrateSchemaV5ToV6(Action<string> logDiagnostic)
+		{
+			using var tx = _connection.BeginTransaction();
+
+			Exec(@"
+CREATE TABLE IF NOT EXISTS verified_password_hashes(
+  verified_password_hash_id INTEGER PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(machine_id) ON DELETE CASCADE,
+  server_name TEXT NOT NULL COLLATE NOCASE,
+  user_sid TEXT NOT NULL COLLATE NOCASE,
+  user_name TEXT NULL,
+  hash_type TEXT NOT NULL,
+  hash_value TEXT NOT NULL COLLATE NOCASE,
+  verified_by_cmdlet TEXT NOT NULL,
+  verified_via TEXT NOT NULL,
+  first_seen_utc TEXT NOT NULL,
+  last_seen_utc TEXT NOT NULL,
+  UNIQUE(machine_id, user_sid, hash_type, hash_value)
+);
+", tx);
+
+			Exec("CREATE INDEX IF NOT EXISTS idx_verified_password_hashes_machine_id ON verified_password_hashes(machine_id);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_verified_password_hashes_server_sid ON verified_password_hashes(server_name, user_sid);", tx);
+			Exec("CREATE INDEX IF NOT EXISTS idx_verified_password_hashes_server ON verified_password_hashes(server_name);", tx);
+
+			tx.Commit();
+
+			logDiagnostic("TBO cache: migration to schema v6 complete.");
 		}
 
 		private void Exec(string sql, SqliteTransaction tx)
@@ -858,6 +928,144 @@ RETURNING dpapi_masterkey_id;";
 			cmd.Parameters.AddWithValue("$now", now);
 
 			return (long)cmd.ExecuteScalar()!;
+		}
+
+		/// <summary>
+		/// Inserts or updates a verified password/NT hash for a principal observed on <paramref name="serverName"/>.
+		/// </summary>
+		/// <remarks>
+		/// Only call after cryptographic confirmation that <paramref name="hashValueHex"/> is correct
+		/// (for example, after a successful DPAPI master key decrypt). Callers should never persist
+		/// guesses or unverified candidates. The <paramref name="verifiedByCmdlet"/> / <paramref name="verifiedVia"/>
+		/// fields are provenance-only; no reader should branch on them (new callers = new string value,
+		/// no enum / no switch). See bead TBO-7xo and the triage consumer TBO-txp.
+		/// </remarks>
+		internal long UpsertVerifiedPasswordHash(
+			long machineId,
+			string serverName,
+			string userSid,
+			string? userName,
+			string hashType,
+			string hashValueHex,
+			string verifiedByCmdlet,
+			string verifiedVia)
+		{
+			if (machineId <= 0)
+				throw new ArgumentOutOfRangeException(nameof(machineId));
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("ServerName must be provided.", nameof(serverName));
+			if (string.IsNullOrWhiteSpace(userSid))
+				throw new ArgumentException("UserSid must be provided.", nameof(userSid));
+			if (string.IsNullOrWhiteSpace(hashType))
+				throw new ArgumentException("HashType must be provided.", nameof(hashType));
+			if (string.IsNullOrWhiteSpace(hashValueHex))
+				throw new ArgumentException("HashValueHex must be provided.", nameof(hashValueHex));
+			if (string.IsNullOrWhiteSpace(verifiedByCmdlet))
+				throw new ArgumentException("VerifiedByCmdlet must be provided.", nameof(verifiedByCmdlet));
+			if (string.IsNullOrWhiteSpace(verifiedVia))
+				throw new ArgumentException("VerifiedVia must be provided.", nameof(verifiedVia));
+
+			var now = UtcNowIso8601();
+
+			using var cmd = _connection.CreateCommand();
+			// COALESCE on user_name lets a caller that learned the login name later ("DOMAIN\\alice")
+			// populate it without a caller that only knew the SID clobbering it back to NULL.
+			// The provenance fields (verified_by_cmdlet, verified_via) are stamped on most-recent-write
+			// so the "last cmdlet to see this hash" is always retrievable.
+			cmd.CommandText = @"
+INSERT INTO verified_password_hashes(machine_id, server_name, user_sid, user_name, hash_type, hash_value, verified_by_cmdlet, verified_via, first_seen_utc, last_seen_utc)
+VALUES ($machine_id, $server_name, $user_sid, $user_name, $hash_type, $hash_value, $verified_by_cmdlet, $verified_via, $now, $now)
+ON CONFLICT(machine_id, user_sid, hash_type, hash_value) DO UPDATE SET
+  server_name=excluded.server_name,
+  user_name=COALESCE(excluded.user_name, user_name),
+  verified_by_cmdlet=excluded.verified_by_cmdlet,
+  verified_via=excluded.verified_via,
+  last_seen_utc=$now
+RETURNING verified_password_hash_id;";
+
+			cmd.Parameters.AddWithValue("$machine_id", machineId);
+			cmd.Parameters.AddWithValue("$server_name", serverName.Trim());
+			cmd.Parameters.AddWithValue("$user_sid", userSid.Trim());
+			cmd.Parameters.AddWithValue("$user_name", (object?)userName ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$hash_type", hashType.Trim());
+			cmd.Parameters.AddWithValue("$hash_value", hashValueHex.Trim());
+			cmd.Parameters.AddWithValue("$verified_by_cmdlet", verifiedByCmdlet.Trim());
+			cmd.Parameters.AddWithValue("$verified_via", verifiedVia.Trim());
+			cmd.Parameters.AddWithValue("$now", now);
+
+			return (long)cmd.ExecuteScalar()!;
+		}
+
+		/// <summary>
+		/// Row from the <c>verified_password_hashes</c> table. All timestamps are ISO-8601 UTC strings.
+		/// </summary>
+		internal sealed class VerifiedPasswordHashRow
+		{
+			public long VerifiedPasswordHashId { get; init; }
+			public long MachineId { get; init; }
+			public string ServerName { get; init; } = string.Empty;
+			public string UserSid { get; init; } = string.Empty;
+			public string? UserName { get; init; }
+			public string HashType { get; init; } = string.Empty;
+			public string HashValueHex { get; init; } = string.Empty;
+			public string VerifiedByCmdlet { get; init; } = string.Empty;
+			public string VerifiedVia { get; init; } = string.Empty;
+			public string FirstSeenUtc { get; init; } = string.Empty;
+			public string LastSeenUtc { get; init; } = string.Empty;
+		}
+
+		/// <summary>
+		/// Returns verified hashes for <paramref name="serverName"/>, optionally narrowed to
+		/// <paramref name="userSid"/>. Pass <see langword="null"/> for <paramref name="userSid"/>
+		/// to bulk-load every user on the host (the triage-cmdlet pattern — TBO-txp).
+		/// </summary>
+		internal IReadOnlyList<VerifiedPasswordHashRow> QueryVerifiedPasswordHashes(string serverName, string? userSid)
+		{
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("ServerName must be provided.", nameof(serverName));
+
+			using var cmd = _connection.CreateCommand();
+			if (userSid is null)
+			{
+				cmd.CommandText = @"
+SELECT verified_password_hash_id, machine_id, server_name, user_sid, user_name, hash_type, hash_value, verified_by_cmdlet, verified_via, first_seen_utc, last_seen_utc
+FROM verified_password_hashes
+WHERE server_name = $server_name
+ORDER BY user_sid, hash_type, hash_value;";
+				cmd.Parameters.AddWithValue("$server_name", serverName.Trim());
+			}
+			else
+			{
+				cmd.CommandText = @"
+SELECT verified_password_hash_id, machine_id, server_name, user_sid, user_name, hash_type, hash_value, verified_by_cmdlet, verified_via, first_seen_utc, last_seen_utc
+FROM verified_password_hashes
+WHERE server_name = $server_name AND user_sid = $user_sid
+ORDER BY hash_type, hash_value;";
+				cmd.Parameters.AddWithValue("$server_name", serverName.Trim());
+				cmd.Parameters.AddWithValue("$user_sid", userSid.Trim());
+			}
+
+			var results = new List<VerifiedPasswordHashRow>();
+			using var reader = cmd.ExecuteReader();
+			while (reader.Read())
+			{
+				results.Add(new VerifiedPasswordHashRow
+				{
+					VerifiedPasswordHashId = reader.GetInt64(0),
+					MachineId = reader.GetInt64(1),
+					ServerName = reader.GetString(2),
+					UserSid = reader.GetString(3),
+					UserName = reader.IsDBNull(4) ? null : reader.GetString(4),
+					HashType = reader.GetString(5),
+					HashValueHex = reader.GetString(6),
+					VerifiedByCmdlet = reader.GetString(7),
+					VerifiedVia = reader.GetString(8),
+					FirstSeenUtc = reader.GetString(9),
+					LastSeenUtc = reader.GetString(10),
+				});
+			}
+
+			return results;
 		}
 
 		internal long UpsertDpapiBlob(
@@ -1291,6 +1499,44 @@ ORDER BY dpapi_masterkey_id;";
 			return results;
 		}
 
+		/// <summary>
+		/// Returns all decrypted master keys for a given server as a GUID→cleartext dictionary.
+		/// Only rows where <c>cleartext_key IS NOT NULL</c> are included. Consumer cmdlets
+		/// (Get-TBOMachineCertificates, Get-TBOChromeLogins, etc.) use this to auto-load
+		/// previously-recovered keys from the cache without requiring explicit pipeline input.
+		/// </summary>
+		internal IReadOnlyDictionary<Guid, byte[]> QueryDecryptedMasterKeysByServer(string serverName)
+		{
+			if (string.IsNullOrWhiteSpace(serverName))
+				return new Dictionary<Guid, byte[]>();
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT mk.master_key_guid, mk.cleartext_key
+FROM dpapi_masterkeys mk
+JOIN machines m ON m.machine_id = mk.machine_id
+WHERE m.server_name = $server_name COLLATE NOCASE
+  AND mk.cleartext_key IS NOT NULL;";
+			cmd.Parameters.AddWithValue("$server_name", serverName);
+
+			using var reader = cmd.ExecuteReader();
+			var results = new Dictionary<Guid, byte[]>();
+			while (reader.Read())
+			{
+				var guidStr = reader.GetString(0);
+				if (!Guid.TryParse(guidStr, out var guid))
+					continue;
+				if (reader.IsDBNull(1))
+					continue;
+				var keyBytes = (byte[])reader.GetValue(1);
+				if (keyBytes.Length == 0)
+					continue;
+				results[guid] = keyBytes;
+			}
+
+			return results;
+		}
+
 		internal IReadOnlyList<DpapiBlobRow> QueryDpapiBlobs()
 		{
 			using var cmd = _connection.CreateCommand();
@@ -1554,6 +1800,7 @@ ORDER BY observation_id;";
 				"observations",
 				"dpapi_masterkeys",
 				"dpapi_blobs",
+				"verified_password_hashes",
 				"write_activities"
 			};
 
@@ -1579,6 +1826,7 @@ ORDER BY observation_id;";
 			cmd.CommandText =
 				"DELETE FROM observations;" +
 				"DELETE FROM write_activities;" +
+				"DELETE FROM verified_password_hashes;" +
 				"DELETE FROM dpapi_blobs;" +
 				"DELETE FROM dpapi_masterkeys;" +
 				"DELETE FROM credentials;" +

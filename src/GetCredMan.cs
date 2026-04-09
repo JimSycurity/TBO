@@ -194,6 +194,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string TaskSchedulerMarker = "Domain:batch=TaskScheduler:Task:";
 
 		private static readonly byte[] TaskSchedulerMarkerBytes = System.Text.Encoding.Unicode.GetBytes(TaskSchedulerMarker);
+		private readonly Dictionary<string, Dictionary<Guid, byte[]>> _serverCachedKeys = new(StringComparer.OrdinalIgnoreCase);
 		private static readonly SecretDecodeOptions CredManDecodeOptions = new SecretDecodeOptions
 		{
 			MinTextLength = 1,
@@ -249,6 +250,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public byte[]? EntropyBytes { get; set; }
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb)
 		{
 			var input = this.InputObject;
@@ -270,7 +277,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var fileSystem = SmbFileSystemResolver.Resolve(smb);
 			var masterKey = ResolveMasterKey();
-			var masterKeySet = ResolveMasterKeySet(smb);
+			var masterKeySet = DpapiHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOCredManEntry");
+			if (this.ResolveCacheIngestionEnabled(this.Cache))
+			{
+				if (!_serverCachedKeys.TryGetValue(serverName, out var cached))
+				{
+					cached = DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg));
+					_serverCachedKeys[serverName] = cached;
+				}
+				DpapiHelpers.MergeMasterKeySets(masterKeySet, cached);
+			}
 			if (masterKeySet.Count > 0)
 				TboDpapiMasterKeyCache.TrySetMany(smb, serverName, masterKeySet);
 			if ((this.MasterKeyBytes != null || !string.IsNullOrWhiteSpace(this.MasterKey)) && (masterKey == null || masterKey.Length == 0))
@@ -602,40 +618,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (!string.IsNullOrWhiteSpace(this.MasterKey))
 				return BinaryHelper.ParseHexString(this.MasterKey.AsSpan());
 			return null;
-		}
-
-		private Dictionary<Guid, byte[]> ResolveMasterKeySet(ISmbProviderInfo smb)
-		{
-			if (this.MasterKeys == null || this.MasterKeys.Length == 0)
-				return new Dictionary<Guid, byte[]>();
-
-			var results = new Dictionary<Guid, byte[]>();
-			foreach (var entry in this.MasterKeys)
-			{
-				if (entry == null)
-					continue;
-				if (string.IsNullOrWhiteSpace(entry.MasterKeyGuid) || string.IsNullOrWhiteSpace(entry.MasterKey))
-					continue;
-				if (!Guid.TryParse(entry.MasterKeyGuid, out var guid))
-					continue;
-
-				byte[] keyBytes;
-				try
-				{
-					keyBytes = BinaryHelper.ParseHexString(entry.MasterKey.AsSpan());
-				}
-				catch (Exception ex)
-				{
-					this.LogWarning(smb, $"Get-TBOCredManEntry failed to parse master key {entry.MasterKeyGuid}: {ex.Message}");
-					continue;
-				}
-
-				if (keyBytes.Length == 0)
-					continue;
-				results[guid] = keyBytes;
-			}
-
-			return results;
 		}
 
 		private byte[]? ResolveEntropy()

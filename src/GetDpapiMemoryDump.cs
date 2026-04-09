@@ -102,11 +102,15 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var entropy = ResolveEntropy();
 
-			var masterKeySet = ChromeHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBODpapiMemoryDump");
+			var masterKeySet = DpapiHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBODpapiMemoryDump");
+			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
+			if (ingestCache)
+			{
+				var cached = DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg));
+				DpapiHelpers.MergeMasterKeySets(masterKeySet, cached);
+			}
 			if (masterKeySet.Count > 0)
 				TboDpapiMasterKeyCache.TrySetMany(smb, serverName, masterKeySet);
-
-			var ingestCache = this.ResolveCacheIngestionEnabled(this.Cache);
 			TboCacheDatabase? cacheDb = null;
 			long cacheMachineId = 0;
 			try

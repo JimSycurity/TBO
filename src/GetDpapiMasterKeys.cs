@@ -55,6 +55,27 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public string? UserNtlmHash { get; set; }
 
+		/// <summary>
+		/// When set, persists any password/NT hash that successfully decrypts a master key (directly
+		/// or via CREDHIST chain decrypt) to the TBO cache's <c>verified_password_hashes</c> table for
+		/// reuse by later cmdlet runs. Cache reads are always attempted when cache ingestion is
+		/// enabled — see <c>ResolveCacheIngestionEnabled</c>.
+		/// </summary>
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		/// <summary>
+		/// Optional explicit path to the TBO cache SQLite file. Overrides the
+		/// <c>TITANIS_TBO_CACHE</c> environment variable and the default per-user path.
+		/// </summary>
+		[Parameter]
+		public string? CachePath { get; set; }
+
+		/// <summary>Name used as <c>verified_by_cmdlet</c> provenance in the cache.</summary>
+		private const string CacheCmdletName = "Get-TBODpapiMasterKeys";
+		private const string VerifiedViaDirect = "masterkey_direct_decrypt";
+		private const string VerifiedViaCredHist = "credhist_chain_decrypt";
+
 		private CancellationTokenSource? _cancelSource;
 
 		protected override void ProcessRecord(ISmbProviderInfo smb)
@@ -71,8 +92,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
 			var dpapiSystemKeys = ResolveDpapiKeys();
-			var hasUserMaterial = !string.IsNullOrWhiteSpace(this.UserPassword) || !string.IsNullOrWhiteSpace(this.UserNtlmHash);
+			var hasPlaintextUserMaterial = !string.IsNullOrWhiteSpace(this.UserPassword) || !string.IsNullOrWhiteSpace(this.UserNtlmHash);
 			var hasDpapiSystemMaterial = dpapiSystemKeys.MachineKey != null || dpapiSystemKeys.UserKey != null;
+
+			// Load any previously-verified password/NT hashes for this server from the cache.
+			// Keyed by user SID so ResolveUserCandidates can fold them into the candidate list.
+			var cacheIngestEnabled = this.ResolveCacheIngestionEnabled(this.Cache);
+			var cachedHashesBySid = new Dictionary<string, (byte[]? Sha1Pwd, byte[]? NtPwd)>(StringComparer.OrdinalIgnoreCase);
+			if (cacheIngestEnabled)
+			{
+				LoadCachedHashes(serverName, cachedHashesBySid);
+			}
+			var hasCachedUserMaterial = cachedHashesBySid.Count > 0;
+			var hasUserMaterial = hasPlaintextUserMaterial || hasCachedUserMaterial;
 
 			var effectiveScope = this.Scope;
 			if (effectiveScope.HasFlag(DpapiMasterKeyScope.Machine) && !hasDpapiSystemMaterial)
@@ -83,7 +115,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			if (effectiveScope.HasFlag(DpapiMasterKeyScope.User) && !hasDpapiSystemMaterial && !hasUserMaterial)
 			{
-				this.WriteWarning("Get-TBODpapiMasterKeys cannot decrypt user profile master keys without UserPassword/UserNtlmHash (or DPAPI_SYSTEM).");
+				this.WriteWarning("Get-TBODpapiMasterKeys cannot decrypt user profile master keys without UserPassword/UserNtlmHash (or DPAPI_SYSTEM, or a cached verified hash).");
 				effectiveScope &= ~DpapiMasterKeyScope.User;
 			}
 
@@ -117,16 +149,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 			}
 
-			var credHistStartHashes = new List<(string Label, byte[] Hash)>();
+			// (Label, Hash, HashType) — HashType matches DpapiVerifiedHashTypes constants so that a
+			// successful CREDHIST chain decrypt can attribute the winning start-hash back to its
+			// verified kind when caching. Cached hashes get folded in per-SID inside the loop below.
+			var credHistStartHashes = new List<(string Label, byte[] Hash, string HashType)>();
 			if (userSha1Hash != null && userSha1Hash.Length > 0)
-				credHistStartHashes.Add(("SHA1(password)", userSha1Hash));
+				credHistStartHashes.Add(("SHA1(password)", userSha1Hash, DpapiVerifiedHashTypes.Sha1Pwd));
 			if (userNtHash != null && userNtHash.Length > 0)
-				credHistStartHashes.Add(("UserNtlmHash", userNtHash));
+				credHistStartHashes.Add(("UserNtlmHash", userNtHash, DpapiVerifiedHashTypes.NtPwd));
 			if (userNtHashFromPassword != null && userNtHashFromPassword.Length > 0)
-				credHistStartHashes.Add(("NT(password)", userNtHashFromPassword));
+				credHistStartHashes.Add(("NT(password)", userNtHashFromPassword, DpapiVerifiedHashTypes.NtPwd));
 
 			credHistStartHashes = credHistStartHashes
-				.GroupBy(x => Convert.ToHexString(x.Hash), StringComparer.OrdinalIgnoreCase)
+				.GroupBy(x => x.HashType + ":" + Convert.ToHexString(x.Hash), StringComparer.OrdinalIgnoreCase)
 				.Select(g => g.First())
 				.ToList();
 
@@ -157,11 +192,43 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				if (userKeyCache.TryGetValue(sid, out var cached))
 					return cached;
 
-				var derived = DpapiUserKeyDerivation.DerivePreKeyCandidates(
+				// Start from plaintext material (if supplied): this produces candidates tagged with
+				// SourceHashType/SourceHash so a successful decrypt can be written back to cache.
+				var combined = new List<DpapiKeyMaterialCandidate>();
+				combined.AddRange(DpapiUserKeyDerivation.DerivePreKeyCandidates(
 					sid,
 					this.UserPassword,
-					userNtHash);
+					userNtHash));
 
+				// Fold in any cached verified hashes for this SID. Same source-hash → same prekey →
+				// Deduplicate() drops the duplicate, so plaintext and cache coexist without double work.
+				if (cachedHashesBySid.TryGetValue(sid, out var cachedForSid))
+				{
+					var fromCache = DpapiUserKeyDerivation.DerivePreKeyCandidatesFromHashes(
+						sid,
+						cachedForSid.Sha1Pwd,
+						cachedForSid.NtPwd);
+					if (fromCache.Count > 0)
+					{
+						this.WriteVerbose($"Get-TBODpapiMasterKeys: loaded {fromCache.Count} cached hash candidate(s) for SID {sid}.");
+						combined.AddRange(fromCache);
+					}
+				}
+
+				// Deduplicate by prekey bytes (not by source hash) so that identical prekeys reached
+				// via different paths collapse to one attempt.
+				var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+				var deduped = new List<DpapiKeyMaterialCandidate>(combined.Count);
+				foreach (var cand in combined)
+				{
+					if (cand.KeyMaterial == null || cand.KeyMaterial.Length == 0)
+						continue;
+					if (!seen.Add(Convert.ToHexString(cand.KeyMaterial)))
+						continue;
+					deduped.Add(cand);
+				}
+
+				IReadOnlyList<DpapiKeyMaterialCandidate> derived = deduped;
 				userKeyCache[sid] = derived;
 				return derived;
 			}
@@ -312,7 +379,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				DpapiMasterKeyFileDecryptionResult? decryptResult = null;
 				DpapiMasterKeyDecryptionResult? bestResult = null;
-				string? usedKeyLabel = null;
+				DpapiKeyMaterialCandidate? usedKeyCandidate = null;
 
 				bool TryDecryptWithCandidates(IEnumerable<DpapiKeyMaterialCandidate> candidates)
 				{
@@ -325,7 +392,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 						decryptResult = candidateResult;
 						bestResult = candidateBest;
-						usedKeyLabel = candidate.Label;
+						usedKeyCandidate = candidate;
 
 						if (candidateBest?.Success == true)
 							return true;
@@ -335,11 +402,32 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				}
 
 				var decrypted = TryDecryptWithCandidates(keyCandidates);
+				var decryptedViaCredHist = false;
+
+				// Per-SID CREDHIST start-hash list: base list (plaintext-derived) plus any cached
+				// hashes known for this particular user. The cache may contain hashes for users we
+				// never saw plaintext material for, which is precisely why this feature exists.
+				var perSidCredHistStartHashes = credHistStartHashes;
+				if (isUserScope && !string.IsNullOrWhiteSpace(location.UserSid)
+					&& cachedHashesBySid.TryGetValue(location.UserSid, out var cachedForCredHist))
+				{
+					var list = new List<(string Label, byte[] Hash, string HashType)>(credHistStartHashes);
+					if (cachedForCredHist.Sha1Pwd != null && cachedForCredHist.Sha1Pwd.Length > 0)
+						list.Add(("cache:sha1_pwd", cachedForCredHist.Sha1Pwd, DpapiVerifiedHashTypes.Sha1Pwd));
+					if (cachedForCredHist.NtPwd != null && cachedForCredHist.NtPwd.Length > 0)
+						list.Add(("cache:nt_pwd", cachedForCredHist.NtPwd, DpapiVerifiedHashTypes.NtPwd));
+
+					perSidCredHistStartHashes = list
+						.GroupBy(x => x.HashType + ":" + Convert.ToHexString(x.Hash), StringComparer.OrdinalIgnoreCase)
+						.Select(g => g.First())
+						.ToList();
+				}
+
 				if (!decrypted
 					&& isUserScope
 					&& hasUserMaterial
 					&& !string.IsNullOrWhiteSpace(location.UserSid)
-					&& credHistStartHashes.Count > 0
+					&& perSidCredHistStartHashes.Count > 0
 					&& (masterKeyFile.CredHist != null || masterKeyFile.CredHistLength > 0))
 				{
 					var keyDir = Path.GetDirectoryName(location.KeyPath);
@@ -354,7 +442,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 								keyCandidates.Select(c => Convert.ToHexString(c.KeyMaterial)),
 								StringComparer.OrdinalIgnoreCase);
 
-							foreach (var (label, startHash) in credHistStartHashes)
+							foreach (var (label, startHash, _) in perSidCredHistStartHashes)
 							{
 								if (!credHistFile.TryDecryptChain(startHash, out var decryptedEntries, out var failureReason))
 								{
@@ -373,13 +461,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 								var credCandidates = new List<DpapiKeyMaterialCandidate>();
 								foreach (var entry in candidatesToUse)
 								{
+									// Historical CREDHIST entries are also verified-by-decrypt: if one
+									// of these prekeys wins, we cache the originating SHA1/NT hash so
+									// future cmdlet runs can reuse it without re-deriving CREDHIST.
 									if (entry.PasswordHash != null && entry.PasswordHash.Length > 0)
 									{
 										credCandidates.Add(new DpapiKeyMaterialCandidate
 										{
 											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(pwdhash, SID)",
 											KeyMaterial = DpapiUserKeyDerivation.DeriveLocalPreKeyFromHash(location.UserSid, entry.PasswordHash),
-											Confidence = 0.8
+											Confidence = 0.8,
+											SourceHashType = DpapiVerifiedHashTypes.Sha1Pwd,
+											SourceHash = (byte[])entry.PasswordHash.Clone(),
 										});
 									}
 
@@ -389,14 +482,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 										{
 											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(PBKDF2-SHA256(NT), SID)",
 											KeyMaterial = DpapiUserKeyDerivation.DeriveDomainPreKeyFromNtHash(location.UserSid, entry.NtHash),
-											Confidence = 0.7
+											Confidence = 0.7,
+											SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+											SourceHash = (byte[])entry.NtHash.Clone(),
 										});
 
 										credCandidates.Add(new DpapiKeyMaterialCandidate
 										{
 											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(NT, SID)",
 											KeyMaterial = DpapiUserKeyDerivation.DeriveFallbackPreKeyFromNtHash(location.UserSid, entry.NtHash),
-											Confidence = 0.4
+											Confidence = 0.4,
+											SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+											SourceHash = (byte[])entry.NtHash.Clone(),
 										});
 									}
 								}
@@ -414,7 +511,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 								this.WriteVerbose($"Get-TBODpapiMasterKeys attempting CREDHIST-based decryption ({label}) for {location.KeyPath}.");
 								decrypted = TryDecryptWithCandidates(credCandidates);
 								if (decrypted)
+								{
+									decryptedViaCredHist = true;
 									break;
+								}
 							}
 						}
 					}
@@ -422,13 +522,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				if (bestResult != null && bestResult.Success && bestResult.MasterKey != null)
 				{
-					if (!string.IsNullOrWhiteSpace(usedKeyLabel))
-						this.WriteVerbose($"Get-TBODpapiMasterKeys decrypted {location.KeyPath} using {usedKeyLabel}.");
+					if (!string.IsNullOrWhiteSpace(usedKeyCandidate?.Label))
+						this.WriteVerbose($"Get-TBODpapiMasterKeys decrypted {location.KeyPath} using {usedKeyCandidate.Label}.");
 
 					if (!string.IsNullOrWhiteSpace(masterKeyGuid)
 						&& Guid.TryParse(masterKeyGuid, out var parsedMasterKeyGuid))
 					{
 						TboDpapiMasterKeyCache.TrySet(smb, serverName, parsedMasterKeyGuid, bestResult.MasterKey);
+					}
+
+					// Persist the source hash that just verified to the verified-hash cache so that
+					// subsequent cmdlet runs (including the planned Invoke-TBOTriage cmdlet — TBO-txp)
+					// can reuse it without asking for the plaintext password again. Only candidates
+					// carrying both a SourceHashType and SourceHash qualify; DPAPI_SYSTEM-derived
+					// prekeys and other opaque material are intentionally not cached.
+					if (cacheIngestEnabled
+						&& isUserScope
+						&& !string.IsNullOrWhiteSpace(location.UserSid)
+						&& usedKeyCandidate?.SourceHashType != null
+						&& usedKeyCandidate.SourceHash != null
+						&& usedKeyCandidate.SourceHash.Length > 0)
+					{
+						WriteVerifiedHashToCache(
+							serverName,
+							location.UserSid!,
+							usedKeyCandidate.SourceHashType,
+							usedKeyCandidate.SourceHash,
+							verifiedVia: decryptedViaCredHist ? VerifiedViaCredHist : VerifiedViaDirect,
+							contextForErrors: location.KeyPath);
 					}
 
 					this.WriteObject(new TboDpapiMasterKeyInfo
@@ -470,6 +591,103 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			this._cancelSource?.Cancel();
 			base.StopProcessing();
+		}
+
+		/// <summary>
+		/// Reads verified password/NT hashes for <paramref name="serverName"/> from the TBO cache
+		/// (if present) and populates <paramref name="target"/> keyed by user SID. Failures are
+		/// logged and swallowed — the cache read must never break the cmdlet.
+		/// </summary>
+		private void LoadCachedHashes(string serverName, Dictionary<string, (byte[]? Sha1Pwd, byte[]? NtPwd)> target)
+		{
+			TboCacheDatabase? cacheDb = null;
+			try
+			{
+				cacheDb = TboCacheDatabase.Open(this.CachePath, msg => this.WriteVerbose(msg));
+				var rows = cacheDb.QueryVerifiedPasswordHashes(serverName, userSid: null);
+				foreach (var row in rows)
+				{
+					byte[]? parsed;
+					try
+					{
+						parsed = Convert.FromHexString(row.HashValueHex);
+					}
+					catch (FormatException ex)
+					{
+						this.WriteVerbose($"Get-TBODpapiMasterKeys: skipping malformed cached hash for {row.UserSid} ({row.HashType}): {ex.Message}");
+						continue;
+					}
+
+					if (!target.TryGetValue(row.UserSid, out var existing))
+						existing = (null, null);
+
+					switch (row.HashType)
+					{
+						case DpapiVerifiedHashTypes.Sha1Pwd:
+							if (existing.Sha1Pwd == null)
+								existing = (parsed, existing.NtPwd);
+							break;
+						case DpapiVerifiedHashTypes.NtPwd:
+							if (existing.NtPwd == null)
+								existing = (existing.Sha1Pwd, parsed);
+							break;
+						default:
+							this.WriteVerbose($"Get-TBODpapiMasterKeys: skipping unknown cached hash type '{row.HashType}' for SID {row.UserSid}.");
+							continue;
+					}
+
+					target[row.UserSid] = existing;
+				}
+
+				if (target.Count > 0)
+					this.WriteVerbose($"Get-TBODpapiMasterKeys: loaded cached verified hashes for {target.Count} SID(s) on {serverName}.");
+			}
+			catch (Exception ex)
+			{
+				this.WriteWarning($"Get-TBODpapiMasterKeys: cache read failed for {serverName}: {ex.Message}");
+			}
+			finally
+			{
+				cacheDb?.Dispose();
+			}
+		}
+
+		/// <summary>
+		/// Persists a verified password/NT hash to the TBO cache. Failures are logged and swallowed.
+		/// </summary>
+		private void WriteVerifiedHashToCache(
+			string serverName,
+			string userSid,
+			string hashType,
+			byte[] hashBytes,
+			string verifiedVia,
+			string contextForErrors)
+		{
+			TboCacheDatabase? cacheDb = null;
+			try
+			{
+				cacheDb = TboCacheDatabase.Open(this.CachePath, msg => this.WriteVerbose(msg));
+				var machineId = cacheDb.UpsertMachine(serverName);
+				var hex = Convert.ToHexString(hashBytes);
+				cacheDb.UpsertVerifiedPasswordHash(
+					machineId: machineId,
+					serverName: serverName,
+					userSid: userSid,
+					userName: null,
+					hashType: hashType,
+					hashValueHex: hex,
+					verifiedByCmdlet: CacheCmdletName,
+					verifiedVia: verifiedVia);
+				this.WriteVerbose($"Get-TBODpapiMasterKeys: cached verified {hashType} for SID {userSid} on {serverName} (via {verifiedVia}).");
+			}
+			catch (Exception ex)
+			{
+				this.WriteWarning($"Get-TBODpapiMasterKeys: cache write failed for {contextForErrors}: {ex.Message}");
+			}
+			finally
+			{
+				cacheDb?.Dispose();
+			}
 		}
 
 		private (byte[]? MachineKey, byte[]? UserKey) ResolveDpapiKeys()

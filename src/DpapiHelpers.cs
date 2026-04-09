@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using Titanis.Net;
@@ -122,6 +123,91 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var result = SecretDecoding.TryDecode(payload, CleartextDecodeOptions);
 			return result.Text;
+		}
+
+		/// <summary>
+		/// Converts piped <see cref="TboDpapiMasterKeyInfo"/> objects into a GUID→cleartext dictionary.
+		/// Consolidated from identical copies that existed in ChromeHelpers, MachineCertificateHelpers,
+		/// SafariKeychainHelpers, and GetTBOCredManEntry.
+		/// </summary>
+		internal static Dictionary<Guid, byte[]> BuildMasterKeySet(
+			IEnumerable<TboDpapiMasterKeyInfo>? masterKeys,
+			Action<string>? logWarning,
+			string context)
+		{
+			logWarning ??= _ => { };
+			context = string.IsNullOrWhiteSpace(context) ? "BuildMasterKeySet" : context;
+
+			if (masterKeys == null)
+				return new Dictionary<Guid, byte[]>();
+
+			var results = new Dictionary<Guid, byte[]>();
+			foreach (var entry in masterKeys)
+			{
+				if (entry == null)
+					continue;
+				if (string.IsNullOrWhiteSpace(entry.MasterKeyGuid) || string.IsNullOrWhiteSpace(entry.MasterKey))
+					continue;
+				if (!Guid.TryParse(entry.MasterKeyGuid, out var guid))
+					continue;
+
+				byte[] keyBytes;
+				try
+				{
+					keyBytes = BinaryHelper.ParseHexString(entry.MasterKey.AsSpan());
+				}
+				catch (Exception ex)
+				{
+					logWarning($"{context} failed to parse master key {entry.MasterKeyGuid}: {ex.Message}");
+					continue;
+				}
+
+				if (keyBytes.Length == 0)
+					continue;
+				results[guid] = keyBytes;
+			}
+
+			return results;
+		}
+
+		/// <summary>
+		/// Loads previously-decrypted DPAPI master keys for the given server from the SQLite cache.
+		/// Returns an empty dictionary on any error (logged as a warning). The result is suitable
+		/// for merging into a pipeline-supplied master key set — pipeline entries win on conflict.
+		/// </summary>
+		internal static Dictionary<Guid, byte[]> LoadCachedMasterKeys(
+			string? cachePath,
+			string serverName,
+			Action<string> logVerbose,
+			Action<string> logWarning)
+		{
+			try
+			{
+				using var db = TboCacheDatabase.Open(cachePath, logVerbose);
+				var cached = db.QueryDecryptedMasterKeysByServer(serverName);
+				if (cached.Count > 0)
+					logVerbose($"TBO cache: loaded {cached.Count} decrypted master key(s) for {serverName}.");
+				return new Dictionary<Guid, byte[]>(cached);
+			}
+			catch (Exception ex)
+			{
+				logWarning($"TBO cache: failed to load cached master keys for {serverName}: {ex.Message}");
+				return new Dictionary<Guid, byte[]>();
+			}
+		}
+
+		/// <summary>
+		/// Merges cached master keys into a pipeline-supplied set. Pipeline entries win on GUID conflict.
+		/// </summary>
+		internal static void MergeMasterKeySets(
+			Dictionary<Guid, byte[]> pipelineKeys,
+			IReadOnlyDictionary<Guid, byte[]> cachedKeys)
+		{
+			foreach (var kvp in cachedKeys)
+			{
+				// Pipeline wins — only add cached keys for GUIDs not already present.
+				pipelineKeys.TryAdd(kvp.Key, kvp.Value);
+			}
 		}
 	}
 }
