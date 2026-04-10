@@ -13,6 +13,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	{
 		public string? Path { get; init; }
 		public int SchemaVersion { get; init; }
+		public bool DpapiProtectionEnabled { get; init; }
 
 		public long MachineCount { get; init; }
 		public long PrincipalCount { get; init; }
@@ -1132,6 +1133,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			{
 				Path = resolvedPath,
 				SchemaVersion = schemaVersion,
+				DpapiProtectionEnabled = TboCacheProtection.IsDpapiProtectionEnabled(),
 				MachineCount = GetCount("machines"),
 				PrincipalCount = GetCount("principals"),
 				CredentialCount = GetCount("credentials"),

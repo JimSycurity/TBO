@@ -12,12 +12,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	/// <remarks>
 	/// This is intentionally minimal and internal. Cmdlets and other collectors should not execute SQL directly.
 		/// </remarks>
-		internal sealed class TboCacheDatabase : IDisposable
+	internal sealed class TboCacheDatabase : IDisposable
 	{
 		internal const string CachePathEnvVar = "TITANIS_TBO_CACHE";
 
 		private const int SchemaVersion = 6;
 		private readonly SqliteConnection _connection;
+		private readonly Action<string> _logDiagnostic;
 
 		internal enum PrincipalScope
 		{
@@ -28,9 +29,10 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string PrincipalScopeGlobal = "Global";
 		private const string PrincipalScopeMachine = "Machine";
 
-		private TboCacheDatabase(SqliteConnection connection)
+		private TboCacheDatabase(SqliteConnection connection, Action<string>? logDiagnostic)
 		{
 			_connection = connection ?? throw new ArgumentNullException(nameof(connection));
+			_logDiagnostic = logDiagnostic ?? (_ => { });
 		}
 
 		public void Dispose()
@@ -116,7 +118,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			var conn = new SqliteConnection(builder.ToString());
 			conn.Open();
 
-			var db = new TboCacheDatabase(conn);
+			var db = new TboCacheDatabase(conn, logDiagnostic);
 			db.Initialize(logDiagnostic);
 			return db;
 		}
@@ -811,6 +813,17 @@ RETURNING principal_id;";
 			if (string.IsNullOrWhiteSpace(identifier))
 				throw new ArgumentException("Credential identifier must be provided.", nameof(identifier));
 
+			var normalizedKind = kind.Trim();
+			var persistedSecretBlob = secretBlob;
+			if (persistedSecretBlob != null
+				&& persistedSecretBlob.Length > 0
+				&& normalizedKind.Equals("dpapi_cleartext", StringComparison.OrdinalIgnoreCase))
+			{
+				persistedSecretBlob = TboCacheProtection.ProtectDpapiPayloadForStorage(
+					persistedSecretBlob,
+					contextLabel: $"credentials.secret_blob/{normalizedKind}");
+			}
+
 			var now = UtcNowIso8601();
 
 			using var cmd = _connection.CreateCommand();
@@ -821,9 +834,9 @@ ON CONFLICT(kind, identifier) DO UPDATE SET
   last_seen_utc=$now
 RETURNING credential_id;";
 
-			cmd.Parameters.AddWithValue("$kind", kind);
+			cmd.Parameters.AddWithValue("$kind", normalizedKind);
 			cmd.Parameters.AddWithValue("$identifier", identifier);
-			cmd.Parameters.AddWithValue("$secret_blob", (object?)secretBlob ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$secret_blob", (object?)persistedSecretBlob ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$now", now);
 
 			return (long)cmd.ExecuteScalar()!;
@@ -888,6 +901,14 @@ RETURNING observation_id;";
 			if (string.IsNullOrWhiteSpace(masterKeyGuid))
 				throw new ArgumentException("MasterKeyGuid must be provided.", nameof(masterKeyGuid));
 
+			var persistedCleartextKey = cleartextKey;
+			if (persistedCleartextKey != null && persistedCleartextKey.Length > 0)
+			{
+				persistedCleartextKey = TboCacheProtection.ProtectDpapiPayloadForStorage(
+					persistedCleartextKey,
+					contextLabel: "dpapi_masterkeys.cleartext_key");
+			}
+
 			var now = UtcNowIso8601();
 
 			using var cmd = _connection.CreateCommand();
@@ -926,7 +947,7 @@ RETURNING dpapi_masterkey_id;";
 			cmd.Parameters.AddWithValue("$hash_context", (object?)hashContext ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$hash", (object?)hash ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$hash_line", (object?)hashLine ?? DBNull.Value);
-			cmd.Parameters.AddWithValue("$cleartext_key", (object?)cleartextKey ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$cleartext_key", (object?)persistedCleartextKey ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$cleartext_key_sha1", (object?)cleartextKeySha1 ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$failure_reason", (object?)failureReason ?? DBNull.Value);
 			cmd.Parameters.AddWithValue("$now", now);
@@ -989,8 +1010,18 @@ LIMIT 1;";
 			if (reader.IsDBNull(0))
 				return (true, false);
 
-			var keyBytes = (byte[])reader.GetValue(0);
-			return (true, keyBytes.Length > 0);
+			var persistedPayload = (byte[])reader.GetValue(0);
+			if (!TboCacheProtection.TryUnprotectDpapiPayloadFromStorage(
+				persistedPayload,
+				contextLabel: $"dpapi_masterkeys/{masterKeyGuid}",
+				logDiagnostic: _logDiagnostic,
+				out var cleartextKey,
+				out _))
+			{
+				return (true, false);
+			}
+
+			return (true, cleartextKey.Length > 0);
 		}
 
 		/// <summary>
@@ -1777,9 +1808,37 @@ ORDER BY dpapi_masterkey_id;";
 			var results = new List<DpapiMasterKeyRow>();
 			while (reader.Read())
 			{
+				var rowId = reader.GetInt64(0);
+				byte[]? cleartextKey = null;
+				string? cleartextUnprotectFailure = null;
+				if (!reader.IsDBNull(11))
+				{
+					var persistedPayload = (byte[])reader.GetValue(11);
+					if (persistedPayload.Length > 0)
+					{
+						if (TboCacheProtection.TryUnprotectDpapiPayloadFromStorage(
+							persistedPayload,
+							contextLabel: $"dpapi_masterkeys/{rowId}",
+							logDiagnostic: _logDiagnostic,
+							out var unprotectedPayload,
+							out var unprotectFailure))
+						{
+							cleartextKey = unprotectedPayload;
+						}
+						else
+						{
+							cleartextUnprotectFailure = unprotectFailure;
+						}
+					}
+				}
+
+				var failureReason = reader.IsDBNull(13) ? null : reader.GetString(13);
+				if (!string.IsNullOrWhiteSpace(cleartextUnprotectFailure))
+					failureReason = AppendFailureReason(failureReason, cleartextUnprotectFailure!);
+
 				results.Add(new DpapiMasterKeyRow
 				{
-					DpapiMasterKeyId = reader.GetInt64(0),
+					DpapiMasterKeyId = rowId,
 					MachineId = reader.GetInt64(1),
 					Scope = reader.GetString(2),
 					UserSid = reader.IsDBNull(3) ? null : reader.GetString(3),
@@ -1790,9 +1849,9 @@ ORDER BY dpapi_masterkey_id;";
 					HashContext = reader.IsDBNull(8) ? null : reader.GetInt32(8),
 					Hash = reader.IsDBNull(9) ? null : reader.GetString(9),
 					HashLine = reader.IsDBNull(10) ? null : reader.GetString(10),
-					CleartextKey = reader.IsDBNull(11) ? null : (byte[])reader.GetValue(11),
+					CleartextKey = cleartextKey,
 					CleartextKeySha1 = reader.IsDBNull(12) ? null : reader.GetString(12),
-					FailureReason = reader.IsDBNull(13) ? null : reader.GetString(13),
+					FailureReason = failureReason,
 					FirstSeenUtc = reader.GetString(14),
 					LastSeenUtc = reader.GetString(15),
 				});
@@ -1830,7 +1889,18 @@ WHERE m.server_name = $server_name COLLATE NOCASE
 					continue;
 				if (reader.IsDBNull(1))
 					continue;
-				var keyBytes = (byte[])reader.GetValue(1);
+				var persistedPayload = (byte[])reader.GetValue(1);
+				if (!TboCacheProtection.TryUnprotectDpapiPayloadFromStorage(
+					persistedPayload,
+					contextLabel: $"dpapi_masterkeys/{guid}",
+					logDiagnostic: _logDiagnostic,
+					out var keyBytes,
+					out var unprotectFailure))
+				{
+					if (!string.IsNullOrWhiteSpace(unprotectFailure))
+						_logDiagnostic($"TBO cache: unable to use cached DPAPI master key {guid} for {serverName}: {unprotectFailure}");
+					continue;
+				}
 				if (keyBytes.Length == 0)
 					continue;
 				results[guid] = keyBytes;
@@ -2188,6 +2258,18 @@ ORDER BY observation_id;";
 			}
 
 			tx.Commit();
+		}
+
+		private static string AppendFailureReason(string? existing, string addition)
+		{
+			if (string.IsNullOrWhiteSpace(existing))
+				return addition;
+			if (string.IsNullOrWhiteSpace(addition))
+				return existing;
+
+			return existing.TrimEnd().EndsWith(".", StringComparison.Ordinal)
+				? $"{existing} {addition}"
+				: $"{existing}; {addition}";
 		}
 
 		private static string AddLongParameters(SqliteCommand cmd, string baseName, IReadOnlyCollection<long> values)

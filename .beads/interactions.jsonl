@@ -8,3 +8,5 @@
 {"id":"int-7240f1d8","kind":"field_change","created_at":"2026-04-10T18:13:17.745994Z","actor":"Jim Sykora","issue_id":"TBO-hvr.4","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-4a674a74","kind":"field_change","created_at":"2026-04-10T18:19:02.9613918Z","actor":"Jim Sykora","issue_id":"TBO-hvr.4","extra":{"field":"status","new_value":"closed","old_value":"in_progress"}}
 {"id":"int-c5d89958","kind":"field_change","created_at":"2026-04-10T18:34:32.9082685Z","actor":"Jim Sykora","issue_id":"TBO-hvr","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-4c170578","kind":"field_change","created_at":"2026-04-10T19:14:42.9466889Z","actor":"Jim Sykora","issue_id":"TBO-hvr.5","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-c974ee42","kind":"field_change","created_at":"2026-04-10T19:19:54.1952803Z","actor":"Jim Sykora","issue_id":"TBO-hvr.5","extra":{"field":"status","new_value":"closed","old_value":"in_progress"}}

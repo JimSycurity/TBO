@@ -556,6 +556,215 @@ Describe 'TBO cache DPAPI backlog and candidate ranking (TBO-hvr.4)' {
 	}
 }
 
+Describe 'TBO cache secure-at-rest DPAPI material (TBO-hvr.5)' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		$script:moduleAvailable = $false
+		if ($script:repoRoot) {
+			try {
+				Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+				$script:moduleAvailable = $true
+			} catch {
+				$script:moduleAvailable = $false
+			}
+		}
+
+		$script:originalCachePath = $env:TITANIS_TBO_CACHE
+		$script:originalProtectDpapi = $env:TITANIS_TBO_CACHE_PROTECT_DPAPI
+
+		if ($script:moduleAvailable) {
+			$module = Get-Module -Name 'Titanis.TBO.Smb2.PowerShell'
+			$assembly = $module.ImplementingAssembly
+			$script:cacheDbType = $assembly.GetType('Titanis.Tbo.Smb2.PowerShell.TboCacheDatabase')
+		}
+
+		function Open-TboCacheDbReflected {
+			param([string]$CachePath)
+			$openMethod = $script:cacheDbType.GetMethod(
+				'Open',
+				[System.Reflection.BindingFlags]::Static -bor [System.Reflection.BindingFlags]::NonPublic)
+			return $openMethod.Invoke($null, @($CachePath, $null))
+		}
+
+		function Invoke-UpsertMachine {
+			param([object]$Db, [string]$ServerName)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertMachine',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			return [int64]$method.Invoke($Db, @($ServerName))
+		}
+
+		function Invoke-UpsertDpapiMasterKey {
+			param(
+				[object]$Db,
+				[int64]$MachineId,
+				[string]$Scope,
+				[string]$UserSid,
+				[string]$KeyPath,
+				[string]$MasterKeyGuid,
+				[bool]$IsPreferred,
+				[string]$FailureReason,
+				[AllowNull()][byte[]]$CleartextKey
+			)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertDpapiMasterKey',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			$cleartextSha1 = if ($CleartextKey -and $CleartextKey.Length -gt 0) { '0123456789abcdef0123456789abcdef01234567' } else { $null }
+			return [int64]$method.Invoke($Db, @(
+				$MachineId, $Scope, $UserSid, $KeyPath, $MasterKeyGuid, $IsPreferred, $null, $null, $null, $null, $FailureReason, $CleartextKey, $cleartextSha1))
+		}
+
+		function Invoke-UpsertCredential {
+			param(
+				[object]$Db,
+				[string]$Kind,
+				[string]$Identifier,
+				[AllowNull()][byte[]]$SecretBlob
+			)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertCredential',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			return [int64]$method.Invoke($Db, @($Kind, $Identifier, $SecretBlob))
+		}
+
+		function Invoke-QueryDecryptedMasterKeysByServer {
+			param([object]$Db, [string]$ServerName)
+			$method = $script:cacheDbType.GetMethod(
+				'QueryDecryptedMasterKeysByServer',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			return $method.Invoke($Db, @($ServerName))
+		}
+	}
+
+	AfterAll {
+		if ($null -eq $script:originalCachePath) {
+			Remove-Item env:TITANIS_TBO_CACHE -ErrorAction SilentlyContinue
+		} else {
+			$env:TITANIS_TBO_CACHE = $script:originalCachePath
+		}
+
+		if ($null -eq $script:originalProtectDpapi) {
+			Remove-Item env:TITANIS_TBO_CACHE_PROTECT_DPAPI -ErrorAction SilentlyContinue
+		} else {
+			$env:TITANIS_TBO_CACHE_PROTECT_DPAPI = $script:originalProtectDpapi
+		}
+	}
+
+	It 'encrypts decrypted DPAPI cache material at rest when protection is enabled' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$cachePath = Join-Path $TestDrive 'cache_dpapi_protected.sqlite3'
+		$env:TITANIS_TBO_CACHE = $cachePath
+		$env:TITANIS_TBO_CACHE_PROTECT_DPAPI = 'true'
+
+		$serverName = 'host1'
+		$masterKeyGuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+		[byte[]]$masterKeyBytes = 1..64
+		[byte[]]$cleartextBlob = 101..148
+
+		Clear-TBOCache -Confirm:$false
+
+		$db = Open-TboCacheDbReflected -CachePath $cachePath
+		try {
+			$machineId = Invoke-UpsertMachine -Db $db -ServerName $serverName
+			Invoke-UpsertDpapiMasterKey -Db $db -MachineId $machineId -Scope 'User' -UserSid 'S-1-5-21-1-2-3-500' `
+				-KeyPath "\\$serverName\C$\Users\Administrator\AppData\Roaming\Microsoft\Protect\S-1-5-21-1-2-3-500\$masterKeyGuid" `
+				-MasterKeyGuid $masterKeyGuid -IsPreferred $true -FailureReason $null -CleartextKey $masterKeyBytes | Out-Null
+
+			Invoke-UpsertCredential -Db $db -Kind 'dpapi_cleartext' -Identifier 'blob-1' -SecretBlob $cleartextBlob | Out-Null
+			$decryptedByServer = Invoke-QueryDecryptedMasterKeysByServer -Db $db -ServerName $serverName
+		} finally {
+			$db.Dispose()
+		}
+
+		$conn = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$cachePath;Mode=ReadWrite;Pooling=False")
+		$conn.Open()
+		try {
+			$mkCmd = $conn.CreateCommand()
+			$mkCmd.CommandText = @'
+SELECT cleartext_key
+FROM dpapi_masterkeys
+WHERE master_key_guid = $guid;
+'@
+			$mkCmd.Parameters.Clear()
+			$mkCmd.Parameters.AddWithValue('$guid', $masterKeyGuid) | Out-Null
+			$persistedMk = [byte[]]$mkCmd.ExecuteScalar()
+			$persistedMk | Should -Not -BeNullOrEmpty
+			[Convert]::ToHexString($persistedMk) | Should -Not -Be ([Convert]::ToHexString($masterKeyBytes))
+			([Text.Encoding]::ASCII.GetString($persistedMk, 0, [Math]::Min($persistedMk.Length, 17))) | Should -Be 'TBOCACHE:DPAPI:V1:'
+
+			$credCmd = $conn.CreateCommand()
+			$credCmd.CommandText = @'
+SELECT secret_blob
+FROM credentials
+WHERE kind = 'dpapi_cleartext' AND identifier = 'blob-1';
+'@
+			$persistedBlob = [byte[]]$credCmd.ExecuteScalar()
+			$persistedBlob | Should -Not -BeNullOrEmpty
+			[Convert]::ToHexString($persistedBlob) | Should -Not -Be ([Convert]::ToHexString($cleartextBlob))
+			([Text.Encoding]::ASCII.GetString($persistedBlob, 0, [Math]::Min($persistedBlob.Length, 17))) | Should -Be 'TBOCACHE:DPAPI:V1:'
+		} finally {
+			$conn.Dispose()
+		}
+
+		$guidObj = [Guid]::Parse($masterKeyGuid)
+		$decryptedByServer.ContainsKey($guidObj) | Should -BeTrue
+		[Convert]::ToHexString($decryptedByServer[$guidObj]) | Should -Be ([Convert]::ToHexString($masterKeyBytes))
+	}
+
+	It 'keeps plaintext DPAPI material at rest when protection is not enabled' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$cachePath = Join-Path $TestDrive 'cache_dpapi_unprotected.sqlite3'
+		$env:TITANIS_TBO_CACHE = $cachePath
+		Remove-Item env:TITANIS_TBO_CACHE_PROTECT_DPAPI -ErrorAction SilentlyContinue
+
+		$masterKeyGuid = 'ffffffff-eeee-dddd-cccc-bbbbbbbbbbbb'
+		[byte[]]$masterKeyBytes = 200..255
+
+		Clear-TBOCache -Confirm:$false
+
+		$db = Open-TboCacheDbReflected -CachePath $cachePath
+		try {
+			$machineId = Invoke-UpsertMachine -Db $db -ServerName 'host2'
+			Invoke-UpsertDpapiMasterKey -Db $db -MachineId $machineId -Scope 'User' -UserSid 'S-1-5-21-4-5-6-500' `
+				-KeyPath "\\host2\C$\Users\Administrator\AppData\Roaming\Microsoft\Protect\S-1-5-21-4-5-6-500\$masterKeyGuid" `
+				-MasterKeyGuid $masterKeyGuid -IsPreferred $true -FailureReason $null -CleartextKey $masterKeyBytes | Out-Null
+		} finally {
+			$db.Dispose()
+		}
+
+		$conn = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$cachePath;Mode=ReadWrite;Pooling=False")
+		$conn.Open()
+		try {
+			$mkCmd = $conn.CreateCommand()
+			$mkCmd.CommandText = @'
+SELECT cleartext_key
+FROM dpapi_masterkeys
+WHERE master_key_guid = $guid;
+'@
+			$mkCmd.Parameters.Clear()
+			$mkCmd.Parameters.AddWithValue('$guid', $masterKeyGuid) | Out-Null
+			$persistedMk = [byte[]]$mkCmd.ExecuteScalar()
+			$persistedMk | Should -Not -BeNullOrEmpty
+			[Convert]::ToHexString($persistedMk) | Should -Be ([Convert]::ToHexString($masterKeyBytes))
+		} finally {
+			$conn.Dispose()
+		}
+	}
+}
+
 Describe 'TBO cache schema migration' {
 	It 'migrates a v1 cache DB to current schema on open' {
 		if (-not $script:moduleAvailable) {

@@ -162,9 +162,11 @@ Cache ingestion defaults:
 - Set `TITANIS_TBO_CACHE_INGEST` to `1/true/yes` to enable cache writes by default for cmdlets that support `-Cache`.
 - Use `-CachePath` to write to a specific cache file for a single invocation.
 - Use `-Cache:$false` to suppress cache writes for a single invocation when global ingestion is enabled.
+- Set `TITANIS_TBO_CACHE_PROTECT_DPAPI` to `1/true/yes` to encrypt decrypted DPAPI cache material at rest (`dpapi_masterkeys.cleartext_key` and `dpapi_cleartext` blobs). This protection is local-user scoped (Windows DPAPI) and is applied only on new/updated rows.
 
 ```powershell
 $env:TITANIS_TBO_CACHE_INGEST = 'true'
+$env:TITANIS_TBO_CACHE_PROTECT_DPAPI = 'true'
 Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol
 Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -CachePath C:\Temp\tbo-cache.sqlite3
 Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache:$false

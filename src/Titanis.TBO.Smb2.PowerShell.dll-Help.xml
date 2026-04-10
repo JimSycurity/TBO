@@ -6338,6 +6338,7 @@ Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2</maml:code>
       <command:noun>TBOCacheInfo</command:noun>
       <maml:description>
         <maml:para>Shows information about the persistent TBO cache database (schema version and row counts).</maml:para>
+        <maml:para>The output includes <c>DpapiProtectionEnabled</c>, which reflects whether <c>TITANIS_TBO_CACHE_PROTECT_DPAPI</c> is currently enabled for encrypted-at-rest DPAPI cache payloads.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
