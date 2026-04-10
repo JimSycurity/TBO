@@ -468,26 +468,21 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 	internal static class ChromeCrypto
 	{
-		private static readonly byte[] V10Header = Encoding.ASCII.GetBytes("v10");
-		private static readonly byte[] V11Header = Encoding.ASCII.GetBytes("v11");
-
 		internal static bool HasV10OrV11Header(ReadOnlySpan<byte> data, out string header)
 		{
 			header = string.Empty;
 
-			if (data.Length >= V10Header.Length && data.Slice(0, V10Header.Length).SequenceEqual(V10Header))
-			{
-				header = "v10";
-				return true;
-			}
+			// Chromium AES-GCM payloads are prefixed with an ASCII version token:
+			// v10/v11 (classic) and newer formats such as v20.
+			if (data.Length < 3 || data[0] != (byte)'v')
+				return false;
+			if (data[1] < (byte)'0' || data[1] > (byte)'9')
+				return false;
+			if (data[2] < (byte)'0' || data[2] > (byte)'9')
+				return false;
 
-			if (data.Length >= V11Header.Length && data.Slice(0, V11Header.Length).SequenceEqual(V11Header))
-			{
-				header = "v11";
-				return true;
-			}
-
-			return false;
+			header = Encoding.ASCII.GetString(data.Slice(0, 3));
+			return true;
 		}
 
 		internal static SecretDecodeResult DecodeSecret(byte[] payload, Action<string>? logVerbose = null)
@@ -548,7 +543,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 				if (!TryDecryptAesGcm(encryptedBytes, aesStateKey, out var plaintext, out var aesFailure))
 				{
-					failureReason = aesFailure;
+					if (vHeader.Equals("v20", StringComparison.OrdinalIgnoreCase)
+						&& !string.IsNullOrWhiteSpace(aesFailure)
+						&& aesFailure.StartsWith("AES-GCM decrypt failed:", StringComparison.OrdinalIgnoreCase))
+					{
+						failureReason = $"{aesFailure} Chromium v20 data may be app-bound and not decryptable with the Local State key alone.";
+					}
+					else
+					{
+						failureReason = aesFailure;
+					}
 					return;
 				}
 
@@ -599,13 +603,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			failureReason = null;
 
 			DpapiBlob blob;
-			try
+			if (!DpapiHelpers.TryParseDpapiBlob(encryptedBytes, out blob, out var parseFailure))
 			{
-				blob = DpapiBlob.Parse(encryptedBytes, 0);
-			}
-			catch (Exception ex)
-			{
-				failureReason = $"Failed to parse DPAPI blob: {ex.Message}";
+				failureReason = parseFailure;
 				return false;
 			}
 

@@ -908,7 +908,11 @@ ON CONFLICT(machine_id, master_key_guid) DO UPDATE SET
   hash_line=COALESCE(excluded.hash_line, hash_line),
   cleartext_key=COALESCE(excluded.cleartext_key, cleartext_key),
   cleartext_key_sha1=COALESCE(excluded.cleartext_key_sha1, cleartext_key_sha1),
-  failure_reason=CASE WHEN excluded.failure_reason IS NOT NULL THEN excluded.failure_reason ELSE failure_reason END,
+  failure_reason=CASE
+    WHEN excluded.cleartext_key IS NOT NULL THEN NULL
+    WHEN excluded.failure_reason IS NOT NULL THEN excluded.failure_reason
+    ELSE failure_reason
+  END,
   last_seen_utc=$now
 RETURNING dpapi_masterkey_id;";
 
@@ -928,6 +932,65 @@ RETURNING dpapi_masterkey_id;";
 			cmd.Parameters.AddWithValue("$now", now);
 
 			return (long)cmd.ExecuteScalar()!;
+		}
+
+		internal long UpsertDpapiMasterKeyTarget(
+			long machineId,
+			string masterKeyGuid,
+			string sourcePath,
+			string? failureReason)
+		{
+			if (string.IsNullOrWhiteSpace(sourcePath))
+				sourcePath = $"target:{masterKeyGuid}";
+
+			var reason = string.IsNullOrWhiteSpace(failureReason)
+				? "Master key observed from protected data but cleartext key is not yet available."
+				: failureReason;
+
+			return UpsertDpapiMasterKey(
+				machineId: machineId,
+				scope: "Unknown",
+				userSid: null,
+				keyPath: sourcePath,
+				masterKeyGuid: masterKeyGuid,
+				isPreferred: false,
+				isDomain: null,
+				hashContext: null,
+				hash: null,
+				hashLine: null,
+				failureReason: reason,
+				cleartextKey: null,
+				cleartextKeySha1: null);
+		}
+
+		internal (bool Exists, bool HasCleartext) GetDpapiMasterKeyPresence(
+			long machineId,
+			string masterKeyGuid)
+		{
+			if (machineId <= 0)
+				throw new ArgumentOutOfRangeException(nameof(machineId));
+			if (string.IsNullOrWhiteSpace(masterKeyGuid))
+				throw new ArgumentException("MasterKeyGuid must be provided.", nameof(masterKeyGuid));
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT cleartext_key
+FROM dpapi_masterkeys
+WHERE machine_id = $machine_id
+  AND master_key_guid = $master_key_guid
+LIMIT 1;";
+			cmd.Parameters.AddWithValue("$machine_id", machineId);
+			cmd.Parameters.AddWithValue("$master_key_guid", masterKeyGuid.Trim());
+
+			using var reader = cmd.ExecuteReader();
+			if (!reader.Read())
+				return (false, false);
+
+			if (reader.IsDBNull(0))
+				return (true, false);
+
+			var keyBytes = (byte[])reader.GetValue(0);
+			return (true, keyBytes.Length > 0);
 		}
 
 		/// <summary>
@@ -1063,6 +1126,123 @@ ORDER BY hash_type, hash_value;";
 					FirstSeenUtc = reader.GetString(9),
 					LastSeenUtc = reader.GetString(10),
 				});
+			}
+
+			return results;
+		}
+
+		/// <summary>
+		/// Returns SID-linked NT hash credentials observed on <paramref name="serverName"/> via the
+		/// graph tables (<c>observations</c> + <c>principals</c> + <c>credentials</c>).
+		/// This allows DPAPI cmdlets to correlate SAM-recovered NT hashes with user SIDs even when
+		/// the hashes have not yet been promoted to <c>verified_password_hashes</c>.
+		/// </summary>
+		internal sealed class ObservedNtlmHashRow
+		{
+			public string UserSid { get; init; } = string.Empty;
+			public string HashValue { get; init; } = string.Empty;
+			public string SourceKind { get; init; } = string.Empty;
+			public string ObservedUtc { get; init; } = string.Empty;
+		}
+
+		internal IReadOnlyList<ObservedNtlmHashRow> QueryObservedNtlmHashes(string serverName, string? userSid)
+		{
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("ServerName must be provided.", nameof(serverName));
+
+			using var cmd = _connection.CreateCommand();
+			if (string.IsNullOrWhiteSpace(userSid))
+			{
+				cmd.CommandText = @"
+SELECT
+  p.sid,
+  c.identifier,
+  o.source_kind,
+  o.observed_utc
+FROM observations o
+JOIN machines m ON m.machine_id = o.machine_id
+JOIN principals p ON p.principal_id = o.principal_id
+JOIN credentials c ON c.credential_id = o.credential_id
+WHERE m.server_name = $server_name COLLATE NOCASE
+  AND p.sid IS NOT NULL
+  AND c.kind = 'NTHash'
+ORDER BY p.sid, o.observed_utc DESC, c.last_seen_utc DESC;";
+				cmd.Parameters.AddWithValue("$server_name", serverName.Trim());
+			}
+			else
+			{
+				cmd.CommandText = @"
+SELECT
+  p.sid,
+  c.identifier,
+  o.source_kind,
+  o.observed_utc
+FROM observations o
+JOIN machines m ON m.machine_id = o.machine_id
+JOIN principals p ON p.principal_id = o.principal_id
+JOIN credentials c ON c.credential_id = o.credential_id
+WHERE m.server_name = $server_name COLLATE NOCASE
+  AND p.sid = $user_sid COLLATE NOCASE
+  AND c.kind = 'NTHash'
+ORDER BY o.observed_utc DESC, c.last_seen_utc DESC;";
+				cmd.Parameters.AddWithValue("$server_name", serverName.Trim());
+				cmd.Parameters.AddWithValue("$user_sid", userSid.Trim());
+			}
+
+			var results = new List<ObservedNtlmHashRow>();
+			using var reader = cmd.ExecuteReader();
+			while (reader.Read())
+			{
+				results.Add(new ObservedNtlmHashRow
+				{
+					UserSid = reader.GetString(0),
+					HashValue = reader.GetString(1),
+					SourceKind = reader.GetString(2),
+					ObservedUtc = reader.GetString(3),
+				});
+			}
+
+			return results;
+		}
+
+		internal IReadOnlyList<string> QueryObservedCredentialIdentifiers(string serverName, string credentialKind, int maxCount = 8)
+		{
+			if (string.IsNullOrWhiteSpace(serverName))
+				throw new ArgumentException("ServerName must be provided.", nameof(serverName));
+			if (string.IsNullOrWhiteSpace(credentialKind))
+				throw new ArgumentException("Credential kind must be provided.", nameof(credentialKind));
+			if (maxCount <= 0)
+				throw new ArgumentOutOfRangeException(nameof(maxCount), "Max count must be greater than zero.");
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT
+  c.identifier,
+  MAX(o.observed_utc) AS last_observed_utc
+FROM observations o
+JOIN machines m ON m.machine_id = o.machine_id
+JOIN credentials c ON c.credential_id = o.credential_id
+WHERE m.server_name = $server_name COLLATE NOCASE
+  AND c.kind = $credential_kind COLLATE NOCASE
+GROUP BY c.identifier
+ORDER BY last_observed_utc DESC, c.identifier ASC
+LIMIT $max_count;";
+			cmd.Parameters.AddWithValue("$server_name", serverName.Trim());
+			cmd.Parameters.AddWithValue("$credential_kind", credentialKind.Trim());
+			cmd.Parameters.AddWithValue("$max_count", maxCount);
+
+			var results = new List<string>();
+			using var reader = cmd.ExecuteReader();
+			while (reader.Read())
+			{
+				if (reader.IsDBNull(0))
+					continue;
+
+				var identifier = reader.GetString(0);
+				if (string.IsNullOrWhiteSpace(identifier))
+					continue;
+
+				results.Add(identifier);
 			}
 
 			return results;
@@ -1346,6 +1526,128 @@ ORDER BY
 					ObservationCount = reader.GetInt64(9),
 					FirstObservedUtc = reader.GetString(10),
 					LastObservedUtc = reader.GetString(11),
+				});
+			}
+
+			return results;
+		}
+
+		internal sealed class ObservationFindingRow
+		{
+			internal long ObservationId { get; init; }
+			internal long MachineId { get; init; }
+			internal string ServerName { get; init; } = "";
+
+			internal long? PrincipalId { get; init; }
+			internal string? PrincipalScope { get; init; }
+			internal long? PrincipalScopeMachineId { get; init; }
+			internal string? PrincipalSid { get; init; }
+			internal string? PrincipalDomain { get; init; }
+			internal string? PrincipalName { get; init; }
+			internal string? PrincipalType { get; init; }
+
+			internal long? CredentialId { get; init; }
+			internal string? CredentialKind { get; init; }
+			internal string? CredentialIdentifier { get; init; }
+
+			internal string SourceKind { get; init; } = "";
+			internal string? SourcePath { get; init; }
+			internal string ObservedUtc { get; init; } = "";
+			internal string? ContextJson { get; init; }
+			internal int? Confidence { get; init; }
+		}
+
+		internal IReadOnlyList<ObservationFindingRow> QueryObservationFindings(
+			string? serverName = null,
+			string? principalSid = null,
+			string? principalDomain = null,
+			string? principalName = null,
+			string? principalType = null,
+			string? credentialKind = null,
+			string? credentialIdentifier = null,
+			string? sourceKind = null,
+			string? sourcePath = null)
+		{
+			serverName = string.IsNullOrWhiteSpace(serverName) ? null : serverName.Trim();
+			principalSid = string.IsNullOrWhiteSpace(principalSid) ? null : principalSid.Trim();
+			principalDomain = string.IsNullOrWhiteSpace(principalDomain) ? null : principalDomain.Trim();
+			principalName = string.IsNullOrWhiteSpace(principalName) ? null : principalName.Trim();
+			principalType = string.IsNullOrWhiteSpace(principalType) ? null : principalType.Trim();
+			credentialKind = string.IsNullOrWhiteSpace(credentialKind) ? null : credentialKind.Trim();
+			credentialIdentifier = string.IsNullOrWhiteSpace(credentialIdentifier) ? null : credentialIdentifier.Trim();
+			sourceKind = string.IsNullOrWhiteSpace(sourceKind) ? null : sourceKind.Trim();
+			sourcePath = string.IsNullOrWhiteSpace(sourcePath) ? null : sourcePath.Trim();
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = @"
+SELECT
+  o.observation_id,
+  o.machine_id,
+  m.server_name,
+  o.principal_id,
+  p.scope,
+  p.scope_machine_id,
+  p.sid,
+  p.domain,
+  p.name,
+  p.type,
+  o.credential_id,
+  c.kind,
+  c.identifier,
+  o.source_kind,
+  o.source_path,
+  o.observed_utc,
+  o.context_json,
+  o.confidence
+FROM observations o
+JOIN machines m ON m.machine_id = o.machine_id
+LEFT JOIN principals p ON p.principal_id = o.principal_id
+LEFT JOIN credentials c ON c.credential_id = o.credential_id
+WHERE ($server_name IS NULL OR m.server_name = $server_name COLLATE NOCASE)
+  AND ($principal_sid IS NULL OR p.sid = $principal_sid COLLATE NOCASE)
+  AND ($principal_domain IS NULL OR p.domain = $principal_domain COLLATE NOCASE)
+  AND ($principal_name IS NULL OR p.name = $principal_name COLLATE NOCASE)
+  AND ($principal_type IS NULL OR p.type = $principal_type COLLATE NOCASE)
+  AND ($credential_kind IS NULL OR c.kind = $credential_kind COLLATE NOCASE)
+  AND ($credential_identifier IS NULL OR c.identifier = $credential_identifier COLLATE NOCASE)
+  AND ($source_kind IS NULL OR o.source_kind = $source_kind COLLATE NOCASE)
+  AND ($source_path IS NULL OR o.source_path = $source_path COLLATE NOCASE)
+ORDER BY o.observed_utc DESC, o.observation_id DESC;";
+
+			cmd.Parameters.AddWithValue("$server_name", (object?)serverName ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$principal_sid", (object?)principalSid ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$principal_domain", (object?)principalDomain ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$principal_name", (object?)principalName ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$principal_type", (object?)principalType ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$credential_kind", (object?)credentialKind ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$credential_identifier", (object?)credentialIdentifier ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$source_kind", (object?)sourceKind ?? DBNull.Value);
+			cmd.Parameters.AddWithValue("$source_path", (object?)sourcePath ?? DBNull.Value);
+
+			using var reader = cmd.ExecuteReader();
+			var results = new List<ObservationFindingRow>();
+			while (reader.Read())
+			{
+				results.Add(new ObservationFindingRow
+				{
+					ObservationId = reader.GetInt64(0),
+					MachineId = reader.GetInt64(1),
+					ServerName = reader.GetString(2),
+					PrincipalId = reader.IsDBNull(3) ? null : reader.GetInt64(3),
+					PrincipalScope = reader.IsDBNull(4) ? null : reader.GetString(4),
+					PrincipalScopeMachineId = reader.IsDBNull(5) ? null : reader.GetInt64(5),
+					PrincipalSid = reader.IsDBNull(6) ? null : reader.GetString(6),
+					PrincipalDomain = reader.IsDBNull(7) ? null : reader.GetString(7),
+					PrincipalName = reader.IsDBNull(8) ? null : reader.GetString(8),
+					PrincipalType = reader.IsDBNull(9) ? null : reader.GetString(9),
+					CredentialId = reader.IsDBNull(10) ? null : reader.GetInt64(10),
+					CredentialKind = reader.IsDBNull(11) ? null : reader.GetString(11),
+					CredentialIdentifier = reader.IsDBNull(12) ? null : reader.GetString(12),
+					SourceKind = reader.GetString(13),
+					SourcePath = reader.IsDBNull(14) ? null : reader.GetString(14),
+					ObservedUtc = reader.GetString(15),
+					ContextJson = reader.IsDBNull(16) ? null : reader.GetString(16),
+					Confidence = reader.IsDBNull(17) ? null : reader.GetInt32(17),
 				});
 			}
 

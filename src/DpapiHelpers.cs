@@ -37,6 +37,30 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return buffer.IndexOf(DpapiMagic);
 		}
 
+		internal static bool TryParseDpapiBlob(ReadOnlySpan<byte> data, out DpapiBlob blob, out string? failureReason)
+		{
+			blob = null!;
+			failureReason = null;
+
+			var offset = FindMagicOffset(data);
+			if (offset < 0)
+			{
+				failureReason = "DPAPI magic header not found.";
+				return false;
+			}
+
+			try
+			{
+				blob = DpapiBlob.Parse(data, offset);
+				return true;
+			}
+			catch (Exception ex)
+			{
+				failureReason = $"Failed to parse DPAPI blob: {ex.Message}";
+				return false;
+			}
+		}
+
 		internal static string NormalizeServerName(string? serverName)
 		{
 			return string.IsNullOrWhiteSpace(serverName)

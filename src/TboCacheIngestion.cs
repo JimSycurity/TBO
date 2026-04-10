@@ -1,4 +1,7 @@
 using System;
+using System.Text;
+using System.Text.Json;
+using Titanis.Crypto;
 
 namespace Titanis.Tbo.Smb2.PowerShell
 {
@@ -123,6 +126,25 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				contextJson: contextJson,
 				confidence: confidence);
 
+			// Offline enrichment for cached plaintext credentials:
+			// derive/store NTHash and link it to the same machine/principal/source graph edge.
+			MaybeIngestDerivedNtHash(
+				db,
+				serverName,
+				machineId,
+				principalId,
+				principalSid,
+				principalName,
+				credentialKind,
+				credentialIdentifier,
+				sourceKind,
+				sourcePath,
+				observedUtc,
+				confidence,
+				contextJson,
+				observationId,
+				logDiagnostic);
+
 			return new AddObservationResult
 			{
 				CachePath = TboCacheDatabase.ResolveCachePath(args.CachePath),
@@ -148,6 +170,90 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				SourceKind = sourceKind,
 				SourcePath = sourcePath,
 			};
+		}
+
+		private static void MaybeIngestDerivedNtHash(
+			TboCacheDatabase db,
+			string serverName,
+			long machineId,
+			long? principalId,
+			string? principalSid,
+			string? principalName,
+			string? credentialKind,
+			string? credentialIdentifier,
+			string sourceKind,
+			string? sourcePath,
+			DateTime observedUtc,
+			int? confidence,
+			string? contextJson,
+			long sourceObservationId,
+			Action<string> logDiagnostic)
+		{
+			if (!string.Equals(credentialKind, "Password", StringComparison.OrdinalIgnoreCase))
+				return;
+
+			if (credentialIdentifier == null)
+				return;
+
+			if (!TryDeriveNtHashHex(credentialIdentifier, out var ntHashHex))
+				return;
+
+			try
+			{
+				var derivedCredentialId = db.UpsertCredential("NTHash", ntHashHex);
+				var derivedContext = BuildDerivedNtHashContextJson(contextJson, sourceObservationId);
+				db.InsertObservation(
+					machineId: machineId,
+					principalId: principalId,
+					credentialId: derivedCredentialId,
+					sourceKind: sourceKind,
+					sourcePath: sourcePath,
+					observedUtc: observedUtc,
+					contextJson: derivedContext,
+					confidence: confidence);
+
+				if (!string.IsNullOrWhiteSpace(principalSid))
+				{
+					db.UpsertVerifiedPasswordHash(
+						machineId: machineId,
+						serverName: serverName,
+						userSid: principalSid,
+						userName: principalName,
+						hashType: DpapiVerifiedHashTypes.NtPwd,
+						hashValueHex: ntHashHex,
+						verifiedByCmdlet: sourceKind,
+						verifiedVia: "cache_password_derived");
+				}
+			}
+			catch (Exception ex)
+			{
+				logDiagnostic($"TBO cache: failed to derive NTHash from Password observation on {serverName}: {ex.Message}");
+			}
+		}
+
+		private static bool TryDeriveNtHashHex(string password, out string ntHashHex)
+		{
+			ntHashHex = string.Empty;
+
+			var passwordUtf16 = Encoding.Unicode.GetBytes(password);
+			var ntHash = SlimHashAlgorithm.ComputeHash<Md4Context>(passwordUtf16);
+			if (ntHash == null || ntHash.Length == 0)
+				return false;
+
+			ntHashHex = Convert.ToHexString(ntHash).ToLowerInvariant();
+			return true;
+		}
+
+		private static string BuildDerivedNtHashContextJson(string? originalContextJson, long sourceObservationId)
+		{
+			var payload = new
+			{
+				derived = "NTHash",
+				derivedFromKind = "Password",
+				sourceObservationId,
+				sourceContextJson = originalContextJson
+			};
+			return JsonSerializer.Serialize(payload);
 		}
 
 		private static string RequireNonEmpty(string? value, string paramName)

@@ -5,6 +5,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 {
 	internal static class TboDpapiMasterKeyCache
 	{
+		private static readonly object DiagGateLock = new();
+		private static readonly Dictionary<string, DateTime> DiagGate = new(StringComparer.OrdinalIgnoreCase);
+		private static readonly TimeSpan DiagRepeatWindow = TimeSpan.FromMinutes(2);
+		private const int MaxDiagGateEntries = 4096;
+
 		internal static bool TryGet(
 			ISmbProviderInfo smb,
 			string serverName,
@@ -27,12 +32,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var cache = store.GetOrCreateRegistrySecretCache(serverName);
 				if (!cache.TryGetDpapiMasterKey(masterKeyGuid, out masterKey))
 				{
-					LogDiagnostic(smb, $"TBO: DPAPI master key cache miss ({masterKeyGuid}) for {serverName}.");
+					LogDiagnostic(smb, $"miss|{serverName}|{masterKeyGuid}", $"TBO: DPAPI master key cache miss ({masterKeyGuid}) for {serverName}.");
 					masterKey = null;
 					return false;
 				}
 
-				LogDiagnostic(smb, $"TBO: DPAPI master key cache hit ({masterKeyGuid}) for {serverName}.");
+				LogDiagnostic(smb, $"hit|{serverName}|{masterKeyGuid}", $"TBO: DPAPI master key cache hit ({masterKeyGuid}) for {serverName}.");
 				return masterKey != null && masterKey.Length > 0;
 			}
 			catch
@@ -95,11 +100,51 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 		}
 
-		private static void LogDiagnostic(ISmbProviderInfo smb, string message)
+		private static void LogDiagnostic(ISmbProviderInfo smb, string eventKey, string message)
 		{
-			if (smb is SmbProviderInfo provider)
-				provider.LogDiagnostic(message);
+			if (smb is not SmbProviderInfo provider)
+				return;
+			if (string.IsNullOrWhiteSpace(message))
+				return;
+			if (string.IsNullOrWhiteSpace(eventKey))
+				return;
+			if (!ShouldEmitDiagnostic(eventKey))
+				return;
+
+			provider.LogDiagnostic(message);
+		}
+
+		private static bool ShouldEmitDiagnostic(string eventKey)
+		{
+			var now = DateTime.UtcNow;
+			lock (DiagGateLock)
+			{
+				if (DiagGate.TryGetValue(eventKey, out var lastLogUtc)
+					&& (now - lastLogUtc) < DiagRepeatWindow)
+				{
+					return false;
+				}
+
+				if (DiagGate.Count >= MaxDiagGateEntries)
+				{
+					var staleCutoff = now - DiagRepeatWindow;
+					var staleKeys = new List<string>();
+					foreach (var kv in DiagGate)
+					{
+						if (kv.Value < staleCutoff)
+							staleKeys.Add(kv.Key);
+					}
+
+					foreach (var key in staleKeys)
+						DiagGate.Remove(key);
+
+					if (DiagGate.Count >= MaxDiagGateEntries)
+						DiagGate.Clear();
+				}
+
+				DiagGate[eventKey] = now;
+				return true;
+			}
 		}
 	}
 }
-

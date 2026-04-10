@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Management.Automation;
 using System.Threading;
+using System.Threading.Tasks;
 using Titanis.Msrpc.Msrrp;
 using Titanis.Net;
 using Titanis.Smb2;
@@ -43,9 +44,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		private const string FileSystemParameterSet = "FileSystem";
 		private const string RegistryParameterSet = "Registry";
 		private const int DefaultMaxBytes = 1024;
+		private const int PipeBusyRetryCount = 6;
+		private const int PipeBusyInitialDelayMs = 200;
+		private const int PipeBusyMaxDelayMs = 2000;
+		private const int PipeBusyRetryLogIntervalMs = 5000;
 
 		private TboCacheDatabase? _cacheDb;
 		private long _cacheMachineId;
+		private int _pipeBusyAdaptiveDelayMs;
+		private int _pipeBusySuppressedLogCount;
+		private DateTime _pipeBusyNextVerboseUtc;
 
 		[Parameter(Mandatory = true, Position = 1, ParameterSetName = FileSystemParameterSet, ValueFromPipeline = true, ValueFromPipelineByPropertyName = true)]
 		public string Path { get; set; } = string.Empty;
@@ -100,6 +108,7 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 			finally
 			{
+				FlushSuppressedPipeBusyLogs(smb);
 				_cacheDb?.Dispose();
 				_cacheDb = null;
 				_cacheMachineId = 0;
@@ -271,6 +280,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				this.WriteWarning($"Find-TBODpapiBlobs was denied access to {filePath}: {ex.StatusCode}.");
 				return;
 			}
+			catch (NtstatusException ex) when (IsFileBusy(ex))
+			{
+				this.LogVerbose(smb, $"Find-TBODpapiBlobs skipped locked file {filePath}: {ex.StatusCode}.");
+				return;
+			}
 			catch (Exception ex)
 			{
 				smb.LogException($"Find-TBODpapiBlobs failed to read {filePath}", ex);
@@ -314,18 +328,34 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			List<RegistryValueInfo> values;
 			try
 			{
-				values = CollectValues(key, includeData: true, cancellationToken);
+				values = ExecutePipeBusyRetry(
+					smb,
+					operationName: $"enumerating values for {keyPath}",
+					cancellationToken,
+					() => CollectValues(key, includeData: true, cancellationToken));
 			}
 			catch (NotSupportedException ex)
 			{
 				smb.LogException($"Find-TBODpapiBlobs failed to enumerate values with data for {keyPath}", ex);
-				values = CollectValues(key, includeData: false, cancellationToken);
+				values = ExecutePipeBusyRetry(
+					smb,
+					operationName: $"enumerating values for {keyPath} (metadata mode)",
+					cancellationToken,
+					() => CollectValues(key, includeData: false, cancellationToken));
 				foreach (var valueInfo in values)
 				{
 					try
 					{
-						var fullInfo = key.GetValue(valueInfo.Name, cancellationToken).GetAwaiter().GetResult();
+						var fullInfo = ExecutePipeBusyRetry(
+							smb,
+							operationName: $"reading value {keyPath}\\{valueInfo.Name}",
+							cancellationToken,
+							() => key.GetValue(valueInfo.Name, cancellationToken).GetAwaiter().GetResult());
 						ScanRegistryValue(smb, serverName, keyPath, fullInfo);
+					}
+					catch (Win32Exception valueEx) when (valueEx.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
+					{
+						this.LogVerbose(smb, $"Find-TBODpapiBlobs skipped value {keyPath}\\{valueInfo.Name}: {valueEx.Message}");
 					}
 					catch (Exception valueEx)
 					{
@@ -333,6 +363,11 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						this.WriteWarning($"Find-TBODpapiBlobs failed to read {keyPath}\\{valueInfo.Name}: {valueEx.Message}");
 					}
 				}
+				values = new List<RegistryValueInfo>();
+			}
+			catch (Win32Exception ex) when (ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
+			{
+				this.LogVerbose(smb, $"Find-TBODpapiBlobs skipped value enumeration for {keyPath}: {ex.Message}");
 				values = new List<RegistryValueInfo>();
 			}
 			catch (Exception ex)
@@ -353,7 +388,16 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			List<RegistrySubkeyInfo> subkeys;
 			try
 			{
-				subkeys = CollectSubkeys(key, cancellationToken);
+				subkeys = ExecutePipeBusyRetry(
+					smb,
+					operationName: $"enumerating subkeys for {keyPath}",
+					cancellationToken,
+					() => CollectSubkeys(key, cancellationToken));
+			}
+			catch (Win32Exception ex) when (ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
+			{
+				this.LogVerbose(smb, $"Find-TBODpapiBlobs skipped subkey enumeration for {keyPath}: {ex.Message}");
+				return;
 			}
 			catch (Exception ex)
 			{
@@ -370,15 +414,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				IRegistryKey? childKey = null;
 				try
 				{
-					childKey = key.OpenSubkey(
-						subkey.KeyName,
-						RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys,
-						RegistryKeyOptions.BackupRestore,
-						cancellationToken).GetAwaiter().GetResult();
+					childKey = ExecutePipeBusyRetry(
+						smb,
+						operationName: $"opening subkey {childPath}",
+						cancellationToken,
+						() => key.OpenSubkey(
+							subkey.KeyName,
+							RegistryAccessRights.QueryValue | RegistryAccessRights.EnumerateSubkeys,
+							RegistryKeyOptions.BackupRestore,
+							cancellationToken).GetAwaiter().GetResult());
 				}
 				catch (Win32Exception ex) when (ex.NativeErrorCode == (int)Win32ErrorCode.ERROR_ACCESS_DENIED)
 				{
-					this.WriteWarning($"Find-TBODpapiBlobs was denied access to {childPath}: {ex.Message}");
+					this.LogVerbose(smb, $"Find-TBODpapiBlobs skipped subkey {childPath}: {ex.Message}");
 					continue;
 				}
 				catch (Exception ex)
@@ -593,6 +641,74 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			return ex.StatusCode is Ntstatus.STATUS_NOT_A_DIRECTORY
 				or Ntstatus.STATUS_FILE_IS_A_DIRECTORY;
+		}
+
+		private static bool IsFileBusy(NtstatusException ex)
+		{
+			return ex.StatusCode is Ntstatus.STATUS_SHARING_VIOLATION
+				or Ntstatus.STATUS_FILE_LOCK_CONFLICT
+				or Ntstatus.STATUS_LOCK_NOT_GRANTED
+				or Ntstatus.STATUS_DELETE_PENDING;
+		}
+
+		private T ExecutePipeBusyRetry<T>(
+			ISmbProviderInfo smb,
+			string operationName,
+			CancellationToken cancellationToken,
+			Func<T> action)
+		{
+			if (action == null)
+				throw new ArgumentNullException(nameof(action));
+
+			if (_pipeBusyAdaptiveDelayMs > 0)
+			{
+				Task.Delay(_pipeBusyAdaptiveDelayMs, cancellationToken).GetAwaiter().GetResult();
+			}
+
+			var delayMs = PipeBusyInitialDelayMs;
+			for (var attempt = 1; ; attempt++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				try
+				{
+					var result = action();
+					if (_pipeBusyAdaptiveDelayMs > 0)
+						_pipeBusyAdaptiveDelayMs = Math.Max(0, _pipeBusyAdaptiveDelayMs - 25);
+					return result;
+				}
+				catch (NtstatusException ex) when (ex.StatusCode == Ntstatus.STATUS_PIPE_BUSY && attempt <= PipeBusyRetryCount)
+				{
+					_pipeBusyAdaptiveDelayMs = Math.Min(PipeBusyMaxDelayMs, Math.Max(_pipeBusyAdaptiveDelayMs, delayMs));
+					LogPipeBusyRetry(smb, operationName, attempt, delayMs);
+					Task.Delay(delayMs, cancellationToken).GetAwaiter().GetResult();
+					delayMs = Math.Min(delayMs * 2, PipeBusyMaxDelayMs);
+				}
+			}
+		}
+
+		private void LogPipeBusyRetry(ISmbProviderInfo smb, string operationName, int attempt, int delayMs)
+		{
+			var nowUtc = DateTime.UtcNow;
+			if (nowUtc >= _pipeBusyNextVerboseUtc)
+			{
+				FlushSuppressedPipeBusyLogs(smb);
+				this.LogVerbose(smb,
+					$"Find-TBODpapiBlobs throttling after STATUS_PIPE_BUSY while {operationName} (retry {attempt}/{PipeBusyRetryCount}, delay {delayMs}ms).");
+				_pipeBusyNextVerboseUtc = nowUtc.AddMilliseconds(PipeBusyRetryLogIntervalMs);
+				return;
+			}
+
+			_pipeBusySuppressedLogCount++;
+		}
+
+		private void FlushSuppressedPipeBusyLogs(ISmbProviderInfo smb)
+		{
+			if (_pipeBusySuppressedLogCount <= 0)
+				return;
+
+			this.LogVerbose(smb,
+				$"Find-TBODpapiBlobs suppressed {_pipeBusySuppressedLogCount} additional STATUS_PIPE_BUSY retry log entr{(_pipeBusySuppressedLogCount == 1 ? "y" : "ies")}.");
+			_pipeBusySuppressedLogCount = 0;
 		}
 
 		private UncPath ResolveToUncPath(string path, string paramName)

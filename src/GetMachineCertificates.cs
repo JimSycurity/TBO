@@ -4,10 +4,12 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
+using System.Net.Sockets;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Titanis;
@@ -115,49 +117,100 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			var results = new List<UncPath>();
 			var fileSystem = SmbFileSystemResolver.Resolve(smb);
-			ISmbDirectory? dir = null;
-			try
+			const int maxAttempts = 2;
+			for (var attempt = 1; attempt <= maxAttempts; attempt++)
 			{
-				dir = fileSystem.OpenDirectory(directoryPath, cancellationToken);
-				foreach (var entry in dir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken))
+				ISmbDirectory? dir = null;
+				try
 				{
-					if (string.IsNullOrWhiteSpace(entry.FileName))
-						continue;
-					if (entry.FileName is "." or "..")
-						continue;
+					dir = fileSystem.OpenDirectory(directoryPath, cancellationToken);
+					foreach (var entry in dir.QueryEntries("*", Smb2Directory.Smb2DirQueryOptions.None, SecurityInfo.None, Smb2Directory.DefaultQueryBufferSize, cancellationToken))
+					{
+						if (string.IsNullOrWhiteSpace(entry.FileName))
+							continue;
+						if (entry.FileName is "." or "..")
+							continue;
 
-					bool isDirectory = (entry.FileAttributes & Winterop.FileAttributes.Directory) != 0;
-					if (isDirectory)
-						continue;
+						bool isDirectory = (entry.FileAttributes & Winterop.FileAttributes.Directory) != 0;
+						if (isDirectory)
+							continue;
 
-					var fileName = entry.FileName;
-					if (!KeyFileNameRegex.IsMatch(fileName))
-						continue;
+						var fileName = entry.FileName;
+						if (!KeyFileNameRegex.IsMatch(fileName))
+							continue;
 
-					results.Add(directoryPath.Append(fileName));
+						results.Add(directoryPath.Append(fileName));
+					}
+					return results;
 				}
-			}
-			catch (NtstatusException ex) when (IsMissingPath(ex))
-			{
-				logVerbose($"Get-TBOMachineCertificates could not open {directoryPath}: {ex.StatusCode}.");
-				return results;
-			}
-			catch (NtstatusException ex) when (IsAccessDenied(ex))
-			{
-				logWarning($"Get-TBOMachineCertificates was denied access to {directoryPath}: {ex.StatusCode}.");
-				return results;
-			}
-			catch (Exception ex)
-			{
-				logException($"Get-TBOMachineCertificates failed to enumerate {directoryPath}", ex);
-				throw;
-			}
-			finally
-			{
-				dir?.Dispose();
+				catch (NtstatusException ex) when (IsMissingPath(ex))
+				{
+					logVerbose($"Get-TBOMachineCertificates could not open {directoryPath}: {ex.StatusCode}.");
+					return results;
+				}
+				catch (NtstatusException ex) when (IsAccessDenied(ex))
+				{
+					logWarning($"Get-TBOMachineCertificates was denied access to {directoryPath}: {ex.StatusCode}.");
+					return results;
+				}
+				catch (Exception ex) when (attempt < maxAttempts && IsTransientTransportException(ex))
+				{
+					logWarning($"Get-TBOMachineCertificates transient transport failure enumerating {directoryPath}; retrying after forced disconnect (attempt {attempt}/{maxAttempts}): {ex.Message}");
+					TryForceDisconnect(smb, directoryPath.ServerName, directoryPath.Port);
+				}
+				catch (Exception ex)
+				{
+					logException($"Get-TBOMachineCertificates failed to enumerate {directoryPath}", ex);
+					throw;
+				}
+				finally
+				{
+					dir?.Dispose();
+				}
 			}
 
 			return results;
+		}
+
+		private static bool IsTransientTransportException(Exception ex)
+		{
+			if (ex is IOException or SocketException)
+				return true;
+
+			if (ContainsConnectionResetText(ex.Message))
+				return true;
+
+			if (ex is AggregateException aggregate)
+			{
+				foreach (var inner in aggregate.InnerExceptions)
+				{
+					if (IsTransientTransportException(inner))
+						return true;
+				}
+			}
+
+			return ex.InnerException != null && IsTransientTransportException(ex.InnerException);
+		}
+
+		private static bool ContainsConnectionResetText(string? message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return false;
+
+			return message.IndexOf("forcibly closed by the remote host", StringComparison.OrdinalIgnoreCase) >= 0
+				|| message.IndexOf("connection reset", StringComparison.OrdinalIgnoreCase) >= 0
+				|| message.IndexOf("existing connection was forcibly closed", StringComparison.OrdinalIgnoreCase) >= 0;
+		}
+
+		private static void TryForceDisconnect(ISmbProviderInfo smb, string serverName, int? port)
+		{
+			try
+			{
+				smb.DisconnectServerAsync(serverName, port, true).GetAwaiter().GetResult();
+			}
+			catch
+			{
+			}
 		}
 
 		internal static bool TryExtractCapiDpapiBlob(
@@ -288,13 +341,13 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			try
 			{
-				int offset = 0;
 				if (fileBytes.Length < 56)
 				{
 					failureReason = "Key file is truncated.";
 					return false;
 				}
 
+				int offset = 0;
 				_ = BinaryPrimitives.ReadUInt32LittleEndian(fileBytes.Slice(offset, 4));
 				offset += 8; // version + unk0
 
@@ -314,45 +367,47 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				offset += 4;
 
 				offset += 16; // unkArray[16]
-				offset += 4; // unk1
 
-				if (descrLen > int.MaxValue || fileBytes.Length - offset < (int)descrLen)
+				// Some key files include an extra 4-byte field before the UTF-16 description;
+				// others do not. Try both layouts.
+				int[] descriptionOffsets = new[] { offset + 4, offset };
+				foreach (var descOffset in descriptionOffsets)
 				{
-					failureReason = "Key file description length is invalid.";
-					return false;
+					int pos = descOffset;
+
+					if (descrLen > int.MaxValue || fileBytes.Length - pos < (int)descrLen)
+						continue;
+
+					if (publicPropsLen > int.MaxValue || privatePropsLen > int.MaxValue || privateKeyLen > int.MaxValue)
+						continue;
+
+					uniqueName = Encoding.Unicode.GetString(fileBytes.Slice(pos, (int)descrLen)).TrimEnd('\0');
+					pos += (int)descrLen;
+
+					int pubLen = (int)publicPropsLen;
+					int privPropLen = (int)privatePropsLen;
+					int privKeyLen = (int)privateKeyLen;
+
+					if (fileBytes.Length - pos < pubLen + privPropLen + privKeyLen)
+						continue;
+
+					pos += pubLen + privPropLen;
+
+					// The private key block is the final section in observed CNG key files.
+					// Return from its start to EOF so parsing can tolerate under-reported
+					// privateKeyLen values in malformed headers.
+					dpapiBlobBytes = fileBytes.Slice(pos).ToArray();
+					if (dpapiBlobBytes.Length == 0)
+					{
+						failureReason = "Key file did not contain a DPAPI private key blob.";
+						return false;
+					}
+
+					return true;
 				}
 
-				uniqueName = Encoding.Unicode.GetString(fileBytes.Slice(offset, (int)descrLen)).TrimEnd('\0');
-				offset += (int)descrLen;
-
-				if (publicPropsLen > int.MaxValue || privatePropsLen > int.MaxValue)
-				{
-					failureReason = "Key file property lengths are invalid.";
-					return false;
-				}
-
-				if (fileBytes.Length - offset < (int)publicPropsLen + (int)privatePropsLen)
-				{
-					failureReason = "Key file properties are truncated.";
-					return false;
-				}
-
-				offset += checked((int)publicPropsLen + (int)privatePropsLen);
-
-				if (privateKeyLen == 0)
-				{
-					failureReason = "Key file did not contain a DPAPI private key blob.";
-					return false;
-				}
-
-				if (privateKeyLen > int.MaxValue || fileBytes.Length - offset < (int)privateKeyLen)
-				{
-					failureReason = "Key file DPAPI blob is truncated.";
-					return false;
-				}
-
-				dpapiBlobBytes = fileBytes.Slice(offset, (int)privateKeyLen).ToArray();
-				return true;
+				failureReason = "Key file header did not match expected CNG format.";
+				return false;
 			}
 			catch (Exception ex)
 			{
@@ -743,6 +798,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	[OutputType(typeof(TboMachineCertificateInfo))]
 	public sealed class GetTBOMachineCertificates : TboRegCmdlet
 	{
+		private const string CacheSourceKind = "Get-TBOMachineCertificates";
+		private const string CacheCredentialKindPrivateKey = "MachineCertificatePrivateKey";
+		private const string CacheCredentialKindCertificate = "MachineCertificate";
+		private const string CacheCredentialKindKeyContainer = "MachineCertificateKeyContainer";
+		private const string CacheCredentialKindFailure = "MachineCertificateDecryptFailure";
+
 		[Parameter]
 		public string ShareName { get; set; } = MachineCertificateHelpers.DefaultShareName;
 
@@ -772,7 +833,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				throw new ArgumentException("ShareName must be provided.", nameof(this.ShareName));
 
 			var masterKeySet = DpapiHelpers.BuildMasterKeySet(this.MasterKeys, msg => this.LogWarning(smb, msg), "Get-TBOMachineCertificates");
-			if (this.ResolveCacheIngestionEnabled(this.Cache))
+			var cacheIngestEnabled = this.ResolveCacheIngestionEnabled(this.Cache);
+			if (cacheIngestEnabled)
 			{
 				var cached = DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg));
 				DpapiHelpers.MergeMasterKeySets(masterKeySet, cached);
@@ -818,6 +880,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						cancellationToken);
 					if (result == null)
 						continue;
+					if (cacheIngestEnabled)
+						TryWriteMachineCertificateToCache(smb, serverName, result);
 					if (!this.ShowAll.IsPresent && string.IsNullOrWhiteSpace(result.Thumbprint))
 						continue;
 					this.WriteObject(result);
@@ -848,10 +912,110 @@ namespace Titanis.Tbo.Smb2.PowerShell
 						cancellationToken);
 					if (result == null)
 						continue;
+					if (cacheIngestEnabled)
+						TryWriteMachineCertificateToCache(smb, serverName, result);
 					if (!this.ShowAll.IsPresent && string.IsNullOrWhiteSpace(result.Thumbprint))
 						continue;
 					this.WriteObject(result);
 				}
+			}
+		}
+
+		private void TryWriteMachineCertificateToCache(
+			ISmbProviderInfo smb,
+			string serverName,
+			TboMachineCertificateInfo result)
+		{
+			if (string.IsNullOrWhiteSpace(serverName))
+				return;
+			if (result == null)
+				return;
+
+			try
+			{
+				using var cacheDb = TboCacheDatabase.Open(this.CachePath, msg => this.WriteVerbose(msg));
+				var machineId = cacheDb.UpsertMachine(serverName);
+				var sourcePath = string.IsNullOrWhiteSpace(result.SourcePath) ? null : result.SourcePath;
+
+				var contextJson = JsonSerializer.Serialize(new
+				{
+					keyType = result.KeyType,
+					uniqueName = result.UniqueName,
+					masterKeyGuid = result.MasterKeyGuid,
+					thumbprint = result.Thumbprint,
+					subject = result.Subject,
+					notAfterUtc = result.NotAfter?.ToUniversalTime().ToString("O"),
+					hmacValidated = result.HmacValidated,
+					failureReason = result.FailureReason
+				});
+
+				var wroteAny = false;
+
+				if (!string.IsNullOrWhiteSpace(result.PrivateKeyPem))
+				{
+					var privateKeyId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(result.PrivateKeyPem)));
+					var credentialId = cacheDb.UpsertCredential(CacheCredentialKindPrivateKey, privateKeyId);
+					cacheDb.InsertObservation(
+						machineId: machineId,
+						principalId: null,
+						credentialId: credentialId,
+						sourceKind: CacheSourceKind,
+						sourcePath: sourcePath,
+						contextJson: contextJson,
+						confidence: 100);
+					wroteAny = true;
+				}
+
+				if (!string.IsNullOrWhiteSpace(result.CertificatePem) || !string.IsNullOrWhiteSpace(result.Thumbprint))
+				{
+					var certId = !string.IsNullOrWhiteSpace(result.Thumbprint)
+						? result.Thumbprint.Trim().ToLowerInvariant()
+						: Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(result.CertificatePem!)));
+					var credentialId = cacheDb.UpsertCredential(CacheCredentialKindCertificate, certId);
+					cacheDb.InsertObservation(
+						machineId: machineId,
+						principalId: null,
+						credentialId: credentialId,
+						sourceKind: CacheSourceKind,
+						sourcePath: sourcePath,
+						contextJson: contextJson,
+						confidence: 95);
+					wroteAny = true;
+				}
+
+				if (!string.IsNullOrWhiteSpace(result.UniqueName))
+				{
+					var keyContainerId = $"{result.KeyType}:{result.UniqueName}";
+					var credentialId = cacheDb.UpsertCredential(CacheCredentialKindKeyContainer, keyContainerId);
+					cacheDb.InsertObservation(
+						machineId: machineId,
+						principalId: null,
+						credentialId: credentialId,
+						sourceKind: CacheSourceKind,
+						sourcePath: sourcePath,
+						contextJson: contextJson,
+						confidence: string.IsNullOrWhiteSpace(result.FailureReason) ? 90 : 70);
+					wroteAny = true;
+				}
+
+				if (!wroteAny && !string.IsNullOrWhiteSpace(result.FailureReason))
+				{
+					var failureSeed = $"{result.KeyType}|{result.SourcePath}|{result.FailureReason}";
+					var failureId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(failureSeed)));
+					var credentialId = cacheDb.UpsertCredential(CacheCredentialKindFailure, failureId);
+					cacheDb.InsertObservation(
+						machineId: machineId,
+						principalId: null,
+						credentialId: credentialId,
+						sourceKind: CacheSourceKind,
+						sourcePath: sourcePath,
+						contextJson: contextJson,
+						confidence: 60);
+				}
+			}
+			catch (Exception ex)
+			{
+				this.LogException(smb, $"Get-TBOMachineCertificates failed to write cache record for {result.SourcePath}", ex, emitWarning: false);
 			}
 		}
 
@@ -901,7 +1065,20 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			DpapiBlob blob;
 			try
 			{
-				blob = DpapiBlob.Parse(dpapiBlobBytes);
+				var dpapiOffset = DpapiHelpers.FindMagicOffset(dpapiBlobBytes);
+				if (dpapiOffset < 0)
+				{
+					return new TboMachineCertificateInfo
+					{
+						ServerName = this.ServerName,
+						SourcePath = path.ToString(),
+						KeyType = keyType,
+						UniqueName = uniqueName,
+						FailureReason = "Failed to parse DPAPI blob: DPAPI magic header not found."
+					};
+				}
+
+				blob = DpapiBlob.Parse(dpapiBlobBytes, dpapiOffset);
 			}
 			catch (Exception ex)
 			{

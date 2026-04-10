@@ -708,7 +708,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			byte[] entropyBytes,
 			CancellationToken cancellationToken)
 		{
-			var blob = DpapiBlob.Parse(dpapiBlobBytes);
+			if (!DpapiHelpers.TryParseDpapiBlob(dpapiBlobBytes, out var blob, out var parseFailure))
+				throw new InvalidOperationException(parseFailure ?? "Failed to parse keyset DPAPI blob.");
 			var machineMasterKey = DecryptMachineMasterKey(smb, serverName, shareName, blob.GuidMasterKey, dpapiMachineKey, cancellationToken);
 			var clear = DpapiBlobCrypto.Decrypt(blob, machineMasterKey, entropyBytes);
 			if (!clear.Success || clear.Cleartext == null || clear.Cleartext.Length == 0)

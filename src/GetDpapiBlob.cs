@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Management.Automation;
 using System.Threading;
@@ -34,6 +36,8 @@ namespace Titanis.Tbo.Smb2.PowerShell
 	[OutputType(typeof(TboDpapiBlobDecryptionInfo))]
 	public sealed class GetTBODpapiBlob : TboRegCmdlet
 	{
+		private const string CacheSourceKind = "Get-TBODpapiBlob";
+
 		private const string InputObjectParameterSet = "InputObject";
 		private const string FileParameterSet = "File";
 		private const string RegistryParameterSet = "Registry";
@@ -79,37 +83,146 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		[Parameter]
 		public byte[]? EntropyBytes { get; set; }
 
+		[Parameter]
+		public SwitchParameter Cache { get; set; }
+
+		[Parameter]
+		public string? CachePath { get; set; }
+
 		protected override void ProcessRecord(ISmbProviderInfo smb, CancellationToken cancellationToken)
 		{
-			var masterKey = ResolveMasterKey();
-			if (masterKey == null || masterKey.Length == 0)
+			var explicitMasterKey = ResolveMasterKey();
+			if ((this.MasterKeyBytes != null || !string.IsNullOrWhiteSpace(this.MasterKey))
+				&& (explicitMasterKey == null || explicitMasterKey.Length == 0))
+			{
 				throw new ArgumentException("MasterKey must be provided (hex) or MasterKeyBytes must be set.", nameof(this.MasterKey));
+			}
+
+			var cacheEnabled = this.ResolveCacheIngestionEnabled(this.Cache);
+			var serverName = DpapiHelpers.NormalizeServerName(this.ServerName);
+			if (cacheEnabled && string.IsNullOrWhiteSpace(serverName))
+			{
+				this.LogWarning(smb, "Get-TBODpapiBlob cache read/write disabled: ServerName is required for cache operations.");
+				cacheEnabled = false;
+			}
+
+			if ((explicitMasterKey == null || explicitMasterKey.Length == 0) && !cacheEnabled)
+			{
+				throw new ArgumentException(
+					"MasterKey must be provided (hex) or MasterKeyBytes must be set. Enable -Cache (or TITANIS_TBO_CACHE_INGEST) to resolve master keys from cache.",
+					nameof(this.MasterKey));
+			}
+
+			var cachedMasterKeys = cacheEnabled
+				? DpapiHelpers.LoadCachedMasterKeys(this.CachePath, serverName, msg => this.LogVerbose(smb, msg), msg => this.LogWarning(smb, msg))
+				: new System.Collections.Generic.Dictionary<Guid, byte[]>();
+			if (cacheEnabled && cachedMasterKeys.Count > 0)
+				TboDpapiMasterKeyCache.TrySetMany(smb, serverName, cachedMasterKeys);
 
 			var entropy = ResolveEntropy();
-
-			DpapiBlobInput input;
-			try
+			TboCacheDatabase? cacheDb = null;
+			long cacheMachineId = 0;
+			if (cacheEnabled)
 			{
-				input = ResolveInput(smb, cancellationToken);
-			}
-			catch (Exception ex)
-			{
-				this.WriteObject(new TboDpapiBlobDecryptionInfo
+				try
 				{
-					ServerName = this.ServerName,
-					Source = this.ParameterSetName,
-					FailureReason = ex.Message
-				});
-				return;
+					cacheDb = TboCacheDatabase.Open(this.CachePath, msg => this.WriteVerbose(msg));
+					cacheMachineId = cacheDb.UpsertMachine(serverName);
+				}
+				catch (Exception ex)
+				{
+					cacheDb?.Dispose();
+					cacheDb = null;
+					cacheMachineId = 0;
+					this.LogException(smb, $"Get-TBODpapiBlob failed to open cache DB for {serverName}", ex, emitWarning: false);
+					this.LogWarning(smb, $"Get-TBODpapiBlob cache write disabled: {ex.Message}");
+				}
 			}
 
-			DpapiBlob blob;
 			try
 			{
-				blob = DpapiBlob.Parse(input.Data, input.Offset);
-			}
-			catch (Exception ex)
-			{
+				DpapiBlobInput input;
+				try
+				{
+					input = ResolveInput(smb, cancellationToken);
+				}
+				catch (Exception ex)
+				{
+					this.WriteObject(new TboDpapiBlobDecryptionInfo
+					{
+						ServerName = this.ServerName,
+						Source = this.ParameterSetName,
+						FailureReason = ex.Message
+					});
+					return;
+				}
+
+				DpapiBlob blob;
+				try
+				{
+					blob = DpapiBlob.Parse(input.Data, input.Offset);
+				}
+				catch (Exception ex)
+				{
+					var parseFailure = $"Failed to parse DPAPI blob: {ex.Message}";
+					TryWriteBlobRecordToCache(smb, cacheDb, cacheMachineId, input, null, parseFailure);
+					this.WriteObject(new TboDpapiBlobDecryptionInfo
+					{
+						ServerName = this.ServerName,
+						Source = input.Source,
+						Path = input.Path,
+						ValueName = input.ValueName,
+						Offset = input.Offset,
+						FailureReason = parseFailure
+					});
+					return;
+				}
+
+				var masterKey = explicitMasterKey;
+				if ((masterKey == null || masterKey.Length == 0) && cacheEnabled)
+				{
+					if (!cachedMasterKeys.TryGetValue(blob.GuidMasterKey, out masterKey) || masterKey == null || masterKey.Length == 0)
+					{
+						if (!TboDpapiMasterKeyCache.TryGet(smb, serverName, blob.GuidMasterKey, out masterKey) || masterKey == null || masterKey.Length == 0)
+							masterKey = null;
+					}
+				}
+
+				DpapiBlobDecryptionResult decryptResult;
+				if (masterKey == null || masterKey.Length == 0)
+				{
+					var missingReason = BuildMissingMasterKeyFailureReason(cacheDb, cacheMachineId, blob.GuidMasterKey);
+					decryptResult = new DpapiBlobDecryptionResult
+					{
+						Success = false,
+						FailureReason = missingReason
+					};
+					TryRecordMissingMasterKeyTarget(smb, cacheDb, cacheMachineId, input, blob, missingReason);
+				}
+				else
+				{
+					decryptResult = DpapiBlobCrypto.Decrypt(blob, masterKey, entropy);
+					if (ShouldTryKnownCngEntropyFallback(input, entropy, decryptResult))
+					{
+						foreach (var (label, candidateEntropy) in GetKnownCryptoKeyEntropies())
+						{
+							var retry = DpapiBlobCrypto.Decrypt(blob, masterKey, candidateEntropy);
+							if (retry.Cleartext != null && retry.Cleartext.Length > 0)
+							{
+								this.LogVerbose(smb, $"Get-TBODpapiBlob retried decrypt with known {label} entropy for {input.Path ?? "inline"} and recovered cleartext.");
+								decryptResult = retry;
+								break;
+							}
+						}
+					}
+				}
+
+				var cleartextBytes = decryptResult.Cleartext;
+				var cleartextText = cleartextBytes != null ? DpapiHelpers.TryDecodeCleartext(cleartextBytes) : null;
+				TryWriteBlobRecordToCache(smb, cacheDb, cacheMachineId, input, blob, parseFailureReason: null);
+				if (cleartextBytes != null && cleartextBytes.Length > 0)
+					TryWriteCleartextToCache(smb, cacheDb, cacheMachineId, input, blob, cleartextBytes);
+
 				this.WriteObject(new TboDpapiBlobDecryptionInfo
 				{
 					ServerName = this.ServerName,
@@ -117,36 +230,25 @@ namespace Titanis.Tbo.Smb2.PowerShell
 					Path = input.Path,
 					ValueName = input.ValueName,
 					Offset = input.Offset,
-					FailureReason = $"Failed to parse DPAPI blob: {ex.Message}"
+					CredentialGuid = blob.GuidCredential.ToString(),
+					MasterKeyGuid = blob.GuidMasterKey.ToString(),
+					Flags = blob.Flags,
+					Description = blob.Description,
+					CryptAlgorithmId = blob.CryptAlgorithm,
+					CryptAlgorithm = DpapiBlobCrypto.ResolveCipherAlgorithmName(blob.CryptAlgorithm, blob.CryptAlgorithmLength),
+					HashAlgorithmId = blob.HashAlgorithm,
+					HashAlgorithm = DpapiBlobCrypto.ResolveHashAlgorithmName(blob.HashAlgorithm, blob.HashAlgorithmLength),
+					Cleartext = cleartextText,
+					CleartextHex = cleartextBytes?.ToHexString(),
+					CleartextBytes = cleartextBytes,
+					HmacValidated = decryptResult.HmacValidated,
+					FailureReason = decryptResult.FailureReason
 				});
-				return;
 			}
-
-			var decryptResult = DpapiBlobCrypto.Decrypt(blob, masterKey, entropy);
-			var cleartextBytes = decryptResult.Cleartext;
-			var cleartextText = cleartextBytes != null ? DpapiHelpers.TryDecodeCleartext(cleartextBytes) : null;
-
-			this.WriteObject(new TboDpapiBlobDecryptionInfo
+			finally
 			{
-				ServerName = this.ServerName,
-				Source = input.Source,
-				Path = input.Path,
-				ValueName = input.ValueName,
-				Offset = input.Offset,
-				CredentialGuid = blob.GuidCredential.ToString(),
-				MasterKeyGuid = blob.GuidMasterKey.ToString(),
-				Flags = blob.Flags,
-				Description = blob.Description,
-				CryptAlgorithmId = blob.CryptAlgorithm,
-				CryptAlgorithm = DpapiBlobCrypto.ResolveCipherAlgorithmName(blob.CryptAlgorithm, blob.CryptAlgorithmLength),
-				HashAlgorithmId = blob.HashAlgorithm,
-				HashAlgorithm = DpapiBlobCrypto.ResolveHashAlgorithmName(blob.HashAlgorithm, blob.HashAlgorithmLength),
-				Cleartext = cleartextText,
-				CleartextHex = cleartextBytes?.ToHexString(),
-				CleartextBytes = cleartextBytes,
-				HmacValidated = decryptResult.HmacValidated,
-				FailureReason = decryptResult.FailureReason
-			});
+				cacheDb?.Dispose();
+			}
 		}
 
 		private DpapiBlobInput ResolveInput(ISmbProviderInfo smb, CancellationToken cancellationToken)
@@ -283,6 +385,208 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			if (!string.IsNullOrWhiteSpace(this.Entropy))
 				return BinaryHelper.ParseHexString(this.Entropy.AsSpan());
 			return null;
+		}
+
+		private void TryWriteBlobRecordToCache(
+			ISmbProviderInfo smb,
+			TboCacheDatabase? cacheDb,
+			long cacheMachineId,
+			DpapiBlobInput input,
+			DpapiBlob? blob,
+			string? parseFailureReason)
+		{
+			if (cacheDb == null || cacheMachineId <= 0 || input == null)
+				return;
+			if (input.Offset < 0)
+				return;
+
+			try
+			{
+				var blobKey = BuildBlobKey(input);
+				cacheDb.UpsertDpapiBlob(
+					machineId: cacheMachineId,
+					blobKey: blobKey,
+					source: input.Source,
+					path: input.Path ?? "inline",
+					valueName: input.ValueName,
+					valueType: null,
+					dataLength: input.Data.Length,
+					fileSize: input.Source.Equals("File", StringComparison.OrdinalIgnoreCase) ? input.Data.Length : null,
+					matchOffset: input.Offset,
+					bytesScanned: input.Data.Length,
+					credentialGuid: blob?.GuidCredential.ToString(),
+					masterKeyGuid: blob?.GuidMasterKey.ToString(),
+					flags: blob?.Flags,
+					description: blob?.Description,
+					cryptAlgorithmId: blob?.CryptAlgorithm,
+					hashAlgorithmId: blob?.HashAlgorithm,
+					parseFailureReason: parseFailureReason);
+			}
+			catch (Exception ex)
+			{
+				this.LogException(smb, $"Get-TBODpapiBlob failed to write cache blob record for {this.ServerName}", ex, emitWarning: false);
+				this.LogWarning(smb, $"Get-TBODpapiBlob cache write failed: {ex.Message}");
+			}
+		}
+
+		private void TryWriteCleartextToCache(
+			ISmbProviderInfo smb,
+			TboCacheDatabase? cacheDb,
+			long cacheMachineId,
+			DpapiBlobInput input,
+			DpapiBlob blob,
+			byte[] cleartextBytes)
+		{
+			if (cacheDb == null || cacheMachineId <= 0)
+				return;
+			if (cleartextBytes == null || cleartextBytes.Length == 0)
+				return;
+
+			const int MaxCacheBytes = 8192;
+			var payload = cleartextBytes.Length <= MaxCacheBytes
+				? cleartextBytes
+				: cleartextBytes.AsSpan(0, MaxCacheBytes).ToArray();
+
+			try
+			{
+				var sourcePath = BuildSourcePath(input) ?? "inline";
+				var identifier = $"{sourcePath}|{input.Offset.ToString(CultureInfo.InvariantCulture)}|{blob.GuidMasterKey}";
+				var credentialId = cacheDb.UpsertCredential("dpapi_cleartext", identifier, payload);
+				var contextJson = $"{{\"offset\":{input.Offset.ToString(CultureInfo.InvariantCulture)},\"masterKeyGuid\":\"{blob.GuidMasterKey}\",\"source\":\"{input.Source}\"}}";
+				cacheDb.InsertObservation(
+					machineId: cacheMachineId,
+					principalId: null,
+					credentialId: credentialId,
+					sourceKind: CacheSourceKind,
+					sourcePath: sourcePath,
+					contextJson: contextJson,
+					confidence: 70);
+			}
+			catch (Exception ex)
+			{
+				this.LogException(smb, $"Get-TBODpapiBlob failed to write cache credential record for {this.ServerName}", ex, emitWarning: false);
+			}
+		}
+
+		private static string BuildBlobKey(DpapiBlobInput input)
+		{
+			var source = input.Source?.Trim() ?? string.Empty;
+			var path = input.Path?.Trim() ?? "inline";
+			var valueName = input.ValueName?.Trim() ?? string.Empty;
+
+			if (source.Equals("Registry", StringComparison.OrdinalIgnoreCase))
+				return $"Registry|{path}|{valueName}|{input.Offset}";
+
+			if (source.Equals("File", StringComparison.OrdinalIgnoreCase))
+				return $"File|{path}|{input.Offset}";
+
+			var prefixLen = Math.Min(input.Data.Length, 16);
+			var prefix = prefixLen > 0 ? Convert.ToHexString(input.Data.AsSpan(0, prefixLen)) : "empty";
+			return $"{source}|{path}|{input.Offset}|{prefix}";
+		}
+
+		private static string? BuildSourcePath(DpapiBlobInput input)
+		{
+			if (input == null)
+				return null;
+
+			if (input.Source.Equals("Registry", StringComparison.OrdinalIgnoreCase)
+				&& !string.IsNullOrWhiteSpace(input.Path)
+				&& !string.IsNullOrWhiteSpace(input.ValueName))
+			{
+				return $"{input.Path}\\{input.ValueName}";
+			}
+
+			return input.Path;
+		}
+
+		private static bool ShouldTryKnownCngEntropyFallback(
+			DpapiBlobInput input,
+			byte[]? entropy,
+			DpapiBlobDecryptionResult decryptResult)
+		{
+			if (entropy != null && entropy.Length > 0)
+				return false;
+			if (decryptResult.Cleartext != null && decryptResult.Cleartext.Length > 0)
+				return false;
+			if (!input.Source.Equals("File", StringComparison.OrdinalIgnoreCase))
+				return false;
+			if (string.IsNullOrWhiteSpace(input.Path))
+				return false;
+
+			return input.Path.IndexOf(@"\Microsoft\Crypto\Keys\", StringComparison.OrdinalIgnoreCase) >= 0;
+		}
+
+		private static IReadOnlyList<(string Label, byte[] Entropy)> GetKnownCryptoKeyEntropies()
+		{
+			var entropies = new List<(string Label, byte[] Entropy)>
+			{
+				("CNG", MachineCertificateHelpers.GetCngEntropy()),
+				("PrivateKeyProperties", NgcCryptoKeysHelpers.GetPrivateKeyPropertiesEntropy())
+			};
+
+			var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var deduped = new List<(string Label, byte[] Entropy)>(entropies.Count);
+			foreach (var entry in entropies)
+			{
+				if (entry.Entropy == null || entry.Entropy.Length == 0)
+					continue;
+
+				var key = Convert.ToHexString(entry.Entropy);
+				if (!seen.Add(key))
+					continue;
+
+				deduped.Add(entry);
+			}
+
+			return deduped;
+		}
+
+		private string BuildMissingMasterKeyFailureReason(TboCacheDatabase? cacheDb, long cacheMachineId, Guid masterKeyGuid)
+		{
+			if (cacheDb == null || cacheMachineId <= 0)
+				return $"Master key {masterKeyGuid} was not provided and was not found in cache.";
+
+			try
+			{
+				var state = cacheDb.GetDpapiMasterKeyPresence(cacheMachineId, masterKeyGuid.ToString());
+				if (!state.Exists)
+					return $"Master key {masterKeyGuid} was not found in the supplied key set and has not been seen in SQLite cache.";
+				if (state.HasCleartext)
+					return $"Master key {masterKeyGuid} is present in SQLite cache, but was unavailable in the current key set.";
+
+				return $"Master key {masterKeyGuid} is tracked in SQLite cache, but its cleartext key has not been recovered yet.";
+			}
+			catch
+			{
+				return $"Master key {masterKeyGuid} was not provided and was not found in cache.";
+			}
+		}
+
+		private void TryRecordMissingMasterKeyTarget(
+			ISmbProviderInfo smb,
+			TboCacheDatabase? cacheDb,
+			long cacheMachineId,
+			DpapiBlobInput input,
+			DpapiBlob blob,
+			string? failureReason)
+		{
+			if (cacheDb == null || cacheMachineId <= 0)
+				return;
+
+			try
+			{
+				var sourcePath = BuildSourcePath(input) ?? "inline";
+				cacheDb.UpsertDpapiMasterKeyTarget(
+					machineId: cacheMachineId,
+					masterKeyGuid: blob.GuidMasterKey.ToString(),
+					sourcePath: sourcePath,
+					failureReason: failureReason);
+			}
+			catch (Exception ex)
+			{
+				this.LogException(smb, $"Get-TBODpapiBlob failed to record missing master key target for {this.ServerName}", ex, emitWarning: false);
+			}
 		}
 
 

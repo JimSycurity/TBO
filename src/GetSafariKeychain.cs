@@ -197,13 +197,9 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			}
 
 			DpapiBlob blob;
-			try
+			if (!DpapiHelpers.TryParseDpapiBlob(dpapiBlobBytes, out blob, out var parseFailure))
 			{
-				blob = DpapiBlob.Parse(dpapiBlobBytes, 0);
-			}
-			catch (Exception ex)
-			{
-				failureReason = $"Failed to parse DPAPI blob: {ex.Message}";
+				failureReason = parseFailure;
 				return;
 			}
 

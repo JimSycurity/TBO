@@ -151,6 +151,7 @@
       <maml:description>
         <maml:para>Decrypts DPAPI master keys.</maml:para>
         <maml:para>Machine scope uses DPAPI_SYSTEM from LSA secrets, while user scope can be decrypted via user SID plus password or NT hash. When present, CREDHIST is used to handle password changes for user-scoped keys.</maml:para>
+        <maml:para>When cache ingestion is enabled (via -Cache or TITANIS_TBO_CACHE_INGEST), SID-correlated NTHash observations (for example, from Get-TBORegSamHashes) are also used as user-scope DPAPI candidates.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -1153,6 +1154,7 @@ Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys
       <command:noun>TBODpapiBlob</command:noun>
       <maml:description>
         <maml:para>Decrypts a DPAPI blob using a DPAPI master key.</maml:para>
+        <maml:para>If cache ingestion is enabled (via -Cache or TITANIS_TBO_CACHE_INGEST), cached decrypted master keys are consulted when MasterKey/MasterKeyBytes are not supplied, and blob/decryption artifacts are written to the persistent cache.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -1282,6 +1284,20 @@ Get-TBONGCCryptoKeys -ServerName corp1-wks01.corp1.lab.home-labs.lol -MasterKeys
         </maml:description>
         <command:parameterValue>Byte[]</command:parameterValue>
       </command:parameter>
+      <command:parameter>
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>Enables cache-backed master key lookup and writes DPAPI blob/decryption artifacts to the persistent cache.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter>
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override. If omitted, the cache path is resolved using the TITANIS_TBO_CACHE environment variable or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -1308,6 +1324,15 @@ Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Pat
         <maml:code>Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -RegistryPath HKLM\Software\Contoso -ValueName Blob -MasterKey $mk.MasterKey</maml:code>
         <maml:remarks>
           <maml:para>Decrypts a DPAPI blob stored in a registry value.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 4 --------------------------</command:title>
+        <maml:code>$blob = Find-TBODpapiBlobs -ServerName corp1-web01.corp1.lab.home-labs.lol -Path tbo:\Users -Recurse |
+  Select-Object -First 1
+Get-TBODpapiBlob -ServerName corp1-web01.corp1.lab.home-labs.lol -Path $blob.Path -Offset $blob.MatchOffset -Cache</maml:code>
+        <maml:remarks>
+          <maml:para>Uses cached DPAPI master keys (by MasterKeyGuid) and records blob/decryption artifacts in the cache.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>
@@ -4889,6 +4914,7 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
         <maml:para>Decrypts LSA secrets from the remote registry using the derived LSA key.</maml:para>
         <maml:para>Binary secrets such as DPAPI_SYSTEM, NL$KM, $MACHINE.ACC, and Kerberos* are returned as hex strings in Secret.</maml:para>
         <maml:para>For DPAPI_SYSTEM, the machine/user halves are split into DpapiMachineKey and DpapiUserKey.</maml:para>
+        <maml:para>If cache ingestion is enabled (via -Cache or TITANIS_TBO_CACHE_INGEST), recovered secret material is written to the persistent cache as LSASecret/Password/DPAPI_SYSTEM*/NTHash observations.</maml:para>
       </maml:description>
     </command:details>
     <command:syntax>
@@ -4909,6 +4935,14 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
         <command:parameter required="false">
           <maml:name>LsaKeyBytes</maml:name>
           <command:parameterValue>Byte[]</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>Cache</maml:name>
+          <command:parameterValue>Switch</command:parameterValue>
+        </command:parameter>
+        <command:parameter required="false">
+          <maml:name>CachePath</maml:name>
+          <command:parameterValue>String</command:parameterValue>
         </command:parameter>
       </command:syntaxItem>
     </command:syntax>
@@ -4941,6 +4975,20 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
         </maml:description>
         <command:parameterValue>Byte[]</command:parameterValue>
       </command:parameter>
+      <command:parameter required="false">
+        <maml:name>Cache</maml:name>
+        <maml:description>
+          <maml:para>Overrides the cache ingestion default. Use -Cache to force cache writes or -Cache:$false to suppress writes when TITANIS_TBO_CACHE_INGEST is enabled.</maml:para>
+        </maml:description>
+        <command:parameterValue>Switch</command:parameterValue>
+      </command:parameter>
+      <command:parameter required="false">
+        <maml:name>CachePath</maml:name>
+        <maml:description>
+          <maml:para>Optional cache database path override used when writing cache observations. If omitted, the cache path is resolved using TITANIS_TBO_CACHE or the per-user default path.</maml:para>
+        </maml:description>
+        <command:parameterValue>String</command:parameterValue>
+      </command:parameter>
     </command:parameters>
     <command:examples>
       <command:example>
@@ -4955,6 +5003,15 @@ Set-TBOScheduledTaskSecurityDescriptor -ServerName $task.ServerName -Path $task.
         <maml:code>Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Name 'NL$KM'</maml:code>
         <maml:remarks>
           <maml:para>Decrypts a specific LSA secret.</maml:para>
+        </maml:remarks>
+      </command:example>
+      <command:example>
+        <command:title>-------------------------- EXAMPLE 3 --------------------------</command:title>
+        <maml:code>Get-TBORegLsaSecrets -ServerName corp1-web01.corp1.lab.home-labs.lol -Cache
+Get-TBORegLsaSecrets -ServerName corp1-web02.corp1.lab.home-labs.lol -Cache
+Get-TBOCacheCredentialReuse -Kind LSASecret -MinimumMachineCount 2</maml:code>
+        <maml:remarks>
+          <maml:para>Writes recovered LSA secret material to the cache and shows secrets observed on multiple machines.</maml:para>
         </maml:remarks>
       </command:example>
     </command:examples>

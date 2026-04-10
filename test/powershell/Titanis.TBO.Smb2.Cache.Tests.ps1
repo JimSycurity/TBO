@@ -75,6 +75,487 @@ Describe 'TBO cache principal identity' {
 	}
 }
 
+Describe 'TBO cache pivot query cmdlets (TBO-hvr.1)' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		$script:moduleAvailable = $false
+		if ($script:repoRoot) {
+			try {
+				Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+				$script:moduleAvailable = $true
+			} catch {
+				$script:moduleAvailable = $false
+			}
+		}
+
+		$script:originalCachePath = $env:TITANIS_TBO_CACHE
+	}
+
+	AfterAll {
+		if ($null -eq $script:originalCachePath) {
+			Remove-Item env:TITANIS_TBO_CACHE -ErrorAction SilentlyContinue
+		} else {
+			$env:TITANIS_TBO_CACHE = $script:originalCachePath
+		}
+	}
+
+	It 'supports machine, principal, credential, and source-path pivots offline' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$cachePath = Join-Path $TestDrive 'cache_pivots.sqlite3'
+		$env:TITANIS_TBO_CACHE = $cachePath
+		$nthash = '8846f7eaee8fb117ad06bdd830b7586c'
+
+		Clear-TBOCache -Confirm:$false
+
+		Add-TBOCacheObservation -ServerName host1 `
+			-PrincipalDomain host1 `
+			-PrincipalName Administrator `
+			-PrincipalType LocalUser `
+			-CredentialKind NTHash `
+			-CredentialIdentifier $nthash `
+			-SourceKind Get-TBORegSamHashes `
+			-SourcePath '\\host1\C$\Windows\System32\config\SAM' | Out-Null
+
+		Add-TBOCacheObservation -ServerName host2 `
+			-PrincipalDomain host2 `
+			-PrincipalName Administrator `
+			-PrincipalType LocalUser `
+			-CredentialKind NTHash `
+			-CredentialIdentifier $nthash `
+			-SourceKind Get-TBORegSamHashes `
+			-SourcePath '\\host2\C$\Windows\System32\config\SAM' | Out-Null
+
+		Add-TBOCacheObservation -ServerName host2 `
+			-PrincipalDomain host2 `
+			-PrincipalName svc_sql `
+			-PrincipalType User `
+			-CredentialKind Password `
+			-CredentialIdentifier 'Plaintext:svc_sql' `
+			-SourceKind Manual `
+			-SourcePath '\\host2\C$\Users\svc_sql\secret.txt' | Out-Null
+
+		$machineRows = @(Get-TBOCacheMachineFindings -ServerName host1)
+		$machineRows.Count | Should -Be 1
+		$machineRows[0].ServerName | Should -Be 'host1'
+		$machineRows[0].SourcePath | Should -Be '\\host1\C$\Windows\System32\config\SAM'
+		$machineRows[0].CachePath | Should -Be $cachePath
+
+		$machineWildcardRows = @(Get-TBOCacheMachineFindings -ServerName 'host*' -SourcePath '*\Windows\System32\config\*')
+		$machineWildcardRows.Count | Should -Be 2
+
+		$principalRows = @(Get-TBOCachePrincipalFindings -Name Administrator)
+		$principalRows.Count | Should -Be 2
+		$principalRows | ForEach-Object { $_.PrincipalName | Should -Be 'Administrator' }
+
+		$credentialRows = @(Get-TBOCacheCredentialFindings -Kind NTHash -Identifier $nthash.ToUpperInvariant())
+		$credentialRows.Count | Should -Be 2
+		$credentialRows | ForEach-Object { $_.CredentialKind | Should -Be 'NTHash' }
+
+		$pathRows = @(Get-TBOCachePathFindings -SourcePath '*secret.txt')
+		$pathRows.Count | Should -BeGreaterOrEqual 1
+		$passwordPathRows = @($pathRows | Where-Object { $_.CredentialKind -eq 'Password' })
+		$passwordPathRows.Count | Should -Be 1
+		$passwordPathRows[0].PrincipalName | Should -Be 'svc_sql'
+		$passwordPathRows[0].CredentialIdentifier | Should -Be 'Plaintext:svc_sql'
+	}
+}
+
+Describe 'TBO cache credential reuse heatmap and blast radius (TBO-hvr.2)' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		$script:moduleAvailable = $false
+		if ($script:repoRoot) {
+			try {
+				Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+				$script:moduleAvailable = $true
+			} catch {
+				$script:moduleAvailable = $false
+			}
+		}
+
+		$script:originalCachePath = $env:TITANIS_TBO_CACHE
+	}
+
+	AfterAll {
+		if ($null -eq $script:originalCachePath) {
+			Remove-Item env:TITANIS_TBO_CACHE -ErrorAction SilentlyContinue
+		} else {
+			$env:TITANIS_TBO_CACHE = $script:originalCachePath
+		}
+	}
+
+	It 'supports offline heatmap and blast-radius ranking views' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$cachePath = Join-Path $TestDrive 'cache_reuse_scoring.sqlite3'
+		$env:TITANIS_TBO_CACHE = $cachePath
+
+		$highRiskHash = '8846f7eaee8fb117ad06bdd830b7586c'
+		$lowRiskHash = 'aad3b435b51404eeaad3b435b51404ee'
+
+		Clear-TBOCache -Confirm:$false
+
+		Add-TBOCacheObservation -ServerName host1 `
+			-PrincipalDomain host1 `
+			-PrincipalName Administrator `
+			-PrincipalType LocalUser `
+			-CredentialKind NTHash `
+			-CredentialIdentifier $highRiskHash `
+			-SourceKind Get-TBORegSamHashes `
+			-SourcePath '\\host1\C$\Windows\System32\config\SAM' | Out-Null
+
+		Add-TBOCacheObservation -ServerName host2 `
+			-PrincipalDomain host2 `
+			-PrincipalName Administrator `
+			-PrincipalType LocalUser `
+			-CredentialKind NTHash `
+			-CredentialIdentifier $highRiskHash `
+			-SourceKind Get-TBORegSamHashes `
+			-SourcePath '\\host2\C$\Windows\System32\config\SAM' | Out-Null
+
+		Add-TBOCacheObservation -ServerName host1 `
+			-PrincipalDomain host1 `
+			-PrincipalName helpdesk `
+			-PrincipalType User `
+			-CredentialKind NTHash `
+			-CredentialIdentifier $lowRiskHash `
+			-SourceKind Get-TBORegSamHashes `
+			-SourcePath '\\host1\C$\Windows\System32\config\SAM' | Out-Null
+
+		Add-TBOCacheObservation -ServerName host2 `
+			-PrincipalDomain host2 `
+			-PrincipalName helpdesk `
+			-PrincipalType User `
+			-CredentialKind NTHash `
+			-CredentialIdentifier $lowRiskHash `
+			-SourceKind Get-TBORegSamHashes `
+			-SourcePath '\\host2\C$\Windows\System32\config\SAM' | Out-Null
+
+		$heatmap = @(Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2 -View Heatmap)
+		$heatmap.Count | Should -Be 4
+
+		$highRiskHeatmap = @($heatmap | Where-Object { $_.CredentialIdentifier -eq $highRiskHash })
+		$highRiskHeatmap.Count | Should -Be 2
+		$highRiskHeatmap | ForEach-Object { $_.PrivilegeHints | Should -Contain 'Administrator' }
+
+		$blast = @(Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2 -View BlastRadius)
+		$blast.Count | Should -Be 2
+		$blast[0].CredentialIdentifier | Should -Be $highRiskHash
+		$blast[0].BlastRadiusScore | Should -BeGreaterOrEqual $blast[1].BlastRadiusScore
+		$blast[0].MachineCount | Should -Be 2
+		$blast[0].Priority | Should -Not -BeNullOrEmpty
+
+		$top = @(Get-TBOCacheCredentialReuse -Kind NTHash -MinimumMachineCount 2 -View BlastRadius -Top 1)
+		$top.Count | Should -Be 1
+		$top[0].CredentialIdentifier | Should -Be $highRiskHash
+	}
+}
+
+Describe 'TBO cache derived NTHash enrichment (TBO-hvr.3)' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		$script:moduleAvailable = $false
+		if ($script:repoRoot) {
+			try {
+				Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+				$script:moduleAvailable = $true
+			} catch {
+				$script:moduleAvailable = $false
+			}
+		}
+
+		$script:originalCachePath = $env:TITANIS_TBO_CACHE
+	}
+
+	AfterAll {
+		if ($null -eq $script:originalCachePath) {
+			Remove-Item env:TITANIS_TBO_CACHE -ErrorAction SilentlyContinue
+		} else {
+			$env:TITANIS_TBO_CACHE = $script:originalCachePath
+		}
+	}
+
+	It 'derives and reuses NTHash observations from cached Password observations fully offline' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$cachePath = Join-Path $TestDrive 'cache_derived_nthash.sqlite3'
+		$env:TITANIS_TBO_CACHE = $cachePath
+
+		$password = 'password'
+		$derivedNtHash = '8846f7eaee8fb117ad06bdd830b7586c'
+
+		Clear-TBOCache -Confirm:$false
+
+		Add-TBOCacheObservation -ServerName host1 `
+			-PrincipalSid 'S-1-5-21-1-2-3-500' `
+			-PrincipalDomain host1 `
+			-PrincipalName Administrator `
+			-PrincipalType LocalUser `
+			-CredentialKind Password `
+			-CredentialIdentifier $password `
+			-SourceKind Get-TBORegLsaSecrets `
+			-SourcePath '\\host1\C$\Windows\System32\config\SECURITY' | Out-Null
+
+		Add-TBOCacheObservation -ServerName host2 `
+			-PrincipalSid 'S-1-5-21-4-5-6-500' `
+			-PrincipalDomain host2 `
+			-PrincipalName Administrator `
+			-PrincipalType LocalUser `
+			-CredentialKind Password `
+			-CredentialIdentifier $password `
+			-SourceKind Get-TBORegLsaSecrets `
+			-SourcePath '\\host2\C$\Windows\System32\config\SECURITY' | Out-Null
+
+		$info = Get-TBOCacheInfo
+		$info.MachineCount | Should -Be 2
+		$info.PrincipalCount | Should -Be 2
+		$info.CredentialCount | Should -Be 2
+		$info.ObservationCount | Should -Be 4
+
+		$derivedRows = @(Get-TBOCacheCredentialFindings -Kind NTHash -Identifier $derivedNtHash)
+		$derivedRows.Count | Should -Be 2
+		$derivedRows | ForEach-Object { $_.CredentialKind | Should -Be 'NTHash' }
+		$derivedRows | ForEach-Object { $_.CredentialIdentifier | Should -Be $derivedNtHash }
+
+		$blast = @(Get-TBOCacheCredentialReuse -Kind NTHash -Identifier $derivedNtHash -MinimumMachineCount 2 -View BlastRadius)
+		$blast.Count | Should -Be 1
+		$blast[0].CredentialIdentifier | Should -Be $derivedNtHash
+		$blast[0].MachineCount | Should -Be 2
+
+		$conn = [Microsoft.Data.Sqlite.SqliteConnection]::new("Data Source=$cachePath;Mode=ReadWrite;Pooling=False")
+		$conn.Open()
+		try {
+			$cmd = $conn.CreateCommand()
+			$cmd.CommandText = @'
+SELECT COUNT(1)
+FROM verified_password_hashes
+WHERE hash_type='nt_pwd'
+  AND hash_value=$hash;
+'@
+			$cmd.Parameters.Clear()
+			$cmd.Parameters.AddWithValue('$hash', $derivedNtHash) | Out-Null
+			([int]$cmd.ExecuteScalar()) | Should -Be 2
+		} finally {
+			$conn.Dispose()
+		}
+	}
+}
+
+Describe 'TBO cache DPAPI backlog and candidate ranking (TBO-hvr.4)' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		$script:moduleAvailable = $false
+		if ($script:repoRoot) {
+			try {
+				Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+				$script:moduleAvailable = $true
+			} catch {
+				$script:moduleAvailable = $false
+			}
+		}
+
+		$script:originalCachePath = $env:TITANIS_TBO_CACHE
+
+		if ($script:moduleAvailable) {
+			$module = Get-Module -Name 'Titanis.TBO.Smb2.PowerShell'
+			$assembly = $module.ImplementingAssembly
+			$script:cacheDbType = $assembly.GetType('Titanis.Tbo.Smb2.PowerShell.TboCacheDatabase')
+		}
+
+		function Open-TboCacheDbReflected {
+			param([string]$CachePath)
+			$openMethod = $script:cacheDbType.GetMethod(
+				'Open',
+				[System.Reflection.BindingFlags]::Static -bor [System.Reflection.BindingFlags]::NonPublic)
+			return $openMethod.Invoke($null, @($CachePath, $null))
+		}
+
+		function Invoke-UpsertMachine {
+			param([object]$Db, [string]$ServerName)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertMachine',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			return [int64]$method.Invoke($Db, @($ServerName))
+		}
+
+		function Invoke-UpsertVerifiedPasswordHash {
+			param(
+				[object]$Db,
+				[int64]$MachineId,
+				[string]$ServerName,
+				[string]$UserSid,
+				[string]$HashType,
+				[string]$HashValueHex
+			)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertVerifiedPasswordHash',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			return [int64]$method.Invoke($Db, @(
+				$MachineId, $ServerName, $UserSid, $null, $HashType, $HashValueHex, 'Get-TBODpapiMasterKeys', 'unit_test'))
+		}
+
+		function Invoke-UpsertDpapiMasterKey {
+			param(
+				[object]$Db,
+				[int64]$MachineId,
+				[string]$Scope,
+				[string]$UserSid,
+				[string]$KeyPath,
+				[string]$MasterKeyGuid,
+				[bool]$IsPreferred,
+				[string]$FailureReason,
+				[AllowNull()][byte[]]$CleartextKey
+			)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertDpapiMasterKey',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			$cleartextSha1 = if ($CleartextKey -and $CleartextKey.Length -gt 0) { '0123456789abcdef0123456789abcdef01234567' } else { $null }
+			return [int64]$method.Invoke($Db, @(
+				$MachineId, $Scope, $UserSid, $KeyPath, $MasterKeyGuid, $IsPreferred, $null, $null, $null, $null, $FailureReason, $CleartextKey, $cleartextSha1))
+		}
+
+		function Invoke-UpsertDpapiBlob {
+			param(
+				[object]$Db,
+				[int64]$MachineId,
+				[string]$BlobKey,
+				[string]$Path,
+				[string]$MasterKeyGuid,
+				[string]$ParseFailureReason
+			)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertDpapiBlob',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			return [int64]$method.Invoke($Db, @(
+				$MachineId, $BlobKey, 'File', $Path, $null, $null, 512, 1024L, 128L, 512L, $null, $MasterKeyGuid, $null, $null, $null, $null, $ParseFailureReason))
+		}
+	}
+
+	AfterAll {
+		if ($null -eq $script:originalCachePath) {
+			Remove-Item env:TITANIS_TBO_CACHE -ErrorAction SilentlyContinue
+		} else {
+			$env:TITANIS_TBO_CACHE = $script:originalCachePath
+		}
+	}
+
+	It 'builds unresolved DPAPI backlog and ranks candidate material offline' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$cachePath = Join-Path $TestDrive 'cache_dpapi_backlog.sqlite3'
+		$env:TITANIS_TBO_CACHE = $cachePath
+
+		$sid = 'S-1-5-21-1-2-3-500'
+		$hash = '8846f7eaee8fb117ad06bdd830b7586c'
+		$unresolvedGuid = '11111111-1111-1111-1111-111111111111'
+		$resolvedGuid = '22222222-2222-2222-2222-222222222222'
+
+		Clear-TBOCache -Confirm:$false
+
+		Add-TBOCacheObservation -ServerName host1 `
+			-PrincipalSid $sid `
+			-PrincipalDomain host1 `
+			-PrincipalName Administrator `
+			-PrincipalType LocalUser `
+			-CredentialKind NTHash `
+			-CredentialIdentifier $hash `
+			-SourceKind Get-TBORegSamHashes `
+			-SourcePath '\\host1\C$\Windows\System32\config\SAM' | Out-Null
+
+		Add-TBOCacheObservation -ServerName host1 `
+			-PrincipalSid $sid `
+			-PrincipalDomain host1 `
+			-PrincipalName Administrator `
+			-PrincipalType LocalUser `
+			-CredentialKind Password `
+			-CredentialIdentifier 'Password123!' `
+			-SourceKind Get-TBORegLsaSecrets `
+			-SourcePath '\\host1\C$\Windows\System32\config\SECURITY' | Out-Null
+
+		$db = Open-TboCacheDbReflected -CachePath $cachePath
+		try {
+			$machineId = Invoke-UpsertMachine -Db $db -ServerName 'host1'
+			Invoke-UpsertVerifiedPasswordHash -Db $db -MachineId $machineId -ServerName 'host1' -UserSid $sid -HashType 'nt_pwd' -HashValueHex $hash | Out-Null
+
+			Invoke-UpsertDpapiMasterKey -Db $db -MachineId $machineId -Scope 'User' -UserSid $sid `
+				-KeyPath "\\host1\C$\Users\Administrator\AppData\Roaming\Microsoft\Protect\$sid\$unresolvedGuid" `
+				-MasterKeyGuid $unresolvedGuid -IsPreferred $true -FailureReason 'HMAC validation failed' -CleartextKey $null | Out-Null
+
+			Invoke-UpsertDpapiBlob -Db $db -MachineId $machineId -BlobKey 'blob-unresolved' `
+				-Path '\\host1\C$\Users\Administrator\AppData\Local\Microsoft\Credentials\A1B2C3' `
+				-MasterKeyGuid $unresolvedGuid -ParseFailureReason $null | Out-Null
+
+			[byte[]]$cleartext = 1..16
+			Invoke-UpsertDpapiMasterKey -Db $db -MachineId $machineId -Scope 'User' -UserSid $sid `
+				-KeyPath "\\host1\C$\Users\Administrator\AppData\Roaming\Microsoft\Protect\$sid\$resolvedGuid" `
+				-MasterKeyGuid $resolvedGuid -IsPreferred $false -FailureReason $null -CleartextKey $cleartext | Out-Null
+
+			Invoke-UpsertDpapiBlob -Db $db -MachineId $machineId -BlobKey 'blob-resolved' `
+				-Path '\\host1\C$\Users\Administrator\AppData\Local\Microsoft\Credentials\D4E5F6' `
+				-MasterKeyGuid $resolvedGuid -ParseFailureReason $null | Out-Null
+		} finally {
+			$db.Dispose()
+		}
+
+		$backlog = @(Get-TBOCacheDpapiBacklog -ServerName host1)
+		$backlog.Count | Should -Be 2
+		($backlog | Where-Object { $_.MasterKeyGuid -eq $resolvedGuid }).Count | Should -Be 0
+
+		$mk = @($backlog | Where-Object { $_.ArtifactType -eq 'MasterKey' -and $_.MasterKeyGuid -eq $unresolvedGuid })[0]
+		$mk.UserSid | Should -Be $sid
+		$mk.HasCleartextMasterKey | Should -BeFalse
+		$mk.DependentBlobCount | Should -Be 1
+		$mk.CandidateCount | Should -BeGreaterThan 0
+
+		$blob = @($backlog | Where-Object { $_.ArtifactType -eq 'Blob' -and $_.MasterKeyGuid -eq $unresolvedGuid })[0]
+		$blob.HasMasterKeyRecord | Should -BeTrue
+		$blob.HasCleartextMasterKey | Should -BeFalse
+
+		$candidates = @(Get-TBOCacheDpapiBacklog -ServerName host1 -View CandidateRanking -Top 2)
+		$candidates.Count | Should -BeGreaterThan 0
+		$candidates[0].CandidateSourceClass | Should -Be 'VerifiedHash'
+		$candidates[0].CandidateType | Should -Be 'nt_pwd'
+		$candidates[0].CandidateValue | Should -Be $hash
+		$candidates[0].CandidateRank | Should -Be 1
+
+		$sidScoped = @(Get-TBOCacheDpapiBacklog -ServerName host1 -UserSid $sid)
+		$sidScoped.Count | Should -Be 2
+	}
+}
+
 Describe 'TBO cache schema migration' {
 	It 'migrates a v1 cache DB to current schema on open' {
 		if (-not $script:moduleAvailable) {

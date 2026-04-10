@@ -18,3 +18,5 @@ Lib/
 # Claude Code local settings (per-machine permission overrides)
 .claude/settings.local.json
 
+cache.*.sqlite3*
+testResults.xml
