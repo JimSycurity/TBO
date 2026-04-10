@@ -495,9 +495,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 									{
 										credCandidates.Add(new DpapiKeyMaterialCandidate
 										{
-											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(pwdhash, SID)",
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(pwdhash, SID\\0)",
 											KeyMaterial = DpapiUserKeyDerivation.DeriveLocalPreKeyFromHash(location.UserSid, entry.PasswordHash),
 											Confidence = 0.8,
+											SourceHashType = DpapiVerifiedHashTypes.Sha1Pwd,
+											SourceHash = (byte[])entry.PasswordHash.Clone(),
+										});
+
+										credCandidates.Add(new DpapiKeyMaterialCandidate
+										{
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(pwdhash, SID)",
+											KeyMaterial = DpapiUserKeyDerivation.DeriveLocalPreKeyFromHashNoTerminator(location.UserSid, entry.PasswordHash),
+											Confidence = 0.75,
 											SourceHashType = DpapiVerifiedHashTypes.Sha1Pwd,
 											SourceHash = (byte[])entry.PasswordHash.Clone(),
 										});
@@ -507,9 +516,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 									{
 										credCandidates.Add(new DpapiKeyMaterialCandidate
 										{
-											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(SHA1(NT), SID)",
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(SHA1(NT), SID\\0)",
 											KeyMaterial = DpapiUserKeyDerivation.DeriveLocalPreKeyFromNtHash(location.UserSid, entry.NtHash),
 											Confidence = 0.75,
+											SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+											SourceHash = (byte[])entry.NtHash.Clone(),
+										});
+
+										credCandidates.Add(new DpapiKeyMaterialCandidate
+										{
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(SHA1(NT), SID)",
+											KeyMaterial = DpapiUserKeyDerivation.DeriveLocalPreKeyFromNtHashNoTerminator(location.UserSid, entry.NtHash),
+											Confidence = 0.7,
 											SourceHashType = DpapiVerifiedHashTypes.NtPwd,
 											SourceHash = (byte[])entry.NtHash.Clone(),
 										});
@@ -525,9 +543,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 										credCandidates.Add(new DpapiKeyMaterialCandidate
 										{
-											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(NT, SID)",
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(NT, SID\\0)",
 											KeyMaterial = DpapiUserKeyDerivation.DeriveFallbackPreKeyFromNtHash(location.UserSid, entry.NtHash),
 											Confidence = 0.4,
+											SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+											SourceHash = (byte[])entry.NtHash.Clone(),
+										});
+
+										credCandidates.Add(new DpapiKeyMaterialCandidate
+										{
+											Label = $"CREDHIST {entry.Guid}: HMAC-SHA1(NT, SID)",
+											KeyMaterial = DpapiUserKeyDerivation.DeriveFallbackPreKeyFromNtHashNoTerminator(location.UserSid, entry.NtHash),
+											Confidence = 0.35,
 											SourceHashType = DpapiVerifiedHashTypes.NtPwd,
 											SourceHash = (byte[])entry.NtHash.Clone(),
 										});

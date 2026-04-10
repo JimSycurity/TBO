@@ -99,9 +99,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var localPreKey = DeriveLocalPreKeyFromHash(userSid, sha1Password);
 				candidates.Add(new DpapiKeyMaterialCandidate
 				{
-					Label = "Local: HMAC-SHA1(SHA1(password), SID)",
+					Label = "Local: HMAC-SHA1(SHA1(password), SID\\0)",
 					KeyMaterial = localPreKey,
 					Confidence = 0.9,
+					SourceHashType = DpapiVerifiedHashTypes.Sha1Pwd,
+					SourceHash = (byte[])sha1Password.Clone(),
+				});
+
+				var localPreKeyNoNull = DeriveLocalPreKeyFromHashNoTerminator(userSid, sha1Password);
+				candidates.Add(new DpapiKeyMaterialCandidate
+				{
+					Label = "Local: HMAC-SHA1(SHA1(password), SID)",
+					KeyMaterial = localPreKeyNoNull,
+					Confidence = 0.85,
 					SourceHashType = DpapiVerifiedHashTypes.Sha1Pwd,
 					SourceHash = (byte[])sha1Password.Clone(),
 				});
@@ -114,9 +124,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var localFromNt = DeriveLocalPreKeyFromNtHash(userSid, ntHash);
 				candidates.Add(new DpapiKeyMaterialCandidate
 				{
-					Label = "Local: HMAC-SHA1(SHA1(NT), SID)",
+					Label = "Local: HMAC-SHA1(SHA1(NT), SID\\0)",
 					KeyMaterial = localFromNt,
 					Confidence = 0.8,
+					SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+					SourceHash = (byte[])ntHash.Clone(),
+				});
+
+				var localFromNtNoNull = DeriveLocalPreKeyFromNtHashNoTerminator(userSid, ntHash);
+				candidates.Add(new DpapiKeyMaterialCandidate
+				{
+					Label = "Local: HMAC-SHA1(SHA1(NT), SID)",
+					KeyMaterial = localFromNtNoNull,
+					Confidence = 0.75,
 					SourceHashType = DpapiVerifiedHashTypes.NtPwd,
 					SourceHash = (byte[])ntHash.Clone(),
 				});
@@ -137,9 +157,19 @@ namespace Titanis.Tbo.Smb2.PowerShell
 				var ntHashHmac = DeriveFallbackPreKeyFromNtHash(userSid, ntHash);
 				candidates.Add(new DpapiKeyMaterialCandidate
 				{
-					Label = "Fallback: HMAC-SHA1(NT, SID)",
+					Label = "Fallback: HMAC-SHA1(NT, SID\\0)",
 					KeyMaterial = ntHashHmac,
 					Confidence = 0.3,
+					SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+					SourceHash = (byte[])ntHash.Clone(),
+				});
+
+				var ntHashHmacNoNull = DeriveFallbackPreKeyFromNtHashNoTerminator(userSid, ntHash);
+				candidates.Add(new DpapiKeyMaterialCandidate
+				{
+					Label = "Fallback: HMAC-SHA1(NT, SID)",
+					KeyMaterial = ntHashHmacNoNull,
+					Confidence = 0.25,
 					SourceHashType = DpapiVerifiedHashTypes.NtPwd,
 					SourceHash = (byte[])ntHash.Clone(),
 				});
@@ -154,10 +184,22 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			return HmacSha1(passwordHash, sidUtf16Final);
 		}
 
+		internal static byte[] DeriveLocalPreKeyFromHashNoTerminator(string userSid, byte[] passwordHash)
+		{
+			var sidUtf16 = Encoding.Unicode.GetBytes(userSid);
+			return HmacSha1(passwordHash, sidUtf16);
+		}
+
 		internal static byte[] DeriveLocalPreKeyFromNtHash(string userSid, byte[] ntHash)
 		{
 			var ntAsSha1 = SHA1.HashData(ntHash);
 			return DeriveLocalPreKeyFromHash(userSid, ntAsSha1);
+		}
+
+		internal static byte[] DeriveLocalPreKeyFromNtHashNoTerminator(string userSid, byte[] ntHash)
+		{
+			var ntAsSha1 = SHA1.HashData(ntHash);
+			return DeriveLocalPreKeyFromHashNoTerminator(userSid, ntAsSha1);
 		}
 
 		internal static byte[] DeriveDomainPreKeyFromNtHash(string userSid, byte[] ntHash)
@@ -173,6 +215,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			var sidUtf16Final = EncodeSidUtf16WithNullTerminator(userSid);
 			return HmacSha1(ntHash, sidUtf16Final);
+		}
+
+		internal static byte[] DeriveFallbackPreKeyFromNtHashNoTerminator(string userSid, byte[] ntHash)
+		{
+			var sidUtf16 = Encoding.Unicode.GetBytes(userSid);
+			return HmacSha1(ntHash, sidUtf16);
 		}
 
 		private static byte[] DeriveCredKeyFromNtHash(byte[] ntHash, byte[] sidUtf16)
