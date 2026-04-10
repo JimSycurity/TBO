@@ -664,5 +664,11 @@ Describe 'DpapiUserKeyDerivation source-hash metadata (TBO-7xo)' {
 		$ntCandidate = $candidates | Where-Object { $_.SourceHashType -eq 'nt_pwd' } | Select-Object -First 1
 		$ntCandidate | Should -Not -BeNullOrEmpty
 		[Convert]::ToHexString($ntCandidate.SourceHash) | Should -Be ([Convert]::ToHexString($nt))
+
+		# Local-account NT-hash fallback candidate should be present.
+		$localNtCandidate = $candidates |
+			Where-Object { $_.Label -like '*SHA1(NT)*' -and $_.SourceHashType -eq 'nt_pwd' } |
+			Select-Object -First 1
+		$localNtCandidate | Should -Not -BeNullOrEmpty
 	}
 }

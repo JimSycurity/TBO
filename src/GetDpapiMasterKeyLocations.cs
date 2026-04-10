@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Management.Automation;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -127,13 +128,27 @@ namespace Titanis.Tbo.Smb2.PowerShell
 			writeProgress ??= _ => { };
 			writeVerbose ??= _ => { };
 
-			var results = new List<TboDpapiMasterKeyLocationInfo>();
-			if (scope.HasFlag(DpapiMasterKeyScope.Machine))
-				EnumerateMachineMasterKeys(smb, serverName, shareName, results, writeWarning, writeProgress, writeVerbose, cancellationToken);
-			if (scope.HasFlag(DpapiMasterKeyScope.User))
-				EnumerateUserMasterKeys(smb, serverName, shareName, results, writeWarning, writeProgress, writeVerbose, cancellationToken);
+			const int maxAttempts = 2;
+			for (var attempt = 1; attempt <= maxAttempts; attempt++)
+			{
+				try
+				{
+					var results = new List<TboDpapiMasterKeyLocationInfo>();
+					if (scope.HasFlag(DpapiMasterKeyScope.Machine))
+						EnumerateMachineMasterKeys(smb, serverName, shareName, results, writeWarning, writeProgress, writeVerbose, cancellationToken);
+					if (scope.HasFlag(DpapiMasterKeyScope.User))
+						EnumerateUserMasterKeys(smb, serverName, shareName, results, writeWarning, writeProgress, writeVerbose, cancellationToken);
 
-			return results;
+					return results;
+				}
+				catch (Exception ex) when (attempt < maxAttempts && IsTransientTransportException(ex))
+				{
+					writeWarning($"Get-TBODpapiMasterKeyLocations transient transport failure on {serverName}; retrying after forced disconnect (attempt {attempt}/{maxAttempts}): {ex.Message}");
+					TryForceDisconnect(smb, serverName);
+				}
+			}
+
+			return Array.Empty<TboDpapiMasterKeyLocationInfo>();
 		}
 
 		private static void EnumerateMachineMasterKeys(
@@ -539,6 +554,47 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			return ex.StatusCode is Ntstatus.STATUS_ACCESS_DENIED
 				or Ntstatus.STATUS_PRIVILEGE_NOT_HELD;
+		}
+
+		private static bool IsTransientTransportException(Exception ex)
+		{
+			if (ex is IOException or SocketException)
+				return true;
+
+			if (ContainsConnectionResetText(ex.Message))
+				return true;
+
+			if (ex is AggregateException aggregate)
+			{
+				foreach (var inner in aggregate.InnerExceptions)
+				{
+					if (IsTransientTransportException(inner))
+						return true;
+				}
+			}
+
+			return ex.InnerException != null && IsTransientTransportException(ex.InnerException);
+		}
+
+		private static bool ContainsConnectionResetText(string? message)
+		{
+			if (string.IsNullOrWhiteSpace(message))
+				return false;
+
+			return message.IndexOf("forcibly closed by the remote host", StringComparison.OrdinalIgnoreCase) >= 0
+				|| message.IndexOf("connection reset", StringComparison.OrdinalIgnoreCase) >= 0
+				|| message.IndexOf("existing connection was forcibly closed", StringComparison.OrdinalIgnoreCase) >= 0;
+		}
+
+		private static void TryForceDisconnect(ISmbProviderInfo smb, string serverName)
+		{
+			try
+			{
+				smb.DisconnectServerAsync(serverName, null, true).GetAwaiter().GetResult();
+			}
+			catch
+			{
+			}
 		}
 
 		private static bool IsSid(string name)

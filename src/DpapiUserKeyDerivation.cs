@@ -109,6 +109,18 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			if (ntHash != null)
 			{
+				// Local-account fallback when only NT hash is known (no plaintext SHA1(password)):
+				// prekey = HMAC-SHA1(SHA1(NT), SID\0).
+				var localFromNt = DeriveLocalPreKeyFromNtHash(userSid, ntHash);
+				candidates.Add(new DpapiKeyMaterialCandidate
+				{
+					Label = "Local: HMAC-SHA1(SHA1(NT), SID)",
+					KeyMaterial = localFromNt,
+					Confidence = 0.8,
+					SourceHashType = DpapiVerifiedHashTypes.NtPwd,
+					SourceHash = (byte[])ntHash.Clone(),
+				});
+
 				// Domain-style DPAPI: derive a 16-byte credkey via PBKDF2-HMAC-SHA256(ntHash, sid, ...),
 				// then prekey = HMAC-SHA1(credkey, sid\0).
 				var domainPreKey = DeriveDomainPreKeyFromNtHash(userSid, ntHash);
@@ -140,6 +152,12 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		{
 			var sidUtf16Final = EncodeSidUtf16WithNullTerminator(userSid);
 			return HmacSha1(passwordHash, sidUtf16Final);
+		}
+
+		internal static byte[] DeriveLocalPreKeyFromNtHash(string userSid, byte[] ntHash)
+		{
+			var ntAsSha1 = SHA1.HashData(ntHash);
+			return DeriveLocalPreKeyFromHash(userSid, ntAsSha1);
 		}
 
 		internal static byte[] DeriveDomainPreKeyFromNtHash(string userSid, byte[] ntHash)
