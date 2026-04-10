@@ -238,6 +238,28 @@ Get-TBOCacheDpapiBacklog -ServerName corp1-web01.corp1.lab.home-labs.lol `
   -View CandidateRanking -Top 3
 ```
 
+### Invoke-TBOCacheRehydrate
+
+Remote-required cache replay cmdlet. Uses cached DPAPI backlog metadata to issue targeted refresh actions against remote hosts:
+
+- Master-key refresh via `Get-TBODpapiMasterKeys -Cache` (grouped by host/scope).
+- Blob refresh via `Get-TBODpapiBlob -Cache` for exact cached blob source/path/value/offset.
+
+Use `-WhatIf` to preview the rehydrate plan without touching remote SMB/winreg.
+
+```powershell
+# Preview what would be rehydrated for one host.
+Invoke-TBOCacheRehydrate -ServerName corp1-web01.corp1.lab.home-labs.lol -WhatIf
+
+# Execute remote rehydrate for one host/SID scope.
+Invoke-TBOCacheRehydrate -ServerName corp1-web01.corp1.lab.home-labs.lol `
+  -UserSid S-1-5-21-168112262-2021983837-3103300772-500
+
+# Limit to top backlog targets from a specific cache file.
+Invoke-TBOCacheRehydrate -ServerName corp1-web01.corp1.lab.home-labs.lol `
+  -Top 10 -Path C:\Temp\tbo-cache.sqlite3
+```
+
 ### Get-TBOCacheMachineFindings
 
 Returns observation rows pivoted by machine/host identity. Supports wildcard filtering for `-ServerName`, `-SourceKind`, and `-SourcePath`.

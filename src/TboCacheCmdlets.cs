@@ -141,6 +141,29 @@ namespace Titanis.Tbo.Smb2.PowerShell
 		public string CandidateReason { get; init; } = "";
 	}
 
+	public sealed class TboCacheRehydrateOperation
+	{
+		public string CachePath { get; init; } = "";
+		public string OperationType { get; init; } = "";
+		public string OperationKey { get; init; } = "";
+
+		public string ServerName { get; init; } = "";
+		public string? Scope { get; init; }
+		public string? UserSid { get; init; }
+		public string? MasterKeyGuid { get; init; }
+
+		public string? Source { get; init; }
+		public string? Path { get; init; }
+		public string? ValueName { get; init; }
+		public int? Offset { get; init; }
+
+		public int BacklogItemCount { get; init; }
+		public bool Attempted { get; init; }
+		public bool Succeeded { get; init; }
+		public string? FailureReason { get; init; }
+		public string? ArtifactFailureReason { get; init; }
+	}
+
 	public sealed class TboCacheFinding
 	{
 		public string CachePath { get; init; } = "";
@@ -1374,6 +1397,296 @@ namespace Titanis.Tbo.Smb2.PowerShell
 
 			foreach (var entry in filtered)
 				this.WriteObject(entry.BacklogItem);
+		}
+	}
+
+	[Cmdlet(VerbsLifecycle.Invoke, "TBOCacheRehydrate", SupportsShouldProcess = true, ConfirmImpact = ConfirmImpact.Medium)]
+	[OutputType(typeof(TboCacheRehydrateOperation))]
+	public sealed class InvokeTBOCacheRehydrate : PSCmdlet
+	{
+		[Parameter(Position = 0)]
+		public string[]? ServerName { get; set; }
+
+		[Parameter]
+		public string[]? UserSid { get; set; }
+
+		[Parameter]
+		[ValidateRange(1, int.MaxValue)]
+		public int? Top { get; set; }
+
+		[Parameter]
+		public DateTime? AsOfUtc { get; set; }
+
+		[Parameter]
+		public SwitchParameter IncludeResolved { get; set; }
+
+		[Parameter]
+		public string? Path { get; set; }
+
+		protected override void ProcessRecord()
+		{
+			var resolvedPath = TboCacheDatabase.ResolveCachePath(this.Path);
+			var asOf = (this.AsOfUtc ?? DateTime.UtcNow).ToUniversalTime();
+
+			using var db = TboCacheDatabase.Open(this.Path, msg => this.WriteVerbose(msg));
+			var built = TboCacheDpapiBacklogAnalysis.Build(
+				db,
+				resolvedPath,
+				asOf,
+				includeResolved: this.IncludeResolved.IsPresent);
+
+			var serverPatterns = TboCacheFindingFilters.BuildPatterns(this.ServerName);
+			var sidPatterns = TboCacheFindingFilters.BuildPatterns(this.UserSid);
+
+			var filtered = built.Where(x =>
+				TboCacheFindingFilters.MatchesAny(x.BacklogItem.ServerName, serverPatterns)
+				&& TboCacheFindingFilters.MatchesAny(x.BacklogItem.UserSid, sidPatterns));
+
+			if (this.Top.HasValue)
+				filtered = filtered.Take(this.Top.Value);
+
+			var targets = filtered.ToArray();
+			if (targets.Length == 0)
+			{
+				this.WriteVerbose("Invoke-TBOCacheRehydrate found no matching backlog targets in cache.");
+				return;
+			}
+
+			var blobRowsById = db.QueryDpapiBlobs().ToDictionary(x => x.DpapiBlobId, EqualityComparer<long>.Default);
+
+			foreach (var group in targets
+				.Where(x => x.BacklogItem.ArtifactType.Equals("MasterKey", StringComparison.OrdinalIgnoreCase))
+				.GroupBy(x => BuildMasterKeyOperationKey(x.BacklogItem), StringComparer.OrdinalIgnoreCase))
+			{
+				var first = group.First().BacklogItem;
+				var normalizedScope = NormalizeMasterKeyScope(first.Scope);
+
+				var attempted = false;
+				var succeeded = false;
+				string? failureReason = null;
+
+				if (this.ShouldProcess(
+					first.ServerName,
+					$"Rehydrate DPAPI master keys from cache backlog (scope {normalizedScope})"))
+				{
+					attempted = true;
+					(succeeded, failureReason) = InvokeMasterKeyRefresh(
+						first.ServerName,
+						normalizedScope,
+						resolvedPath);
+				}
+				else
+				{
+					failureReason = "Skipped by ShouldProcess.";
+				}
+
+				this.WriteObject(new TboCacheRehydrateOperation
+				{
+					CachePath = resolvedPath,
+					OperationType = "MasterKeyRefresh",
+					OperationKey = group.Key,
+					ServerName = first.ServerName,
+					Scope = normalizedScope,
+					UserSid = GetSingleValueOrNull(group.Select(x => x.BacklogItem.UserSid)),
+					MasterKeyGuid = GetSingleValueOrNull(group.Select(x => x.BacklogItem.MasterKeyGuid)),
+					BacklogItemCount = group.Count(),
+					Attempted = attempted,
+					Succeeded = succeeded,
+					FailureReason = failureReason
+				});
+			}
+
+			foreach (var target in targets.Where(x => x.BacklogItem.ArtifactType.Equals("Blob", StringComparison.OrdinalIgnoreCase)))
+			{
+				var item = target.BacklogItem;
+				blobRowsById.TryGetValue(item.ArtifactId, out var blobRow);
+
+				var source = blobRow?.Source ?? item.Source;
+				var path = blobRow?.Path ?? item.Path;
+				var valueName = blobRow?.ValueName;
+				if (string.IsNullOrWhiteSpace(valueName))
+					valueName = item.ValueName;
+				var offset = blobRow != null && blobRow.MatchOffset >= 0 && blobRow.MatchOffset <= int.MaxValue
+					? (int?)blobRow.MatchOffset
+					: null;
+
+				var attempted = false;
+				var succeeded = false;
+				string? failureReason = null;
+				string? artifactFailureReason = null;
+
+				if (this.ShouldProcess(
+					path ?? item.Path,
+					$"Rehydrate DPAPI blob from cache backlog ({source})"))
+				{
+					attempted = true;
+					(succeeded, failureReason, artifactFailureReason) = InvokeBlobRefresh(
+						item.ServerName,
+						source,
+						path,
+						valueName,
+						offset,
+						resolvedPath);
+				}
+				else
+				{
+					failureReason = "Skipped by ShouldProcess.";
+				}
+
+				this.WriteObject(new TboCacheRehydrateOperation
+				{
+					CachePath = resolvedPath,
+					OperationType = "BlobRefresh",
+					OperationKey = $"BLOB:{item.ArtifactId}",
+					ServerName = item.ServerName,
+					Scope = item.Scope,
+					UserSid = item.UserSid,
+					MasterKeyGuid = item.MasterKeyGuid,
+					Source = source,
+					Path = path,
+					ValueName = valueName,
+					Offset = offset,
+					BacklogItemCount = 1,
+					Attempted = attempted,
+					Succeeded = succeeded,
+					FailureReason = failureReason,
+					ArtifactFailureReason = artifactFailureReason
+				});
+			}
+		}
+
+		private static string BuildMasterKeyOperationKey(TboCacheDpapiBacklogItem item)
+		{
+			return $"{item.ServerName}|{NormalizeMasterKeyScope(item.Scope)}";
+		}
+
+		private static string NormalizeMasterKeyScope(string? scope)
+		{
+			if (string.Equals(scope, "User", StringComparison.OrdinalIgnoreCase))
+				return "User";
+			if (string.Equals(scope, "Machine", StringComparison.OrdinalIgnoreCase))
+				return "Machine";
+			return "All";
+		}
+
+		private static string? GetSingleValueOrNull(IEnumerable<string?> values)
+		{
+			var distinct = values
+				.Where(x => !string.IsNullOrWhiteSpace(x))
+				.Select(x => x!.Trim())
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.Take(2)
+				.ToArray();
+
+			return distinct.Length == 1 ? distinct[0] : null;
+		}
+
+		private static (bool Succeeded, string? FailureReason) InvokeMasterKeyRefresh(
+			string serverName,
+			string scope,
+			string cachePath)
+		{
+			try
+			{
+				using var ps = System.Management.Automation.PowerShell.Create(System.Management.Automation.RunspaceMode.CurrentRunspace);
+				ps.AddCommand("Get-TBODpapiMasterKeys")
+					.AddParameter("ServerName", serverName)
+					.AddParameter("Scope", scope)
+					.AddParameter("Cache", true)
+					.AddParameter("CachePath", cachePath)
+					.AddParameter("ErrorAction", ActionPreference.Stop);
+
+				ps.Invoke();
+				if (!ps.HadErrors)
+					return (true, null);
+
+				var first = ps.Streams.Error.Count > 0 ? ps.Streams.Error[0] : null;
+				return (false, first?.ToString() ?? "Get-TBODpapiMasterKeys reported errors.");
+			}
+			catch (Exception ex)
+			{
+				return (false, ex.Message);
+			}
+		}
+
+		private static (bool Succeeded, string? FailureReason, string? ArtifactFailureReason) InvokeBlobRefresh(
+			string serverName,
+			string? source,
+			string? path,
+			string? valueName,
+			int? offset,
+			string cachePath)
+		{
+			if (string.IsNullOrWhiteSpace(source))
+				return (false, "Blob source is missing from cache metadata.", null);
+			if (string.IsNullOrWhiteSpace(path))
+				return (false, "Blob path is missing from cache metadata.", null);
+
+			try
+			{
+				using var ps = System.Management.Automation.PowerShell.Create(System.Management.Automation.RunspaceMode.CurrentRunspace);
+				ps.AddCommand("Get-TBODpapiBlob")
+					.AddParameter("ServerName", serverName);
+
+				if (source.Equals("Registry", StringComparison.OrdinalIgnoreCase))
+				{
+					if (string.IsNullOrWhiteSpace(valueName))
+						return (false, "Registry blob metadata is missing ValueName.", null);
+
+					ps.AddParameter("RegistryPath", path)
+						.AddParameter("ValueName", valueName);
+				}
+				else if (source.Equals("File", StringComparison.OrdinalIgnoreCase))
+				{
+					ps.AddParameter("Path", path);
+				}
+				else
+				{
+					return (false, $"Unsupported blob source '{source}'.", null);
+				}
+
+				if (offset.HasValue)
+					ps.AddParameter("Offset", offset.Value);
+
+				ps.AddParameter("Cache", true)
+					.AddParameter("CachePath", cachePath)
+					.AddParameter("ErrorAction", ActionPreference.Stop);
+
+				var outputs = ps.Invoke();
+				if (ps.HadErrors)
+				{
+					var first = ps.Streams.Error.Count > 0 ? ps.Streams.Error[0] : null;
+					return (false, first?.ToString() ?? "Get-TBODpapiBlob reported errors.", null);
+				}
+
+				var artifactFailure = TryGetFirstArtifactFailure(outputs);
+				return (true, null, artifactFailure);
+			}
+			catch (Exception ex)
+			{
+				return (false, ex.Message, null);
+			}
+		}
+
+		private static string? TryGetFirstArtifactFailure(IReadOnlyList<PSObject> outputs)
+		{
+			foreach (var output in outputs)
+			{
+				if (output == null)
+					continue;
+
+				if (output.BaseObject is TboDpapiBlobDecryptionInfo typed
+					&& !string.IsNullOrWhiteSpace(typed.FailureReason))
+				{
+					return typed.FailureReason;
+				}
+
+				var prop = output.Properties["FailureReason"]?.Value;
+				if (prop is string text && !string.IsNullOrWhiteSpace(text))
+					return text;
+			}
+
+			return null;
 		}
 	}
 

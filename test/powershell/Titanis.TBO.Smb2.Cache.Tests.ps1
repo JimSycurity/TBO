@@ -1279,6 +1279,189 @@ Describe 'TBO cache verified_password_hashes (TBO-7xo)' {
 	}
 }
 
+Describe 'TBO cache remote rehydrate planner (TBO-hvr.6)' {
+	BeforeAll {
+		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
+		if (Test-Path -LiteralPath $testHarnessPath) {
+			. $testHarnessPath
+		}
+
+		$script:repoRoot = Get-TboRepoRoot -Paths @($PSScriptRoot, (Get-Location).Path)
+		$script:moduleAvailable = $false
+		if ($script:repoRoot) {
+			try {
+				Import-TboModuleForTests -RepoRoot $script:repoRoot | Out-Null
+				$script:moduleAvailable = $true
+			} catch {
+				$script:moduleAvailable = $false
+			}
+		}
+
+		$script:originalCachePath = $env:TITANIS_TBO_CACHE
+
+		if ($script:moduleAvailable) {
+			$module = Get-Module -Name 'Titanis.TBO.Smb2.PowerShell'
+			$assembly = $module.ImplementingAssembly
+			$script:cacheDbType = $assembly.GetType('Titanis.Tbo.Smb2.PowerShell.TboCacheDatabase')
+		}
+
+		function Open-TboCacheDbReflected {
+			param([string]$CachePath)
+			$openMethod = $script:cacheDbType.GetMethod(
+				'Open',
+				[System.Reflection.BindingFlags]::Static -bor [System.Reflection.BindingFlags]::NonPublic)
+			return $openMethod.Invoke($null, @($CachePath, $null))
+		}
+
+		function Invoke-UpsertMachine {
+			param([object]$Db, [string]$ServerName)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertMachine',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			return [int64]$method.Invoke($Db, @($ServerName))
+		}
+
+		function Invoke-UpsertDpapiMasterKey {
+			param(
+				[object]$Db,
+				[int64]$MachineId,
+				[string]$Scope,
+				[string]$UserSid,
+				[string]$KeyPath,
+				[string]$MasterKeyGuid,
+				[bool]$IsPreferred,
+				[string]$FailureReason,
+				[AllowNull()][byte[]]$CleartextKey
+			)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertDpapiMasterKey',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			$cleartextSha1 = if ($CleartextKey -and $CleartextKey.Length -gt 0) { '0123456789abcdef0123456789abcdef01234567' } else { $null }
+			return [int64]$method.Invoke($Db, @(
+				$MachineId, $Scope, $UserSid, $KeyPath, $MasterKeyGuid, $IsPreferred, $null, $null, $null, $null, $FailureReason, $CleartextKey, $cleartextSha1))
+		}
+
+		function Invoke-UpsertDpapiBlob {
+			param(
+				[object]$Db,
+				[int64]$MachineId,
+				[string]$BlobKey,
+				[string]$Source,
+				[string]$Path,
+				[string]$MasterKeyGuid,
+				[int64]$Offset
+			)
+			$method = $script:cacheDbType.GetMethod(
+				'UpsertDpapiBlob',
+				[System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+			return [int64]$method.Invoke($Db, @(
+				$MachineId, $BlobKey, $Source, $Path, $null, $null, 2048, 4096L, $Offset, 4096L, $null, $MasterKeyGuid, $null, $null, $null, $null, $null))
+		}
+	}
+
+	AfterAll {
+		if ($null -eq $script:originalCachePath) {
+			Remove-Item env:TITANIS_TBO_CACHE -ErrorAction SilentlyContinue
+		} else {
+			$env:TITANIS_TBO_CACHE = $script:originalCachePath
+		}
+	}
+
+	It 'builds a dry-run remote rehydrate plan from unresolved cache metadata' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$cachePath = Join-Path $TestDrive 'cache_rehydrate_plan.sqlite3'
+		$env:TITANIS_TBO_CACHE = $cachePath
+
+		$sid = 'S-1-5-21-1-2-3-500'
+		$guid1 = '11111111-1111-1111-1111-111111111111'
+		$guid2 = '22222222-2222-2222-2222-222222222222'
+		$guidResolved = '33333333-3333-3333-3333-333333333333'
+
+		Clear-TBOCache -Confirm:$false
+
+		$db = Open-TboCacheDbReflected -CachePath $cachePath
+		try {
+			$machineId = Invoke-UpsertMachine -Db $db -ServerName 'host1'
+
+			Invoke-UpsertDpapiMasterKey -Db $db -MachineId $machineId -Scope 'User' -UserSid $sid `
+				-KeyPath "\\host1\C$\Users\Administrator\AppData\Roaming\Microsoft\Protect\$sid\$guid1" `
+				-MasterKeyGuid $guid1 -IsPreferred $true -FailureReason 'HMAC validation failed' -CleartextKey $null | Out-Null
+
+			Invoke-UpsertDpapiMasterKey -Db $db -MachineId $machineId -Scope 'User' -UserSid $sid `
+				-KeyPath "\\host1\C$\Users\Administrator\AppData\Roaming\Microsoft\Protect\$sid\$guid2" `
+				-MasterKeyGuid $guid2 -IsPreferred $false -FailureReason 'HMAC validation failed' -CleartextKey $null | Out-Null
+
+			[byte[]]$resolvedKey = 1..32
+			Invoke-UpsertDpapiMasterKey -Db $db -MachineId $machineId -Scope 'User' -UserSid $sid `
+				-KeyPath "\\host1\C$\Users\Administrator\AppData\Roaming\Microsoft\Protect\$sid\$guidResolved" `
+				-MasterKeyGuid $guidResolved -IsPreferred $false -FailureReason $null -CleartextKey $resolvedKey | Out-Null
+
+			Invoke-UpsertDpapiBlob -Db $db -MachineId $machineId -BlobKey 'blob-unresolved' -Source 'File' `
+				-Path '\\host1\C$\Users\Administrator\AppData\Local\Microsoft\Credentials\A1B2C3' `
+				-MasterKeyGuid $guid1 -Offset 12 | Out-Null
+
+			Invoke-UpsertDpapiBlob -Db $db -MachineId $machineId -BlobKey 'blob-resolved' -Source 'File' `
+				-Path '\\host1\C$\Users\Administrator\AppData\Local\Microsoft\Credentials\D4E5F6' `
+				-MasterKeyGuid $guidResolved -Offset 24 | Out-Null
+		} finally {
+			$db.Dispose()
+		}
+
+		$plan = @(Invoke-TBOCacheRehydrate -ServerName host1 -WhatIf)
+		$plan.Count | Should -Be 2
+
+		$mk = @($plan | Where-Object { $_.OperationType -eq 'MasterKeyRefresh' })[0]
+		$mk.Scope | Should -Be 'User'
+		$mk.BacklogItemCount | Should -Be 2
+		$mk.Attempted | Should -BeFalse
+		$mk.Succeeded | Should -BeFalse
+
+		$blob = @($plan | Where-Object { $_.OperationType -eq 'BlobRefresh' })[0]
+		$blob.Path | Should -Be '\\host1\C$\Users\Administrator\AppData\Local\Microsoft\Credentials\A1B2C3'
+		$blob.Offset | Should -Be 12
+		$blob.Attempted | Should -BeFalse
+		$blob.Succeeded | Should -BeFalse
+	}
+
+	It 'supports limiting plan size with -Top' {
+		if (-not $script:moduleAvailable) {
+			Set-ItResult -Skipped -Because 'Module not available for cmdlet tests.'
+			return
+		}
+
+		$cachePath = Join-Path $TestDrive 'cache_rehydrate_plan_top.sqlite3'
+		$env:TITANIS_TBO_CACHE = $cachePath
+
+		$sid = 'S-1-5-21-9-9-9-500'
+		$guid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+		Clear-TBOCache -Confirm:$false
+
+		$db = Open-TboCacheDbReflected -CachePath $cachePath
+		try {
+			$machineId = Invoke-UpsertMachine -Db $db -ServerName 'host2'
+
+			Invoke-UpsertDpapiMasterKey -Db $db -MachineId $machineId -Scope 'User' -UserSid $sid `
+				-KeyPath "\\host2\C$\Users\Administrator\AppData\Roaming\Microsoft\Protect\$sid\$guid" `
+				-MasterKeyGuid $guid -IsPreferred $true -FailureReason 'HMAC validation failed' -CleartextKey $null | Out-Null
+
+			Invoke-UpsertDpapiBlob -Db $db -MachineId $machineId -BlobKey 'blob-top-1' -Source 'File' `
+				-Path '\\host2\C$\Users\Administrator\AppData\Local\Microsoft\Credentials\AAAA' `
+				-MasterKeyGuid $guid -Offset 0 | Out-Null
+		} finally {
+			$db.Dispose()
+		}
+
+		$plan = @(Invoke-TBOCacheRehydrate -ServerName host2 -Top 1 -WhatIf)
+		$plan.Count | Should -Be 1
+		$plan[0].OperationType | Should -Be 'MasterKeyRefresh'
+	}
+}
+
 Describe 'DpapiUserKeyDerivation source-hash metadata (TBO-7xo)' {
 	BeforeAll {
 		$testHarnessPath = Join-Path $PSScriptRoot 'TboTestHarness.ps1'
